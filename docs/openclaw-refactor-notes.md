@@ -123,20 +123,20 @@ Supported natively:
 
 - Handshake with the Gateway `connect` RPC.
 - Generic request/response RPC calls through `call(method, params)`.
-- Gateway-first typed reads/probes for `status`, `gateway.status`, `gateway.probe`, `models.status`, `models.list`, `models.scan`, `skills.list`, `plugins.list`, `agents.list`, `sessions.list`, and `config.get`.
-- Gateway-first `config.set`/`config.unset` by reading the Gateway config snapshot, applying AgentOS' path mutation locally, and sending the full config back with the Gateway base hash.
+- Gateway-first typed reads for `health`, `status`, `models.authStatus`, `models.list`, `channels.status`, `skills.status`, `plugins.uiDescriptors`, `agents.list`, `agents.delete`, `sessions.list`, and `config.get`.
+- Gateway-first mission dispatch/abort through `chat.send` / `sessions.send` and `sessions.abort` / `chat.abort`, with CLI fallback.
+- Gateway-first `config.set`/`config.unset` by reading the Gateway config snapshot, applying a path-level merge patch through `config.patch` with the Gateway base hash, and using `config.apply` only when patch is unavailable.
 - Request id correlation.
 - Timeout and abort cleanup.
 - Error normalization, typed failure classification, malformed payload handling, conservative auth discovery, redacted-secret protection, and fallback to CLI.
 
 Still CLI-backed by design:
 
-- `agents add/update/delete`
-- `agent` turn execution
+- `agents add/update`
 - streamed agent turns
 - gateway start/stop/restart
 
-Reason: the local OpenClaw CLI and installed control UI confirmed the request/response RPC envelope and safe read/probe shapes plus config snapshot writes. Agent create/update/delete and streaming were not moved because the confirmed Gateway mutation schemas do not exactly match AgentOS' current agent config inputs or stream transcript behavior.
+Reason: the current Gateway source confirms the request/response RPC envelope and safe read/status/catalog/config/session shapes. Agent creation/update and direct streaming remain fallback-backed because the confirmed Gateway mutation schemas do not exactly match AgentOS' current agent config inputs, workspace metadata side effects, or stream transcript behavior.
 
 ## Fallback Behavior
 

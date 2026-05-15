@@ -12,7 +12,6 @@ import type { CommandResult } from "@/lib/openclaw/cli";
 import { isOpenClawInvalidConfigError } from "@/lib/openclaw/command-failure";
 import { compareVersionStrings } from "@/lib/openclaw/domains/control-plane-normalization";
 import type {
-  GatewayProbePayload,
   GatewayStatusPayload,
   MissionCommandPayload,
   ModelsPayload,
@@ -28,7 +27,6 @@ import type {
   OpenClawGatewayClient,
   OpenClawListModelsInput,
   OpenClawListSessionsInput,
-  OpenClawModelScanPayload,
   OpenClawPluginListPayload,
   OpenClawSessionsPayload,
   OpenClawSkillListPayload,
@@ -40,8 +38,8 @@ const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_NATIVE_TIMEOUT_MS = 3_000;
 const CONNECT_METHOD = "connect";
 const CONTROL_PROTOCOL_VERSION = 4;
-const SERVER_OPERATOR_CLIENT_ID = "cli";
-const SERVER_OPERATOR_CLIENT_MODE = "cli";
+const SERVER_OPERATOR_CLIENT_ID = "gateway-client";
+const SERVER_OPERATOR_CLIENT_MODE = "backend";
 const OPENCLAW_DEVICE_AUTH_FILE_NAME = "device-auth.json";
 const OPENCLAW_DEVICE_IDENTITY_FILE_NAME = "device.json";
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -102,6 +100,25 @@ type GatewayEventFrame = {
   type?: string;
   event?: string;
   payload?: unknown;
+};
+
+type NativeHandshakePayload = {
+  type?: string;
+  protocol?: number;
+  server?: {
+    version?: string;
+    connId?: string;
+  };
+  features?: {
+    methods?: string[];
+    events?: string[];
+  };
+  snapshot?: unknown;
+  auth?: {
+    role?: string;
+    scopes?: string[];
+  };
+  policy?: Record<string, unknown>;
 };
 
 type LocalDeviceAuth = {
@@ -239,45 +256,11 @@ function classifyGatewayError(message: string): OpenClawGatewayClientErrorKind {
   return "unknown";
 }
 
-const gatewayStatusPayloadSchema = z
-  .object({
-    service: z
-      .object({
-        label: z.string().optional(),
-        loaded: z.boolean().optional()
-      })
-      .passthrough()
-      .optional(),
-    gateway: z
-      .object({
-        bindMode: z.string().optional(),
-        port: z.number().optional(),
-        probeUrl: z.string().optional()
-      })
-      .passthrough()
-      .optional(),
-    rpc: z
-      .object({
-        ok: z.boolean().optional()
-      })
-      .passthrough()
-      .optional()
-  })
-  .passthrough();
-
 const statusPayloadSchema = z
   .object({
     runtimeVersion: z.string().optional(),
     version: z.string().optional(),
     updateChannel: z.string().optional()
-  })
-  .passthrough();
-
-const modelStatusPayloadSchema = z
-  .object({
-    defaultModel: z.string().nullable().optional(),
-    resolvedDefault: z.string().nullable().optional(),
-    allowed: z.array(z.string()).optional()
   })
   .passthrough();
 
@@ -366,9 +349,11 @@ const modelsPayloadSchema = z
     models: z.array(
       z
         .object({
-          key: z.string(),
+          key: z.string().optional(),
+          id: z.string().optional(),
+          provider: z.string().optional(),
           name: z.string(),
-          input: z.string().default("text"),
+          input: z.union([z.string(), z.array(z.string())]).optional().default("text"),
           contextWindow: z.number().nullable().optional().default(null),
           local: z.boolean().nullable().optional().default(null),
           available: z.boolean().nullable().optional().default(null),
@@ -401,28 +386,21 @@ const skillsPayloadSchema = z
 
 const pluginsPayloadSchema = z
   .object({
-    plugins: z.array(
-      z
-        .object({
-          id: z.string(),
-          name: z.string(),
-          status: z.string().optional(),
-          toolNames: z.array(z.string()).optional()
-        })
-        .passthrough()
-    )
+    plugins: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            name: z.string(),
+            status: z.string().optional(),
+            toolNames: z.array(z.string()).optional()
+          })
+          .passthrough()
+      )
+      .optional(),
+    descriptors: z.array(z.object({}).passthrough()).optional()
   })
   .passthrough();
-
-const modelScanPayloadSchema = z.array(
-  z
-    .object({
-      id: z.string(),
-      name: z.string(),
-      provider: z.string()
-    })
-    .passthrough()
-);
 
 const configSnapshotPayloadSchema = z
   .object({
@@ -757,19 +735,6 @@ function unsetConfigPathValue(config: Record<string, unknown>, path: string) {
   }
 }
 
-function escapeJsonPointerSegment(segment: string | number) {
-  return String(segment).replaceAll("~", "~0").replaceAll("/", "~1");
-}
-
-function configPathToJsonPointer(path: string) {
-  const segments = parseConfigPath(path);
-  if (segments.length === 0) {
-    throw new OpenClawGatewayClientError("Config path is required.", "unknown");
-  }
-
-  return `/${segments.map(escapeJsonPointerSegment).join("/")}`;
-}
-
 function containsRedactedOpenClawSecret(value: unknown): boolean {
   if (typeof value === "string") {
     return isRedactedOpenClawSecret(value);
@@ -793,8 +758,187 @@ function commandResultFromGatewayPayload(payload: unknown): CommandResult {
   };
 }
 
+function normalizeModelsPayload(payload: unknown): ModelsPayload {
+  const parsed = parseGatewayPayload<{ models: Array<Record<string, unknown>> }>(
+    "models.list",
+    modelsPayloadSchema,
+    payload
+  );
+
+  return {
+    ...parsed,
+    models: parsed.models.map((entry) => {
+      const id = readNonEmptyString(entry.id);
+      const provider = readNonEmptyString(entry.provider);
+      const key = readNonEmptyString(entry.key) ?? (provider && id ? `${provider}/${id}` : id);
+      const input = Array.isArray(entry.input)
+        ? entry.input.filter((value): value is string => typeof value === "string").join(",") || "text"
+        : readNonEmptyString(entry.input) ?? "text";
+
+      return {
+        key: key ?? readNonEmptyString(entry.name) ?? "unknown",
+        name: readNonEmptyString(entry.name) ?? key ?? id ?? "Unknown model",
+        input,
+        contextWindow: typeof entry.contextWindow === "number" ? entry.contextWindow : null,
+        local: typeof entry.local === "boolean" ? entry.local : null,
+        available: typeof entry.available === "boolean" ? entry.available : null,
+        tags: Array.isArray(entry.tags) ? entry.tags.filter((tag): tag is string => typeof tag === "string") : [],
+        missing: entry.missing === true
+      };
+    })
+  };
+}
+
+function normalizeModelStatusPayload(authPayload: unknown, modelsPayload: unknown): ModelsStatusPayload {
+  const auth = isObjectRecord(authPayload) ? authPayload : {};
+  const models = modelsPayload ? normalizeModelsPayload(modelsPayload).models : [];
+  const allowed = models.map((model) => model.key).filter(Boolean);
+  const authProviders = Array.isArray(auth.providers)
+    ? auth.providers.filter((entry): entry is Record<string, unknown> => isObjectRecord(entry))
+    : [];
+
+  return {
+    allowed,
+    auth: {
+      providers: authProviders.map((entry) => {
+        const usableProfileCount = countUsableAuthProfiles(entry.profiles);
+
+        return {
+          provider: readNonEmptyString(entry.provider) ?? undefined,
+          effective: {
+            kind: usableProfileCount > 0
+              ? "ok"
+              : readNonEmptyString(entry.status) ?? readNonEmptyString(entry.kind) ?? undefined,
+            detail: readNonEmptyString(entry.detail) ?? undefined
+          },
+          profiles: {
+            count: Array.isArray(entry.profiles) ? usableProfileCount : undefined
+          }
+        };
+      }),
+      missingProvidersInUse: Array.isArray(auth.missingProvidersInUse)
+        ? auth.missingProvidersInUse.filter((entry): entry is string => typeof entry === "string")
+        : [],
+      unusableProfiles: Array.isArray(auth.unusableProfiles) ? auth.unusableProfiles : [],
+      oauth: {
+        providers: authProviders.map((entry) => ({
+          provider: readNonEmptyString(entry.provider) ?? undefined,
+          status: countUsableAuthProfiles(entry.profiles) > 0
+            ? "ok"
+            : readNonEmptyString(entry.status) ?? undefined
+        }))
+      }
+    }
+  };
+}
+
+function countUsableAuthProfiles(value: unknown) {
+  if (!Array.isArray(value)) {
+    return 0;
+  }
+
+  return value.filter((entry) => isUsableAuthProfile(entry)).length;
+}
+
+function isUsableAuthProfile(value: unknown) {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  const status = readNonEmptyString(value.status)?.toLowerCase();
+  if (!status) {
+    return true;
+  }
+
+  return !["expired", "missing", "invalid", "error", "disabled", "revoked"].includes(status);
+}
+
+function normalizePluginsPayload(payload: unknown): OpenClawPluginListPayload {
+  const parsed = parseGatewayPayload<{ plugins?: Array<Record<string, unknown>>; descriptors?: Array<Record<string, unknown>> }>(
+    "plugins.uiDescriptors",
+    pluginsPayloadSchema,
+    payload
+  );
+  const source = parsed.plugins ?? parsed.descriptors ?? [];
+
+  return {
+    plugins: source.map((entry) => ({
+      ...entry,
+      id: readNonEmptyString(entry.id) ?? readNonEmptyString(entry.pluginId) ?? readNonEmptyString(entry.name) ?? "unknown",
+      name: readNonEmptyString(entry.name) ?? readNonEmptyString(entry.label) ?? readNonEmptyString(entry.id) ?? "Unknown plugin",
+      status: readNonEmptyString(entry.status) ?? undefined,
+      toolNames: Array.isArray(entry.toolNames)
+        ? entry.toolNames.filter((toolName): toolName is string => typeof toolName === "string")
+        : undefined
+    }))
+  };
+}
+
 function isRedactedOpenClawSecret(value: string) {
   return value === REDACTED_OPENCLAW_SECRET;
+}
+
+function buildAgentSessionKey(agentId?: string | null, sessionId?: string | null) {
+  const trimmedSessionId = sessionId?.trim();
+
+  if (trimmedSessionId?.startsWith("agent:")) {
+    return trimmedSessionId;
+  }
+
+  const trimmedAgentId = agentId?.trim() || "main";
+  return trimmedSessionId
+    ? `agent:${trimmedAgentId}:explicit:${trimmedSessionId}`
+    : `agent:${trimmedAgentId}:main`;
+}
+
+function buildMergePatchForConfigPath(path: string, value: unknown) {
+  const segments = parseConfigPath(path);
+
+  if (segments.length === 0) {
+    throw new OpenClawGatewayClientError("Config path is required.", "unknown");
+  }
+
+  if (segments.some((segment) => typeof segment === "number")) {
+    throw new OpenClawGatewayClientError(
+      "Gateway config.patch merge updates do not support array-index paths; using CLI config fallback.",
+      "unsupported"
+    );
+  }
+
+  const root: Record<string, unknown> = {};
+  let current = root;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index] as string;
+    if (index === segments.length - 1) {
+      current[segment] = value;
+      break;
+    }
+
+    const next: Record<string, unknown> = {};
+    current[segment] = next;
+    current = next;
+  }
+
+  return root;
+}
+
+function resolveEventSubscriptionRequests(params: Record<string, unknown>) {
+  const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+
+  if (params.subscribeSessions !== false) {
+    requests.push({ method: "sessions.subscribe", params: {} });
+  }
+
+  const sessionKeys = Array.isArray(params.sessionKeys)
+    ? params.sessionKeys.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+
+  for (const key of sessionKeys) {
+    requests.push({ method: "sessions.messages.subscribe", params: { key: key.trim() } });
+  }
+
+  return requests;
 }
 
 async function resolveConfiguredGatewaySecret(
@@ -1374,22 +1518,51 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
 
   getGatewayStatus(options: OpenClawCommandOptions = {}) {
     return this.gatewayFirst(
-      "gateway.status",
+      "health",
       {},
       options,
-      (payload) => parseGatewayPayload<GatewayStatusPayload>("gateway.status", gatewayStatusPayloadSchema, payload),
+      (payload) => {
+        const health = isObjectRecord(payload) ? payload : {};
+        return {
+          service: {
+            label: health.ok === false ? "Runtime degraded" : "Runtime ready",
+            loaded: health.ok !== false
+          },
+          rpc: {
+            ok: health.ok !== false
+          }
+        } satisfies GatewayStatusPayload;
+      },
       () => this.fallback.getGatewayStatus(options)
     );
   }
 
-  getModelStatus(options: OpenClawCommandOptions = {}) {
-    return this.gatewayFirst(
-      "models.status",
-      {},
-      options,
-      (payload) => parseGatewayPayload<ModelsStatusPayload>("models.status", modelStatusPayloadSchema, payload),
-      () => this.fallback.getModelStatus(options)
-    );
+  async getModelStatus(options: OpenClawCommandOptions = {}) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.getModelStatus(options);
+    }
+
+    try {
+      const [authResult, modelsResult] = await Promise.allSettled([
+        this.callNative<unknown>("models.authStatus", {}, options),
+        this.callNative<unknown>("models.list", { view: "configured" }, options)
+      ]);
+
+      if (authResult.status === "rejected" && modelsResult.status === "rejected") {
+        throw authResult.reason;
+      }
+
+      clearGatewayFallbackDiagnostic("models.authStatus");
+      clearGatewayFallbackDiagnostic("models.list");
+      return normalizeModelStatusPayload(
+        authResult.status === "fulfilled" ? authResult.value : null,
+        modelsResult.status === "fulfilled" ? modelsResult.value : null
+      );
+    } catch (error) {
+      this.options.onNativeFailure?.(error, "models.authStatus");
+      recordGatewayFallbackDiagnostic("models.authStatus", error);
+      return this.fallback.getModelStatus(options);
+    }
   }
 
   listAgents(options: OpenClawCommandOptions = {}) {
@@ -1428,20 +1601,25 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
 
   listSkills(options: OpenClawCommandOptions & { eligible?: boolean } = {}) {
     return this.gatewayFirst(
-      "skills.list",
-      { eligible: options.eligible === true },
+      "skills.status",
+      {},
       options,
-      (payload) => parseGatewayPayload<OpenClawSkillListPayload>("skills.list", skillsPayloadSchema, payload),
+      (payload) => {
+        const parsed = parseGatewayPayload<OpenClawSkillListPayload>("skills.status", skillsPayloadSchema, payload);
+        return options.eligible
+          ? { ...parsed, skills: parsed.skills.filter((skill) => skill.eligible === true) }
+          : parsed;
+      },
       () => this.fallback.listSkills(options)
     );
   }
 
   listPlugins(options: OpenClawCommandOptions = {}) {
     return this.gatewayFirst(
-      "plugins.list",
+      "plugins.uiDescriptors",
       {},
       options,
-      (payload) => parseGatewayPayload<OpenClawPluginListPayload>("plugins.list", pluginsPayloadSchema, payload),
+      normalizePluginsPayload,
       () => this.fallback.listPlugins(options)
     );
   }
@@ -1449,35 +1627,24 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   listModels(input: OpenClawListModelsInput = {}, options: OpenClawCommandOptions = {}) {
     return this.gatewayFirst(
       "models.list",
-      { ...input },
+      { view: input.all ? "all" : "configured" },
       options,
-      (payload) => parseGatewayPayload<ModelsPayload>("models.list", modelsPayloadSchema, payload),
+      (payload) => {
+        const normalized = normalizeModelsPayload(payload);
+        return input.provider
+          ? { ...normalized, models: normalized.models.filter((model) => model.key.split("/", 1)[0] === input.provider) }
+          : normalized;
+      },
       () => this.fallback.listModels(input, options)
     );
   }
 
   scanModels(options: OpenClawCommandOptions & { yes?: boolean; noInput?: boolean; noProbe?: boolean } = {}) {
-    return this.gatewayFirst(
-      "models.scan",
-      {
-        yes: options.yes === true,
-        noInput: options.noInput === true,
-        noProbe: options.noProbe === true
-      },
-      options,
-      (payload) => parseGatewayPayload<OpenClawModelScanPayload>("models.scan", modelScanPayloadSchema, payload),
-      () => this.fallback.scanModels(options)
-    );
+    return this.fallback.scanModels(options);
   }
 
   probeGateway(options: OpenClawCommandOptions = {}) {
-    return this.gatewayFirst(
-      "gateway.probe",
-      {},
-      options,
-      (payload) => payload as GatewayProbePayload,
-      () => this.fallback.probeGateway(options)
-    );
+    return this.fallback.probeGateway(options);
   }
 
   controlGateway(action: "start" | "stop" | "restart", options: OpenClawCommandOptions = {}) {
@@ -1566,28 +1733,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   addAgent(input: OpenClawAddAgentInput, options: OpenClawCommandOptions = {}) {
-    const params = {
-      id: input.id,
-      workspace: input.workspace,
-      agentDir: input.agentDir,
-      model: input.model ?? undefined,
-      bindings: input.bindings,
-      skills: input.skills
-    };
-
-    return this.gatewayFirst(
-      "agents.create",
-      params,
-      options,
-      commandResultFromGatewayPayload,
-      () => this.gatewayFirst(
-        "agents.add",
-        params,
-        options,
-        commandResultFromGatewayPayload,
-        () => this.fallback.addAgent(input, options)
-      )
-    );
+    return this.fallback.addAgent(input, options);
   }
 
   deleteAgent(agentId: string, options: OpenClawCommandOptions = {}) {
@@ -1601,14 +1747,18 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   runAgentTurn(input: OpenClawAgentTurnInput, options: OpenClawCommandOptions = {}) {
+    const sessionKey = buildAgentSessionKey(input.agentId, input.sessionId);
+    const timeoutMs = typeof input.timeoutSeconds === "number" && Number.isFinite(input.timeoutSeconds)
+      ? Math.max(0, Math.floor(input.timeoutSeconds * 1000))
+      : undefined;
+    const idempotencyKey = input.dispatchId ?? createRequestId();
     const params = {
-      agentId: input.agentId,
+      sessionKey,
       sessionId: input.sessionId,
       message: input.message,
       thinking: input.thinking,
-      timeoutSeconds: input.timeoutSeconds,
-      workspace: input.workspace ?? undefined,
-      dispatchId: input.dispatchId ?? undefined
+      timeoutMs,
+      idempotencyKey
     };
 
     return this.gatewayFirst(
@@ -1617,8 +1767,14 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       options,
       (payload) => payload as MissionCommandPayload,
       () => this.gatewayFirst(
-        "sessions.chat.send",
-        params,
+        "sessions.send",
+        {
+          key: sessionKey,
+          message: input.message,
+          thinking: input.thinking,
+          timeoutMs,
+          idempotencyKey
+        },
         options,
         (payload) => payload as MissionCommandPayload,
         () => this.fallback.runAgentTurn(input, options)
@@ -1627,18 +1783,27 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   abortAgentTurn(input: OpenClawAbortTurnInput, options: OpenClawCommandOptions = {}) {
+    const sessionKey = input.sessionId || input.agentId ? buildAgentSessionKey(input.agentId, input.sessionId) : undefined;
+
     return this.gatewayFirst(
-      "chat.abort",
+      "sessions.abort",
       {
-        runId: input.runId ?? undefined,
-        sessionId: input.sessionId ?? undefined,
-        agentId: input.agentId ?? undefined,
-        reason: input.reason ?? undefined
+        key: sessionKey,
+        runId: input.runId ?? undefined
       },
       options,
       (payload) => payload as MissionCommandPayload,
-      () => this.fallback.abortAgentTurn?.(input, options) ??
-        this.fallback.call<MissionCommandPayload>("chat.abort", { ...input }, options)
+      () => this.gatewayFirst(
+        "chat.abort",
+        {
+          sessionKey,
+          runId: input.runId ?? undefined
+        },
+        options,
+        (payload) => payload as MissionCommandPayload,
+        () => this.fallback.abortAgentTurn?.(input, options) ??
+          this.fallback.call<MissionCommandPayload>("sessions.abort", { key: sessionKey, runId: input.runId ?? undefined }, options)
+      )
     );
   }
 
@@ -1749,6 +1914,100 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     }
   }
 
+  async probeNativeHandshake(options: OpenClawCommandOptions = {}) {
+    const timeoutMs = resolveNativeTimeoutMs(options.timeoutMs ?? this.options.timeoutMs);
+    const url = resolveGatewayUrl(this.options.url);
+    const WebSocketImpl = resolveWebSocketFactory(this.options.webSocketFactory);
+    const connectContext = await buildConnectParams(this.fallback, this.options, url, options);
+    const socket = new WebSocketImpl(url);
+    const pending = new Map<string, PendingRequest>();
+    const cleanupCallbacks: Array<() => void> = [];
+
+    const rejectPending = (error: unknown) => {
+      for (const [id, request] of pending) {
+        globalThis.clearTimeout(request.timer);
+        pending.delete(id);
+        request.reject(error);
+      }
+    };
+
+    cleanupCallbacks.push(
+      addSocketListener(socket, "message", (event) => {
+        try {
+          const data = (event as { data?: unknown })?.data ?? event;
+          const frame = parseGatewayFrameData(data);
+
+          if (!frame || frame.type !== "res" || frame.id === undefined) {
+            return;
+          }
+
+          const requestId = String(frame.id);
+          const request = pending.get(requestId);
+          if (!request) {
+            return;
+          }
+
+          pending.delete(requestId);
+          globalThis.clearTimeout(request.timer);
+
+          if (frame.ok === false) {
+            request.reject(new NativeGatewayError(normalizeGatewayResponseFailure(frame), { cause: frame }));
+            return;
+          }
+
+          request.resolve(frame.payload);
+        } catch (error) {
+          rejectPending(error);
+        }
+      }),
+      addSocketListener(socket, "error", (event) => {
+        rejectPending(new NativeGatewayError("OpenClaw Gateway WebSocket error.", { cause: event }));
+      }),
+      addSocketListener(socket, "close", (event) => {
+        if (pending.size === 0) {
+          return;
+        }
+
+        const detail = readSocketCloseReason(event);
+        rejectPending(
+          new NativeGatewayError(`OpenClaw Gateway connection closed${detail ? ` (${detail})` : ""}.`)
+        );
+      })
+    );
+
+    try {
+      await waitForSocketOpen(socket, timeoutMs, options.signal);
+      const connectParams = connectContext.deviceAuth
+        ? (await buildConnectParams(
+          this.fallback,
+          this.options,
+          url,
+          options,
+          await waitForConnectChallenge(socket, timeoutMs, options.signal)
+        )).params
+        : connectContext.params;
+      return await sendGatewayRequest<NativeHandshakePayload>(
+        socket,
+        pending,
+        CONNECT_METHOD,
+        connectParams,
+        timeoutMs,
+        options.signal
+      );
+    } finally {
+      for (const cleanup of cleanupCallbacks) {
+        cleanup();
+      }
+      rejectPending(new NativeGatewayError("OpenClaw Gateway handshake probe was cleaned up before completion."));
+
+      try {
+        socket.close();
+      } catch {
+        // Ignore close errors during cleanup.
+      }
+    }
+  }
+
   async subscribeNativeEvents(
     params: Record<string, unknown>,
     callbacks: {
@@ -1837,7 +2096,9 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         )).params
         : connectContext.params;
       await sendGatewayRequest(socket, pending, CONNECT_METHOD, connectParams, timeoutMs, options.signal);
-      await sendGatewayRequest(socket, pending, "events.subscribe", params, timeoutMs, options.signal);
+      for (const request of resolveEventSubscriptionRequests(params)) {
+        await sendGatewayRequest(socket, pending, request.method, request.params, timeoutMs, options.signal);
+      }
     } catch (error) {
       for (const cleanup of cleanupCallbacks) {
         cleanup();
@@ -1905,6 +2166,13 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       return fallback();
     }
 
+    if (containsRedactedOpenClawSecret(value)) {
+      throw new OpenClawGatewayClientError(
+        "Refusing to write a redacted OpenClaw secret back to config.",
+        "auth"
+      );
+    }
+
     try {
       const snapshot = parseGatewayPayload<Record<string, unknown>>(
         "config.get",
@@ -1916,11 +2184,9 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       await this.callNative<unknown>("config.schema", {}, options).catch(() => null);
 
       const baseHash = typeof snapshot.hash === "string" && snapshot.hash.trim() ? snapshot.hash : undefined;
-      const patch = operation === "config.unset"
-        ? { op: "remove", path: configPathToJsonPointer(path) }
-        : { op: "replace", path: configPathToJsonPointer(path), value };
+      const patch = buildMergePatchForConfigPath(path, operation === "config.unset" ? null : value);
       const patchParams: Record<string, unknown> = {
-        patches: [patch]
+        raw: JSON.stringify(patch)
       };
 
       if (baseHash) {
@@ -1932,7 +2198,15 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         payload = await this.callNative<unknown>("config.patch", patchParams, options);
       } catch (patchError) {
         try {
-          payload = await this.callNative<unknown>("config.apply", patchParams, options);
+          const applyParams: Record<string, unknown> = {
+            raw: JSON.stringify(config)
+          };
+
+          if (baseHash) {
+            applyParams.baseHash = baseHash;
+          }
+
+          payload = await this.callNative<unknown>("config.apply", applyParams, options);
         } catch (applyError) {
           if (containsRedactedOpenClawSecret(snapshot.config)) {
             throw new OpenClawGatewayClientError(

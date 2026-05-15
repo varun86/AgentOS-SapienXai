@@ -248,6 +248,43 @@ test("native WS gateway client handshakes and correlates request responses", asy
   assert.equal(fallback.calls.length, 0);
 });
 
+test("native WS gateway client exposes handshake feature discovery", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: {
+          type: "hello-ok",
+          protocol: 4,
+          server: { version: "2026.5.12" },
+          features: {
+            methods: ["status", "chat.send", "sessions.subscribe"],
+            events: ["chat", "sessions.changed"]
+          },
+          auth: { role: "operator", scopes: ["operator.read"] },
+          policy: { tickIntervalMs: 15000 }
+        }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const hello = await client.probeNativeHandshake();
+
+  assert.equal(hello.protocol, 4);
+  assert.deepEqual(hello.features?.methods, ["status", "chat.send", "sessions.subscribe"]);
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect"]);
+  assert.deepEqual(fallback.calls, []);
+});
+
 test("native WS gateway client uses Gateway first for typed status requests", async () => {
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();
@@ -289,10 +326,10 @@ test("native WS gateway client uses Gateway first for typed status requests", as
   });
   assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "status"]);
   assert.deepEqual(sentFrames[0]?.params.client, {
-    id: "cli",
+    id: "gateway-client",
     version: "agentos",
     platform: process.platform,
-    mode: "cli"
+    mode: "backend"
   });
   assert.equal(sentFrames[0]?.params.minProtocol, 4);
   assert.equal(sentFrames[0]?.params.maxProtocol, 4);
@@ -547,7 +584,7 @@ test("native WS gateway client falls back when Gateway typed response is malform
         ok: true,
         payload: frame.method === "connect"
           ? { protocol: 3 }
-          : { models: [{ name: "missing-key" }] }
+          : { models: [{ id: "missing-name" }] }
       });
     });
   });
@@ -564,6 +601,60 @@ test("native WS gateway client falls back when Gateway typed response is malform
   assert.match(getRecentOpenClawGatewayFallbackDiagnostics()[0].issue, /malformed response/);
 });
 
+test("native WS gateway client treats mixed model auth profiles as connected when one profile is usable", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      const payload =
+        frame.method === "connect"
+          ? { protocol: 4 }
+          : frame.method === "models.authStatus"
+            ? {
+                providers: [{
+                  provider: "openai-codex",
+                  status: "expired",
+                  profiles: [
+                    { profileId: "openai-codex:default", status: "expired" },
+                    { profileId: "openai-codex:user@example.com", status: "ok" },
+                    { profileId: "openai-codex:old@example.com", status: "missing" }
+                  ]
+                }]
+              }
+            : {
+                models: [{
+                  id: "gpt-5.5",
+                  provider: "openai-codex",
+                  name: "gpt-5.5"
+                }]
+              };
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const status = await client.getModelStatus();
+
+  assert.deepEqual(status.allowed, ["openai-codex/gpt-5.5"]);
+  assert.equal(status.auth?.providers?.[0]?.effective?.kind, "ok");
+  assert.equal(status.auth?.providers?.[0]?.profiles?.count, 1);
+  assert.equal(status.auth?.oauth?.providers?.[0]?.status, "ok");
+  assert.deepEqual(
+    sentFrames.map((frame) => frame.method).filter((method) => method !== "connect").sort(),
+    ["models.authStatus", "models.list"]
+  );
+  assert.deepEqual(fallback.calls, []);
+});
+
 test("native WS gateway client clears operation fallback diagnostics after Gateway recovery", async () => {
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();
@@ -577,8 +668,8 @@ test("native WS gateway client clears operation fallback diagnostics after Gatew
         payload: frame.method === "connect"
           ? { protocol: 3 }
           : malformed
-            ? { models: [{ name: "missing-key" }] }
-            : { models: [{ key: "ok", name: "OK", input: "text" }] }
+            ? { models: [{ id: "missing-name" }] }
+            : { models: [{ id: "gpt-5.5", provider: "openai", name: "GPT 5.5", input: ["text"] }] }
       });
     });
   });
@@ -595,8 +686,8 @@ test("native WS gateway client clears operation fallback diagnostics after Gatew
   malformed = false;
   assert.deepEqual(await client.listModels(), {
     models: [{
-      key: "ok",
-      name: "OK",
+      key: "openai/gpt-5.5",
+      name: "GPT 5.5",
       input: "text",
       contextWindow: null,
       local: null,
@@ -877,9 +968,27 @@ test("native WS gateway client mutates config through Gateway snapshots", async 
     "config.patch"
   ]);
   assert.deepEqual(sentFrames[5]?.params, {
-    patches: [{ op: "replace", path: "/gateway/remote/url", value: "ws://127.0.0.1:18789" }],
+    raw: JSON.stringify({ gateway: { remote: { url: "ws://127.0.0.1:18789" } } }),
     baseHash: "hash-1"
   });
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client refuses redacted config writes without CLI fallback", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket(() => {});
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await assert.rejects(
+    () => client.setConfig("gateway.auth.token", "__OPENCLAW_REDACTED__"),
+    /Refusing to write a redacted OpenClaw secret/
+  );
+  assert.deepEqual(sentFrames, []);
   assert.deepEqual(fallback.calls, []);
 });
 
@@ -974,7 +1083,7 @@ test("native WS gateway client classifies unknown Gateway methods as unsupported
         id: frame.id,
         ok: frame.method === "connect",
         payload: frame.method === "connect" ? { protocol: 3 } : undefined,
-        error: frame.method === "connect" ? undefined : { message: "INVALID_REQUEST: unknown method: models.status" }
+        error: frame.method === "connect" ? undefined : { message: "INVALID_REQUEST: unknown method: models.authStatus" }
       });
     });
   });
@@ -988,7 +1097,7 @@ test("native WS gateway client classifies unknown Gateway methods as unsupported
   await client.getModelStatus();
 
   assert.deepEqual(fallback.calls.map((call) => call.method), ["getModelStatus"]);
-  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.operation, "models.status");
+  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.operation, "models.authStatus");
   assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.kind, "unsupported");
 });
 
@@ -1018,13 +1127,56 @@ test("native WS gateway client uses Gateway first for critical workflows", async
 
   assert.deepEqual(sentFrames.map((frame) => frame.method), [
     "connect",
-    "agents.create",
-    "connect",
     "agents.delete",
     "connect",
     "chat.send",
     "connect",
-    "chat.abort"
+    "sessions.abort"
   ]);
-  assert.deepEqual(fallback.calls, []);
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["addAgent"]);
+  assert.equal(sentFrames.find((frame) => frame.method === "chat.send")?.params.sessionKey, "agent:agent-1:main");
+  assert.equal(sentFrames.find((frame) => frame.method === "sessions.abort")?.params.runId, "run-1");
+});
+
+test("native WS gateway client subscribes to Gateway session events without legacy events.subscribe", async () => {
+  const fallback = new FallbackGatewayClient();
+  const events: string[] = [];
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 4 } : { subscribed: true }
+      });
+      if (frame.method === "sessions.subscribe") {
+        socket.emitMessage({
+          type: "event",
+          event: "sessions.changed",
+          payload: { key: "agent:main:main" }
+        });
+      }
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const subscription = await client.subscribeNativeEvents(
+    { subscribeSessions: true },
+    {
+      onEvent: (frame) => {
+        if (frame.event) {
+          events.push(frame.event);
+        }
+      }
+    }
+  );
+  subscription.close();
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "sessions.subscribe"]);
+  assert.deepEqual(events, ["sessions.changed"]);
 });

@@ -7,31 +7,54 @@ import type { OpenClawCapabilityMatrix, OpenClawCapabilitySupport } from "@/lib/
 
 const capabilityCacheTtlMs = 60_000;
 const knownGatewayFirstMethods = [
+  "health",
   "status",
-  "gateway.status",
-  "models.status",
+  "diagnostics.stability",
   "models.list",
-  "models.scan",
+  "models.authStatus",
   "agents.list",
   "agents.create",
-  "agents.add",
+  "agents.update",
   "agents.delete",
+  "agents.files.list",
+  "agents.files.get",
+  "agents.files.set",
   "sessions.list",
+  "sessions.create",
+  "sessions.send",
+  "sessions.abort",
+  "sessions.subscribe",
+  "sessions.messages.subscribe",
+  "tasks.list",
+  "tasks.get",
+  "tasks.cancel",
+  "chat.history",
   "chat.send",
   "chat.abort",
-  "sessions.chat.send",
-  "events.subscribe",
   "config.get",
+  "config.set",
   "config.schema",
+  "config.schema.lookup",
   "config.patch",
   "config.apply",
   "channels.status",
-  "skills.list",
-  "plugins.list",
-  "approvals.list",
-  "approvals.respond",
-  "updates.status",
-  "updates.apply"
+  "channels.start",
+  "channels.stop",
+  "channels.logout",
+  "skills.status",
+  "skills.search",
+  "skills.detail",
+  "skills.install",
+  "skills.update",
+  "plugins.uiDescriptors",
+  "exec.approval.list",
+  "exec.approval.resolve",
+  "plugin.approval.list",
+  "plugin.approval.resolve",
+  "update.status",
+  "update.run",
+  "gateway.restart.preflight",
+  "gateway.restart.request"
 ];
 
 let cachedCapabilityMatrix: {
@@ -86,26 +109,40 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
   let protocolVersion: string | null = null;
   let authMode: string | null = null;
   let supportedMethods: string[] = [];
+  let supportedEvents: string[] = [];
 
   if (isCliGatewayClientForcedByEnv()) {
     diagnostics.push("Native Gateway WS is disabled by environment configuration.");
   } else {
-    const nativeCaller =
-      nativeCapabilityCallerForTesting ??
-      ((method: string) => new NativeWsOpenClawGatewayClient({ timeoutMs: 2_500 }).callNative<unknown>(method, {}, { timeoutMs: 2_500 }));
-    const capabilityPayload = await callFirstSupported(nativeCaller, [
-      "rpc.discover",
-      "rpc.methods",
-      "system.capabilities",
-      "capabilities"
-    ], diagnostics);
+    if (nativeCapabilityCallerForTesting) {
+      const capabilityPayload = await callFirstSupported(nativeCapabilityCallerForTesting, [
+        "rpc.discover",
+        "rpc.methods",
+        "system.capabilities",
+        "capabilities"
+      ], diagnostics);
 
-    protocolVersion = readProtocolVersion(capabilityPayload);
-    authMode = readAuthMode(capabilityPayload);
-    supportedMethods = readSupportedMethods(capabilityPayload);
+      protocolVersion = readProtocolVersion(capabilityPayload);
+      authMode = readAuthMode(capabilityPayload);
+      supportedMethods = readSupportedMethods(capabilityPayload);
+      supportedEvents = readSupportedEvents(capabilityPayload);
+    } else {
+      try {
+        const hello = await new NativeWsOpenClawGatewayClient({ timeoutMs: 2_500 }).probeNativeHandshake({
+          timeoutMs: 2_500
+        });
+        protocolVersion = readProtocolVersion(hello);
+        authMode = readAuthMode(hello);
+        supportedMethods = readSupportedMethods(hello);
+        supportedEvents = readSupportedEvents(hello);
+      } catch (error) {
+        diagnostics.push(`handshake: ${readErrorMessage(error)}`);
+      }
+    }
   }
 
   const methodSet = new Set(supportedMethods);
+  const eventSet = new Set(supportedEvents);
   const support = (...methods: string[]): OpenClawCapabilitySupport => {
     if (methodSet.size === 0) {
       return "unknown";
@@ -125,14 +162,24 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
     supportedMethods,
     configSchema: support("config.schema"),
     configPatch: support("config.patch", "config.apply"),
-    chatEvents: support("events.subscribe", "chat.events", "sessions.events"),
+    chatEvents: support("chat.send", "chat.history") === "supported" ||
+      ["chat", "agent", "session.message", "session.tool"].some((event) => eventSet.has(event))
+      ? "supported"
+      : methodSet.size === 0
+        ? "unknown"
+        : "unsupported",
     channels: support("channels.status"),
-    skills: support("skills.list"),
-    approvals: support("approvals.list", "approvals.respond"),
-    updates: support("updates.status", "updates.apply", "status"),
-    nativeMissionDispatch: support("chat.send", "sessions.chat.send"),
-    nativeAgentLifecycle: support("agents.create", "agents.add", "agents.delete"),
-    eventBridge: support("events.subscribe", "chat.events", "sessions.events"),
+    skills: support("skills.status"),
+    approvals: support("exec.approval.list", "exec.approval.resolve", "plugin.approval.list", "plugin.approval.resolve"),
+    updates: support("update.status", "update.run", "status"),
+    nativeMissionDispatch: support("chat.send", "sessions.send"),
+    nativeAgentLifecycle: support("agents.create", "agents.update", "agents.delete"),
+    eventBridge: support("sessions.subscribe") === "supported" ||
+      ["chat", "agent", "session.message", "session.tool", "exec.approval.requested", "plugin.approval.requested"].some((event) => eventSet.has(event))
+      ? "supported"
+      : methodSet.size === 0
+        ? "unknown"
+        : "unsupported",
     unsupportedGatewayMethods,
     diagnostics
   };
@@ -157,10 +204,17 @@ async function callFirstSupported(
 function readSupportedMethods(payload: unknown) {
   const direct = readStringArray(readProperty(payload, "methods"));
   const nested = readStringArray(readProperty(readProperty(payload, "rpc"), "methods"));
+  const features = readStringArray(readProperty(readProperty(payload, "features"), "methods"));
   const supported = readStringArray(readProperty(payload, "supportedMethods"));
   const methodObjects = readMethodObjects(readProperty(payload, "methods"));
 
-  return Array.from(new Set([...direct, ...nested, ...supported, ...methodObjects])).sort();
+  return Array.from(new Set([...direct, ...nested, ...features, ...supported, ...methodObjects])).sort();
+}
+
+function readSupportedEvents(payload: unknown) {
+  const direct = readStringArray(readProperty(payload, "events"));
+  const features = readStringArray(readProperty(readProperty(payload, "features"), "events"));
+  return Array.from(new Set([...direct, ...features])).sort();
 }
 
 function readMethodObjects(value: unknown) {
@@ -190,7 +244,8 @@ function readAuthMode(payload: unknown) {
   return (
     readString(readProperty(payload, "authMode")) ??
     readString(readProperty(readProperty(payload, "auth"), "mode")) ??
-    readString(readProperty(readProperty(payload, "security"), "authMode"))
+    readString(readProperty(readProperty(payload, "security"), "authMode")) ??
+    readString(readProperty(readProperty(payload, "snapshot"), "authMode"))
   );
 }
 

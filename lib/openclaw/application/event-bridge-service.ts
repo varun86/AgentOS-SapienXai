@@ -60,9 +60,10 @@ export async function readOpenClawEventBridgeRuntimes(): Promise<RuntimeRecord[]
 export function normalizeOpenClawGatewayEventToRuntime(frame: GatewayEventFrame): RuntimeRecord | null {
   const payload = isRecord(frame.payload) ? frame.payload : {};
   const eventName = readString(frame.event) ?? readString(payload.type) ?? "event";
-  const agentId = readString(payload.agentId) ?? readString(payload.agent);
-  const sessionId = readString(payload.sessionId) ?? readString(payload.session);
-  const runId = readString(payload.runId) ?? readString(payload.run);
+  const sessionKey = readString(payload.sessionKey) ?? readString(payload.key);
+  const agentId = readString(payload.agentId) ?? readString(payload.agent) ?? parseAgentIdFromSessionKey(sessionKey);
+  const sessionId = readString(payload.sessionId) ?? readString(payload.session) ?? sessionKey;
+  const runId = readString(payload.runId) ?? readString(payload.run) ?? readString(payload.clientRunId);
   const taskId = readString(payload.taskId);
   const timestamp = readTimestamp(payload.timestamp ?? payload.ts ?? payload.updatedAt);
   const status = normalizeStatus(readString(payload.status) ?? eventName);
@@ -108,7 +109,7 @@ export function normalizeOpenClawGatewayEventToRuntime(frame: GatewayEventFrame)
 async function startEventBridge() {
   const capabilityMatrix = await getOpenClawCapabilityMatrix().catch(() => null);
   if (capabilityMatrix?.eventBridge === "unsupported") {
-    lastError = "OpenClaw Gateway does not advertise event subscription support.";
+    lastError = "OpenClaw Gateway does not advertise compatible session/event support.";
     return;
   }
 
@@ -116,8 +117,7 @@ async function startEventBridge() {
   try {
     subscription = await client.subscribeNativeEvents(
       {
-        topics: ["chat", "tool", "log", "session", "approval"],
-        replay: false
+        subscribeSessions: true
       },
       {
         onEvent: (frame) => {
@@ -241,4 +241,13 @@ function readString(value: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseAgentIdFromSessionKey(sessionKey: string | null) {
+  if (!sessionKey?.startsWith("agent:")) {
+    return null;
+  }
+
+  const [, agentId] = sessionKey.split(":");
+  return agentId || null;
 }

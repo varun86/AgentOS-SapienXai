@@ -109,7 +109,7 @@ export async function submitMissionDispatch(
   try {
     const capabilityMatrix = await getOpenClawCapabilityMatrix().catch(() => null);
 
-    if (capabilityMatrix?.nativeMissionDispatch === "supported") {
+    if (capabilityMatrix?.nativeMissionDispatch !== "unsupported") {
       const payload = await getOpenClawAdapter().runAgentTurn(
         {
           agentId,

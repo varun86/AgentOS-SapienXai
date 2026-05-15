@@ -26,15 +26,15 @@ test("capability matrix detects advertised Gateway-first methods", async () => {
       methods: [
         "chat.send",
         "chat.abort",
-        "events.subscribe",
+        "sessions.subscribe",
         "config.schema",
         "config.patch",
         "agents.create",
         "agents.delete",
         "channels.status",
-        "skills.list",
-        "approvals.list",
-        "updates.status"
+        "skills.status",
+        "exec.approval.list",
+        "update.status"
       ]
     };
   });
@@ -77,6 +77,34 @@ test("mission dispatch uses native chat when capability matrix supports it", asy
   });
 
   assert.equal(response.runId, "run-native-1");
+  assert.equal(response.status, "running");
+  assert.deepEqual(calls, [`run:agent-1:${response.dispatchId}`]);
+});
+
+test("mission dispatch still attempts Gateway-first path when capabilities are unknown", async () => {
+  const calls: string[] = [];
+  setOpenClawCapabilityMatrixNativeCallerForTesting(async () => ({
+    protocolVersion: 4,
+    methods: []
+  }));
+  setOpenClawAdapterForTesting(createContractAdapter({
+    async runAgentTurn(input) {
+      calls.push(`run:${input.agentId}:${input.dispatchId ?? "none"}`);
+      return {
+        runId: "run-unknown-1",
+        status: "running",
+        summary: "Queued by Gateway"
+      };
+    }
+  }));
+
+  const response = await submitMissionDispatch({ mission: "Try native", workspaceId: "workspace-1" }, {
+    getMissionControlSnapshot: async () => createSnapshot(),
+    resolveAgentForMission: () => "agent-1",
+    invalidateMissionControlCaches: () => {}
+  });
+
+  assert.equal(response.runId, "run-unknown-1");
   assert.equal(response.status, "running");
   assert.deepEqual(calls, [`run:agent-1:${response.dispatchId}`]);
 });
