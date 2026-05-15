@@ -137,10 +137,10 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       openClawBinarySelection: createDefaultOpenClawBinarySelection(),
       modelReadiness: {
         ready: true,
-        defaultModel: "openai-codex/gpt-5.1-codex-mini",
-        resolvedDefaultModel: "openai-codex/gpt-5.1-codex-mini",
+        defaultModel: "openai/gpt-5.5",
+        resolvedDefaultModel: "openai/gpt-5.5",
         defaultModelReady: true,
-        recommendedModelId: "openai-codex/gpt-5.1-codex-mini",
+        recommendedModelId: "openai/gpt-5.5",
         preferredLoginProvider: "openai-codex",
         totalModelCount: 2,
         availableModelCount: 2,
@@ -191,7 +191,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         path: "~/openclaw/demo",
         kind: "workspace",
         agentIds: ["agent-demo-planner", "agent-demo-executor"],
-        modelIds: ["openai-codex/gpt-5.1-codex-mini", "ollama/qwen3.5:9b"],
+        modelIds: ["openai/gpt-5.5", "ollama/qwen3.5:9b"],
         activeRuntimeIds: ["runtime-demo-plan"],
         totalSessions: 2,
         health: "engaged",
@@ -248,7 +248,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         name: "Planner",
         workspaceId: "workspace-demo",
         workspacePath: "~/openclaw/demo",
-        modelId: "openai-codex/gpt-5.1-codex-mini",
+        modelId: "openai/gpt-5.5",
         isDefault: true,
         status: "engaged",
         sessionCount: 1,
@@ -316,9 +316,9 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
     ],
     models: [
       {
-        id: "openai-codex/gpt-5.1-codex-mini",
-        name: "GPT-5.1 Codex Mini",
-        provider: "openai-codex",
+        id: "openai/gpt-5.5",
+        name: "GPT-5.5",
+        provider: "openai",
         input: "text+image",
         contextWindow: 272000,
         local: false,
@@ -352,7 +352,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         ageMs: 120000,
         agentId: "agent-demo-planner",
         workspaceId: "workspace-demo",
-        modelId: "openai-codex/gpt-5.1-codex-mini",
+        modelId: "openai/gpt-5.5",
         sessionId: "session-demo-plan",
         taskId: "demo-plan",
         tokenUsage: {
@@ -404,7 +404,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       {
         id: "edge-demo-planner-model",
         sourceId: "agent-demo-planner",
-        targetId: "openai-codex/gpt-5.1-codex-mini",
+        targetId: "openai/gpt-5.5",
         kind: "uses-model",
         label: "primary model"
       },

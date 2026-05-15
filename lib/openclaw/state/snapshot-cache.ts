@@ -1,4 +1,4 @@
-export type SnapshotLoadProfile = "interactive" | "refresh";
+export type SnapshotLoadProfile = "interactive" | "refresh" | "system";
 
 export type SnapshotPair<TSnapshot> = {
   visible: TSnapshot;
@@ -33,7 +33,7 @@ export class SnapshotCacheController<TSnapshot> {
     this.cache = null;
   }
 
-  async get(options: { force?: boolean; includeHidden?: boolean } = {}) {
+  async get(options: { force?: boolean; includeHidden?: boolean; loadProfile?: SnapshotLoadProfile } = {}) {
     const cachedSnapshot = this.cache;
     const cacheIsFresh = Boolean(cachedSnapshot && cachedSnapshot.expiresAt > Date.now());
 
@@ -56,7 +56,7 @@ export class SnapshotCacheController<TSnapshot> {
     if (options.force) {
       this.generation += 1;
       this.cache = null;
-      this.promise = this.loadForCurrentGeneration("refresh");
+      this.promise = this.loadForCurrentGeneration(options.loadProfile ?? "refresh");
       void this.promise.catch(() => {});
 
       try {

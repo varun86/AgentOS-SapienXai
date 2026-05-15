@@ -17,6 +17,7 @@ import {
 } from "@/lib/openclaw/binary-selection";
 import { resolveRequiredLoginProvider } from "@/lib/openclaw/model-onboarding";
 import { resolveUpdateInfo } from "@/lib/openclaw/domains/control-plane-normalization";
+import { mapRuntimeSmokeTestEntry } from "@/lib/openclaw/domains/control-plane-settings";
 import { createMissionDispatchResultFromRuntimeOutput } from "@/lib/openclaw/domains/mission-dispatch-model";
 import {
   annotateMissionDispatchMetadata,
@@ -333,7 +334,7 @@ Capability: admin-capable`;
   assert.equal(isOpenClawGatewayReadyOutput("Connectivity probe: failed"), false);
   assert.equal(
     buildOpenClawRuntimeSmokeTestRecoveryCommand("/Users/example/.openclaw/bin/openclaw", "Unknown model: openai-codex/gpt-5.4-mini"),
-    "/Users/example/.openclaw/bin/openclaw models set openai-codex/gpt-5.5"
+    "/Users/example/.openclaw/bin/openclaw doctor --fix && /Users/example/.openclaw/bin/openclaw gateway restart && /Users/example/.openclaw/bin/openclaw gateway status --deep"
   );
   assert.deepEqual(
     classifyOpenClawRuntimeSmokeTestFailure(
@@ -351,7 +352,17 @@ Capability: admin-capable`;
     {
       kind: "model-route",
       detail:
-        "OpenClaw rejected the active Codex model route. The model can exist in Codex, but this OpenClaw provider path could not run it. Try `openai-codex/gpt-5.5`, or use `openai/gpt-5.4-mini` with an OpenAI API key."
+        "OpenClaw rejected a legacy Codex model route. Use canonical `openai/gpt-5.5` model refs with the Codex harness enabled, then run `openclaw doctor --fix` to migrate stale `openai-codex/gpt-*` config entries."
+    }
+  );
+  assert.deepEqual(
+    classifyOpenClawRuntimeSmokeTestFailure(
+      'GatewayClientRequestError: FailoverError: OAuth token refresh failed for openai-codex: OpenAI Codex token refresh failed (401): { "error": { "message": "Your refresh token has already been used to generate a new access token. Please try signing in again." } }'
+    ),
+    {
+      kind: "provider-auth",
+      detail:
+        "Your ChatGPT/Codex session has expired. Reconnect ChatGPT, then retry model discovery or runtime verification. Run: openclaw models auth login --provider openai-codex --set-default"
     }
   );
 });
@@ -361,9 +372,34 @@ test("openclaw runtime failure message explains codex route rejection", () => {
     resolveOpenClawRuntimeFailureMessage(
       "GatewayClientRequestError: FailoverError: Unknown model: openai-codex/gpt-5.4-mini."
     ),
-    "OpenClaw rejected the active Codex model route. The model can exist in Codex, but this OpenClaw provider path could not run it. Try `openai-codex/gpt-5.5`, or use `openai/gpt-5.4-mini` with an OpenAI API key."
+    "OpenClaw rejected a legacy Codex model route. Use canonical `openai/gpt-5.5` model refs with the Codex harness enabled, then run `openclaw doctor --fix` to migrate stale `openai-codex/gpt-*` config entries."
   );
   assert.equal(resolveOpenClawRuntimeFailureMessage("unrelated failure"), null);
+  assert.equal(
+    resolveOpenClawRuntimeFailureMessage("OpenAI Codex token refresh failed (401)"),
+    "Your ChatGPT/Codex session has expired. Reconnect ChatGPT, then retry model discovery or runtime verification. Run: openclaw models auth login --provider openai-codex --set-default"
+  );
+});
+
+test("stale codex auth smoke failures do not keep runtime warnings pinned", () => {
+  assert.equal(
+    mapRuntimeSmokeTestEntry("main", {
+      status: "failed",
+      checkedAt: "2020-01-01T00:00:00.000Z",
+      error:
+        "Your ChatGPT/Codex session has expired. Reconnect ChatGPT, then retry model discovery or runtime verification. Run: openclaw models auth login --provider openai-codex --set-default"
+    }).status,
+    "not-run"
+  );
+  assert.equal(
+    mapRuntimeSmokeTestEntry("main", {
+      status: "failed",
+      checkedAt: new Date().toISOString(),
+      error:
+        "Your ChatGPT/Codex session has expired. Reconnect ChatGPT, then retry model discovery or runtime verification. Run: openclaw models auth login --provider openai-codex --set-default"
+    }).status,
+    "failed"
+  );
 });
 
 test("openclaw runtime preflight rejects bundled channel load failures", () => {

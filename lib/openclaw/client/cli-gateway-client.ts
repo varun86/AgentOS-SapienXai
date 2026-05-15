@@ -157,6 +157,10 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     return runOpenClawJson<TPayload>(["config", "get", path, "--json"], options).catch(() => null);
   }
 
+  async getConfigSchema(options: OpenClawCommandOptions = {}) {
+    return this.call<Record<string, unknown>>("config.schema", {}, options).catch(() => null);
+  }
+
   async hasConfig(path: string, options: OpenClawCommandOptions = {}) {
     try {
       await runOpenClaw(["config", "get", path, "--json"], options);
@@ -219,6 +223,15 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     options: OpenClawCommandOptions = {}
   ) {
     return runOpenClawJson<MissionCommandPayload>(buildAgentTurnArgs(input), options);
+  }
+
+  abortAgentTurn(input: { runId?: string | null; sessionId?: string | null; agentId?: string | null; reason?: string | null }, options: OpenClawCommandOptions = {}) {
+    return this.call<MissionCommandPayload>("chat.abort", {
+      runId: input.runId ?? undefined,
+      sessionId: input.sessionId ?? undefined,
+      agentId: input.agentId ?? undefined,
+      reason: input.reason ?? undefined
+    }, options);
   }
 
   streamAgentTurn(

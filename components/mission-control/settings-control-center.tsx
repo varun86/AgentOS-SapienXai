@@ -130,10 +130,10 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
   const latestCommands = commandHistory.slice(0, 6);
   const commandStats = useMemo(
     () => ({
-      ok: commandHistory.filter((command) => command.status === "ok").length,
-      failed: commandHistory.filter((command) => command.status !== "ok").length
+      ok: latestCommands.filter((command) => command.status === "ok").length,
+      failed: latestCommands.filter((command) => command.status !== "ok").length
     }),
-    [commandHistory]
+    [latestCommands]
   );
   const nativeAuthLabel = gatewayAuthStatus
     ? gatewayAuthStatus.native.ok
@@ -461,7 +461,11 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                     rows={[
                       ["Status", `${resolveGatewayLocality(snapshot)} / ${snapshot.diagnostics.loaded || snapshot.diagnostics.rpcOk ? "Online" : "Offline"}`],
                       ["Endpoint", snapshot.diagnostics.gatewayUrl || "Not configured"],
-                      ["Auth status", nativeAuthLabel]
+                      ["Auth status", nativeAuthLabel],
+                      ["Protocol", snapshot.diagnostics.capabilityMatrix?.gatewayProtocolVersion || "Unknown"],
+                      ["Native chat", formatCapabilitySupport(snapshot.diagnostics.capabilityMatrix?.nativeMissionDispatch)],
+                      ["Config patch", formatCapabilitySupport(snapshot.diagnostics.capabilityMatrix?.configPatch)],
+                      ["Events", formatCapabilitySupport(snapshot.diagnostics.capabilityMatrix?.eventBridge)]
                     ]}
                     successIndex={2}
                   />
@@ -1284,6 +1288,18 @@ function resolveGatewayLocality(snapshot: MissionControlShellSettingsPanelProps[
   return snapshot.diagnostics.bindMode === "remote" || snapshot.diagnostics.configuredGatewayUrl
     ? "Remote"
     : "Local";
+}
+
+function formatCapabilitySupport(value?: "supported" | "unsupported" | "unknown") {
+  if (value === "supported") {
+    return "Supported";
+  }
+
+  if (value === "unsupported") {
+    return "Fallback";
+  }
+
+  return "Unknown";
 }
 
 function formatGatewayAuthIssue(kind: GatewayNativeAuthStatus["native"]["kind"]) {

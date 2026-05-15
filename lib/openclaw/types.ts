@@ -95,6 +95,28 @@ export interface ModelReadiness {
   issues: string[];
 }
 
+export type OpenClawCapabilitySupport = "supported" | "unsupported" | "unknown";
+
+export interface OpenClawCapabilityMatrix {
+  detectedAt: string;
+  openClawVersion: string | null;
+  gatewayProtocolVersion: string | null;
+  authMode: string | null;
+  supportedMethods: string[];
+  configSchema: OpenClawCapabilitySupport;
+  configPatch: OpenClawCapabilitySupport;
+  chatEvents: OpenClawCapabilitySupport;
+  channels: OpenClawCapabilitySupport;
+  skills: OpenClawCapabilitySupport;
+  approvals: OpenClawCapabilitySupport;
+  updates: OpenClawCapabilitySupport;
+  nativeMissionDispatch: OpenClawCapabilitySupport;
+  nativeAgentLifecycle: OpenClawCapabilitySupport;
+  eventBridge: OpenClawCapabilitySupport;
+  unsupportedGatewayMethods: string[];
+  diagnostics: string[];
+}
+
 export interface DiscoveredModelCandidate {
   id: string;
   modelId: string;
@@ -130,6 +152,7 @@ export interface GatewayDiagnostics {
   serviceLabel?: string;
   openClawBinarySelection: OpenClawBinarySelection;
   modelReadiness: ModelReadiness;
+  capabilityMatrix?: OpenClawCapabilityMatrix;
   runtime: OpenClawRuntimeDiagnostics;
   commandHistory?: OpenClawCommandDiagnostic[];
   securityWarnings: string[];

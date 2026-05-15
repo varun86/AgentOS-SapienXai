@@ -26,6 +26,15 @@ import type {
 } from "@/lib/openclaw/state/snapshot-cache";
 import { MissionControlCacheService } from "@/lib/openclaw/application/mission-control-cache-service";
 import { buildRuntimeDiagnosticsFromState } from "@/lib/openclaw/adapter/runtime-diagnostics-adapter";
+import {
+  getCachedOpenClawCapabilityMatrix,
+  getOpenClawCapabilityMatrix,
+  warmOpenClawCapabilityMatrix
+} from "@/lib/openclaw/application/capability-matrix-service";
+import {
+  readOpenClawEventBridgeRuntimes,
+  startOpenClawEventBridge
+} from "@/lib/openclaw/application/event-bridge-service";
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   buildModelRecords,
@@ -186,15 +195,19 @@ export function invalidateMissionControlSnapshotCache() {
   missionControlCacheService.clear();
 }
 
-export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
+export async function getMissionControlSnapshot(
+  options: { force?: boolean; includeHidden?: boolean; loadProfile?: SnapshotLoadProfile } = {}
+) {
   return missionControlCacheService.getSnapshot(options);
 }
 
 async function readGatewayRemoteUrlConfig(): Promise<PromiseSettledResult<unknown>> {
   try {
+    const payload = await getOpenClawAdapter().call<unknown>("config.get", {}, { timeoutMs: 5_000 });
+
     return {
       status: "fulfilled",
-      value: await getOpenClawAdapter().getConfig<unknown>(gatewayRemoteUrlConfigKey, { timeoutMs: 5_000 })
+      value: readConfigSnapshotValue(payload, gatewayRemoteUrlConfigKey)
     };
   } catch (reason) {
     return {
@@ -247,6 +260,32 @@ async function settleSessionsPayloadFromOpenClaw(
   }
 }
 
+function readConfigSnapshotValue(payload: unknown, path: string) {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  return readNestedConfigValue(payload.config, path) ?? readNestedConfigValue(payload.resolved, path) ?? null;
+}
+
+function readNestedConfigValue(source: unknown, path: string) {
+  let current = source;
+
+  for (const segment of path.split(".")) {
+    if (!isRecord(current) || !Object.hasOwn(current, segment)) {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return current;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function normalizeGatewayRemoteUrlConfigValue(value: unknown) {
   if (typeof value === "string") {
     return normalizeOptionalValue(value);
@@ -280,9 +319,28 @@ async function loadMissionControlSnapshots({
   }
 
   try {
+    const systemProfile = profile === "system";
     const settings = await readMissionControlSettings();
+    if (!systemProfile) {
+      startOpenClawEventBridge();
+    }
     const configuredWorkspaceRoot = normalizeConfiguredWorkspaceRootValue(settings.workspaceRoot) ?? null;
-    const gatewayRemoteUrlResult = await readGatewayRemoteUrlConfig();
+
+    if (systemProfile) {
+      return createSnapshotPair(
+        await buildSystemReadinessSnapshot({
+          generation,
+          settings,
+          localGatewayStatus,
+          openclawInstalled,
+          configuredWorkspaceRoot
+        })
+      );
+    }
+
+    const gatewayRemoteUrlResult = systemProfile
+      ? createDeferredPayloadResult<unknown>()
+      : await readGatewayRemoteUrlConfig();
     let gatewayStatusResult: PromiseSettledResult<GatewayStatusPayload>;
     let statusResult: PromiseSettledResult<StatusPayload>;
     let agentsResult: PromiseSettledResult<AgentPayload>;
@@ -296,34 +354,42 @@ async function loadMissionControlSnapshots({
     const modelStatusCacheNeedsRefresh =
       !modelsStatusPayloadCache || Date.now() - modelsStatusPayloadCache.capturedAt > SLOW_PAYLOAD_CACHE_TTL_MS;
 
-    if (profile === "interactive") {
+    if (profile === "interactive" || systemProfile) {
       const shouldHydrateGatewayStatus = !localGatewayStatus && gatewayStatusCacheNeedsRefresh;
       const shouldHydrateStatus = !localGatewayStatus && statusCacheNeedsRefresh;
-      const shouldHydrateModelStatus = modelStatusCacheNeedsRefresh;
+      const shouldHydrateModelStatus = !systemProfile && modelStatusCacheNeedsRefresh;
 
-      gatewayStatusResult = shouldHydrateGatewayStatus
-        ? await settleGatewayStatusPayloadFromOpenClaw(15_000)
-        : createDeferredPayloadResult();
-      statusResult = shouldHydrateStatus
-        ? await settleStatusPayloadFromOpenClaw(15_000)
-        : createDeferredPayloadResult();
+      const gatewayStatusPromise = shouldHydrateGatewayStatus
+        ? settleGatewayStatusPayloadFromOpenClaw(15_000)
+        : Promise.resolve(createDeferredPayloadResult<GatewayStatusPayload>());
+      const statusPromise = shouldHydrateStatus
+        ? settleStatusPayloadFromOpenClaw(15_000)
+        : Promise.resolve(createDeferredPayloadResult<StatusPayload>());
+      const agentConfigPromise = settleAgentConfigFromStateFile(openClawStateRootPath);
+      const modelStatusPromise = shouldHydrateModelStatus
+        ? settleModelStatusPayloadFromOpenClaw(15_000)
+        : Promise.resolve(createDeferredPayloadResult<ModelsStatusPayload>());
+      [gatewayStatusResult, statusResult, agentConfigResult, modelStatusResult] = await Promise.all([
+        gatewayStatusPromise,
+        statusPromise,
+        agentConfigPromise,
+        modelStatusPromise
+      ]);
       agentsResult = createDeferredPayloadResult();
-      agentConfigResult = await settleAgentConfigFromStateFile(openClawStateRootPath);
       modelsResult = createDeferredPayloadResult();
-      modelStatusResult = shouldHydrateModelStatus
-        ? await settleModelStatusPayloadFromOpenClaw(15_000)
-        : createDeferredPayloadResult();
       presenceResult = createDeferredPayloadResult();
       if (statusCacheNeedsRefresh && !shouldHydrateStatus) {
         statusPayloadCache.scheduleRefresh(() => settleStatusPayloadFromOpenClaw(15_000));
       }
     } else {
-      statusResult = await settleStatusPayloadFromOpenClaw(45_000);
-      gatewayStatusResult = await settleGatewayStatusPayloadFromOpenClaw(45_000);
+      [statusResult, gatewayStatusResult, agentConfigResult, modelStatusResult] = await Promise.all([
+        settleStatusPayloadFromOpenClaw(45_000),
+        settleGatewayStatusPayloadFromOpenClaw(45_000),
+        settleAgentConfigFromStateFile(openClawStateRootPath),
+        settleModelStatusPayloadFromOpenClaw(45_000)
+      ]);
       agentsResult = createDeferredPayloadResult();
-      agentConfigResult = await settleAgentConfigFromStateFile(openClawStateRootPath);
       modelsResult = createDeferredPayloadResult();
-      modelStatusResult = await settleModelStatusPayloadFromOpenClaw(45_000);
       presenceResult = createDeferredPayloadResult();
     }
 
@@ -356,10 +422,12 @@ async function loadMissionControlSnapshots({
       agentConfigPayloadCache = entry;
     });
     const agentConfig = resolvedAgentConfig.value ?? [];
-    if (isDeferredPayloadResult(agentsResult)) {
+    if (isDeferredPayloadResult(agentsResult) && !systemProfile) {
       agentsResult = await settleAgentPayloadFromOpenClaw(agentConfig);
     }
-    const sessionsResult = await settleSessionsPayloadFromOpenClaw(agentConfig);
+    const sessionsResult: PromiseSettledResult<SessionsPayload> = systemProfile
+      ? createDeferredPayloadResult<SessionsPayload>()
+      : await settleSessionsPayloadFromOpenClaw(agentConfig);
     const resolvedAgents = resolveCachedPayload(agentsResult, agentPayloadCache, (entry) => {
       agentPayloadCache = entry;
     });
@@ -459,7 +527,8 @@ async function loadMissionControlSnapshots({
       liveSessionRuntimes,
       dispatchRecords
     );
-    const baseRuntimes = mergeRuntimeHistory(annotatedLiveSessionRuntimes);
+    const eventBridgeRuntimes = systemProfile ? [] : await readOpenClawEventBridgeRuntimes();
+    const baseRuntimes = mergeRuntimeHistory([...eventBridgeRuntimes, ...annotatedLiveSessionRuntimes]);
     const dispatchRuntimes = await buildMissionDispatchRuntimesFromRuntime(
       baseRuntimes,
       dispatchRecords,
@@ -469,7 +538,7 @@ async function loadMissionControlSnapshots({
         reconcileRuntimeState: reconcileMissionDispatchRuntimeState
       }
     );
-    const runtimes = mergeRuntimeHistory([...dispatchRuntimes, ...annotatedLiveSessionRuntimes]);
+    const runtimes = mergeRuntimeHistory([...dispatchRuntimes, ...eventBridgeRuntimes, ...annotatedLiveSessionRuntimes]);
     await Promise.all(
       workspacePaths.map(async (workspacePath) => {
         const manifest = await readWorkspaceProjectManifest(workspacePath);
@@ -603,6 +672,13 @@ async function loadMissionControlSnapshots({
       getResolvedOpenClawBin()
     );
     const runtimeDiagnostics = await runtimeDiagnosticsPromise;
+    const capabilityMatrix =
+      profile === "interactive"
+        ? getCachedOpenClawCapabilityMatrix() ?? undefined
+        : await getOpenClawCapabilityMatrix().catch(() => undefined);
+    if (profile === "interactive" && !capabilityMatrix) {
+      warmOpenClawCapabilityMatrix();
+    }
     const gatewayFallbackIssues = getRecentOpenClawGatewayFallbackDiagnostics().map(
       (entry) => `gateway.${entry.operation}: Gateway-first request fell back to CLI (${entry.kind}): ${entry.issue}`
     );
@@ -628,6 +704,7 @@ async function loadMissionControlSnapshots({
       runtimeDiagnostics,
       openClawBinarySelection,
       modelReadiness,
+      capabilityMatrix,
       commandHistory: getRecentOpenClawCommandDiagnostics(),
       versionDiagnostics,
       issues: buildDiagnosticIssues({
@@ -706,6 +783,85 @@ function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair<Miss
   return {
     visible: snapshot,
     full: snapshot
+  };
+}
+
+async function buildSystemReadinessSnapshot({
+  generation,
+  settings,
+  localGatewayStatus,
+  openclawInstalled,
+  configuredWorkspaceRoot
+}: {
+  generation: number;
+  settings: MissionControlSettings;
+  localGatewayStatus: GatewayStatusPayload | null;
+  openclawInstalled: boolean;
+  configuredWorkspaceRoot: string | null;
+}): Promise<MissionControlSnapshot> {
+  const gatewayStatusResult = localGatewayStatus
+    ? ({
+        status: "fulfilled",
+        value: localGatewayStatus
+      } satisfies PromiseSettledResult<GatewayStatusPayload>)
+    : await settleGatewayStatusPayloadFromOpenClaw(3_000);
+  const gatewayStatus = localGatewayStatus ?? gatewayStatusCache.resolve(gatewayStatusResult).value;
+  const agentConfigResult = await settleAgentConfigFromStateFile(openClawStateRootPath);
+  const agentConfig = agentConfigResult.status === "fulfilled" ? agentConfigResult.value : [];
+  const agentIds = agentConfig.map((agent) => agent.id).filter(Boolean);
+  const runtimeState = await inspectOpenClawRuntimeState(openClawStateRootPath, agentIds);
+  const runtimeDiagnostics = buildRuntimeDiagnosticsFromState(
+    runtimeState,
+    getLatestRuntimeSmokeTest(settings)
+  );
+  const modelStatus = buildModelStatusFromAgentConfig(agentConfig);
+  const localModels = buildModelsPayloadFromFallbackSources(agentConfig, modelStatus);
+  const modelReadiness = resolveModelReadiness(localModels.models, modelStatus);
+  const rpcOk = Boolean(gatewayStatus?.rpc?.ok);
+  const loaded = Boolean(gatewayStatus?.service?.loaded || rpcOk);
+  const ready = openclawInstalled && rpcOk && runtimeDiagnostics.stateWritable && runtimeDiagnostics.sessionStoreWritable;
+  const issues = [
+    rpcOk ? null : "OpenClaw Gateway RPC is not ready.",
+    ...runtimeDiagnostics.issues
+  ].filter((issue): issue is string => Boolean(issue));
+  const base = createErrorSnapshot(issues[0] ?? "OpenClaw system readiness snapshot.", {
+    installed: openclawInstalled,
+    loaded,
+    rpcOk
+  });
+
+  return {
+    ...base,
+    generatedAt: new Date().toISOString(),
+    revision: generation,
+    mode: "live",
+    diagnostics: {
+      ...base.diagnostics,
+      installed: openclawInstalled,
+      loaded,
+      rpcOk,
+      health: ready ? "healthy" : openclawInstalled ? "degraded" : "offline",
+      workspaceRoot: resolveWorkspaceRoot(configuredWorkspaceRoot),
+      configuredWorkspaceRoot,
+      gatewayUrl: gatewayStatus?.gateway?.probeUrl ?? base.diagnostics.gatewayUrl,
+      bindMode: gatewayStatus?.gateway?.bindMode,
+      port: gatewayStatus?.gateway?.port,
+      serviceLabel: gatewayStatus?.service?.label,
+      openClawBinarySelection: buildOpenClawBinarySelectionSnapshot(
+        await readOpenClawBinarySelection(),
+        getResolvedOpenClawBin()
+      ),
+      modelReadiness,
+      capabilityMatrix: getCachedOpenClawCapabilityMatrix() ?? undefined,
+      runtime: runtimeDiagnostics,
+      commandHistory: getRecentOpenClawCommandDiagnostics(),
+      issues
+    },
+    missionPresets: [
+      "Audit the selected workspace and generate a concrete first task batch.",
+      "Plan a multi-agent delivery mission for the current product goal.",
+      "Review active runtimes, identify blockers, and propose the next handoff."
+    ]
   };
 }
 

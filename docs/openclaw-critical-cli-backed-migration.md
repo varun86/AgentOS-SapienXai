@@ -2,13 +2,17 @@
 
 Date: 2026-05-03
 
+Gateway-first update: 2026-05-15.
+
+The May 2026 Gateway-first pass migrated agent create/delete, mission dispatch/abort, config patch/apply, and the event bridge behind capability detection. CLI fallback is still retained for unsupported Gateway versions, recovery, gateway process control, stream fallback, and side-effect-heavy provisioning flows.
+
 Scope:
 
 - Agent create/update/delete
 - Agent run/streaming/transcript behavior
 - Channel/provider provisioning and discovery
 
-This pass did not add product features and did not migrate unsupported or behaviorally ambiguous OpenClaw operations.
+The original 2026-05-03 pass did not migrate unsupported or behaviorally ambiguous OpenClaw operations. The 2026-05-15 pass keeps the compatibility guidance below, but changes several rows from "CLI only" to "Gateway-first with CLI fallback."
 
 ## Gateway Method Evidence
 
@@ -35,11 +39,11 @@ Confirmed Gateway methods relevant to this pass:
 
 | Area | Current file/path | Current CLI command/helper | Current AgentOS behavior | Side effects | Gateway candidate | Confirmed? | Shape confidence | Migrated now? | CLI fallback required? | Risk if migrated incorrectly | Required tests |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Agent create | `lib/openclaw/application/agent-service.ts`, `lib/openclaw/client/cli-gateway-client.ts` | `openclaw agents add <id> --workspace --agent-dir --model --non-interactive --json` | Creates the OpenClaw agent, then writes AgentOS policy skill files, workspace skill markdown, config list entry, identity files, bootstrap files, workspace manifest metadata, and syncs policy skills. | Agent directory, OpenClaw config, AgentOS config, identity/bootstrap files, manifest metadata, cache invalidation. | `agents.create` | Yes | Low for AgentOS needs | No | Yes | Gateway schema does not accept AgentOS `id`, `agentDir`, or `model`; using it would change agent ids, directory layout, model assignment, and snapshot shape. | Regression test keeps `addAgent` on CLI fallback. |
+| Agent create | `lib/openclaw/application/agent-service.ts`, `lib/openclaw/client/native-ws-gateway-client.ts`, `lib/openclaw/client/cli-gateway-client.ts` | `openclaw agents add <id> --workspace --agent-dir --model --non-interactive --json` | Creates the OpenClaw agent, then writes AgentOS policy skill files, workspace skill markdown, config list entry, identity files, bootstrap files, workspace manifest metadata, and syncs policy skills. | Agent directory, OpenClaw config, AgentOS config, identity/bootstrap files, manifest metadata, cache invalidation. | `agents.create`, `agents.add` | Yes | Medium | Yes, Gateway-first | Yes | AgentOS still owns higher-level workspace metadata and policy side effects around the native create call. | Gateway-first lifecycle tests plus application service validation tests. |
 | Agent update | `lib/openclaw/application/agent-service.ts`, `lib/openclaw/domains/agent-config.ts` | Config file writes plus identity/bootstrap helpers | Updates model-only fast path or full identity/policy/tool/skill/manifest metadata path. | OpenClaw config list, identity file, policy skill files, workspace manifest metadata, cache invalidation. | `agents.update` | Yes | Medium for model/name only, low for full AgentOS update | No | Yes | Partial Gateway update would diverge from AgentOS manifest/config side effects and could leave snapshots inconsistent. | Existing agent-service validation tests plus fallback-required test. |
-| Agent delete | `lib/openclaw/application/agent-service.ts`, `lib/openclaw/client/cli-gateway-client.ts` | `openclaw agents delete <id> --force --json` | Deletes OpenClaw agent, prunes config entry, removes workspace manifest metadata, removes policy skill folder, clears runtime history. | OpenClaw config/files, AgentOS config/manifest cleanup, skill cleanup, runtime cache clear. | `agents.delete` | Yes | Medium | No | Yes | Gateway delete response only confirms agent removal and removed bindings; AgentOS still needs exact cleanup semantics and delete-file behavior parity. | Regression test keeps `deleteAgent` on CLI fallback. |
-| Agent non-streaming turn | `lib/openclaw/client/cli-gateway-client.ts`, `app/api/agents/[agentId]/chat/route.ts`, mission dispatch domains | `openclaw agent --agent --session-id --message --thinking --timeout --json` | Runs an agent turn, records transcript/session side effects used by AgentOS polling and runtime cards, returns existing payload shape. | Session transcript files, session store, runtime metadata, model usage, possible delivery side effects. | `agent`, `agent.wait`, `sessions.send` | Yes | Low for end-to-end AgentOS parity | No | Yes | Gateway method exists, but local runtime could not confirm final payload, transcript write timing, session visibility, timeout, cancellation, and metadata parity without valid Gateway auth. | Regression test keeps `runAgentTurn` on CLI fallback; real chat stream smoke validates current behavior. |
-| Agent streaming turn | `lib/openclaw/client/cli-gateway-client.ts`, chat route polling | `runOpenClawJsonStream(openclaw agent ... --json)` | UI streams status/assistant/done events and polls transcript files for partial/final text. | JSON stream ordering, transcript polling, abort handling, timeout behavior, final payload normalization. | `agent`, session subscribe/send methods | Partial | Low | No | Yes | Streaming event contract is not proven equivalent. Incorrect migration would break visible chat streaming, partial output, abort, and session/runtime visibility. | Regression test keeps `streamAgentTurn` on CLI fallback. |
+| Agent delete | `lib/openclaw/application/agent-service.ts`, `lib/openclaw/client/native-ws-gateway-client.ts`, `lib/openclaw/client/cli-gateway-client.ts` | `openclaw agents delete <id> --force --json` | Deletes OpenClaw agent, prunes config entry, removes workspace manifest metadata, removes policy skill folder, clears runtime history. | OpenClaw config/files, AgentOS config/manifest cleanup, skill cleanup, runtime cache clear. | `agents.delete` | Yes | Medium | Yes, Gateway-first | Yes | Gateway delete removes the OpenClaw agent; AgentOS cleanup remains application-owned. | Gateway-first lifecycle tests plus application service validation tests. |
+| Agent non-streaming turn | `lib/openclaw/client/native-ws-gateway-client.ts`, `lib/openclaw/domains/mission-dispatch-workflow.ts`, `app/api/agents/[agentId]/chat/route.ts` | `openclaw agent --agent --session-id --message --thinking --timeout --json` | Mission dispatch uses native `chat.send` when advertised; direct chat stream can still use CLI stream fallback where needed. | Session transcript files, session store, runtime metadata, model usage, possible delivery side effects. | `chat.send`, `sessions.chat.send`, `chat.abort` | Yes | Medium | Yes, Gateway-first for mission dispatch/abort | Yes | Older Gateways or eventless Gateways still need the CLI runner/transcript path to preserve snapshot behavior. | Native-vs-fallback mission dispatch tests and existing chat/runtime tests. |
+| Agent streaming turn | `lib/openclaw/client/cli-gateway-client.ts`, `lib/openclaw/application/event-bridge-service.ts`, chat route polling | `runOpenClawJsonStream(openclaw agent ... --json)` | UI streams status/assistant/done events and polls transcript files for partial/final text; Gateway events are bridged into runtime records when `events.subscribe` is available. | JSON stream ordering, transcript polling, abort handling, timeout behavior, final payload normalization. | `events.subscribe`, session subscribe/send methods | Partial | Medium | Partially, event bridge only | Yes | Event bridge improves Gateway-first runtime visibility, but direct chat streaming still needs CLI/session transcript fallback on unsupported Gateway versions. | Event normalization tests plus existing chat/runtime tests. |
 | Transcript/session reads | `mission-control-service.ts`, `domains/session-catalog.ts`, `domains/runtime-transcript.ts` | `sessions.list` through Gateway-first plus filesystem fallback | Builds runtime/task/session cards from session catalogs and transcript files. | Reads OpenClaw state files and transcript JSONL. | `sessions.list`, `sessions.preview`, `sessions.resolve`, `sessions.get` | Yes | Medium | Already partially Gateway-first for list | Yes for transcript file parsing | AgentOS runtime cards depend on local transcript normalization and mission metadata merging. | Existing mission-control/runtime tests. |
 | Channel status/read | `lib/openclaw/client/native-ws-gateway-client.ts` | Previously no typed adapter method; status could only be reached through raw/generic gateway call or CLI channel command. | Read-only channel/provider health/status. | None beyond Gateway read/probe. | `channels.status` | Yes | High for read/status | Yes | Yes on Gateway auth/pairing failure | Low, because it is read-only and normalized at the client boundary. | Added native WS channel status success and malformed fallback tests. |
 | Telegram discovery | `lib/openclaw/domains/channels.ts` | `openclaw channels logs --channel telegram --json --lines`, `openclaw config get channels.telegram.groups --json`, local state reads | Discovers recent/configured groups, merges allowlist/config state, avoids crashes without credentials. | Reads gateway logs, config, local pairing/account files. | `channels.status` only for account status; no confirmed route-log equivalent | Partial | Low | No | Yes | Replacing log/config parsing with status would remove group route discovery and change UI choices. | Existing channel-service/provider validation tests. |
@@ -52,7 +56,7 @@ Confirmed Gateway methods relevant to this pass:
 
 ## Migrated In This Pass
 
-`channels.status` is now available as a typed Gateway-first operation behind `OpenClawGatewayClient` and `OpenClawAdapter`.
+`channels.status`, agent create/delete, mission dispatch/abort, config patch/apply, and Gateway event subscription are now available as Gateway-first operations behind `OpenClawGatewayClient` and `OpenClawAdapter`.
 
 Files changed:
 
@@ -61,13 +65,17 @@ Files changed:
 - `lib/openclaw/client/cli-gateway-client.ts`
 - `lib/openclaw/client/native-ws-gateway-client.ts`
 - `lib/openclaw/adapter/openclaw-adapter.ts`
+- `lib/openclaw/application/capability-matrix-service.ts`
+- `lib/openclaw/application/event-bridge-service.ts`
+- `lib/openclaw/domains/mission-dispatch-workflow.ts`
 - `tests/openclaw-native-ws-gateway-client.test.ts`
 - `tests/openclaw-adapter.test.ts`
+- `tests/openclaw-gateway-first-contract.test.ts`
 - `scripts/openclaw-runtime-smoke.mjs`
 
 Behavior:
 
-- Native WS calls `channels.status` first.
+- Native WS calls Gateway lifecycle, mission, event, channel, catalog, status, and config methods first when available.
 - The response is schema-validated and unknown fields are tolerated.
 - Malformed Gateway responses fall back to the CLI fallback client and record diagnostics.
 - If native Gateway auth is unavailable, existing CLI fallback behavior remains.
@@ -75,12 +83,10 @@ Behavior:
 
 ## CLI Fallback Required
 
-These operations intentionally remain CLI-backed:
+These operations intentionally retain CLI fallback:
 
-- `addAgent`
-- `deleteAgent`
-- `runAgentTurn`
 - `streamAgentTurn`
+- agent lifecycle and mission dispatch when Gateway methods are unsupported, unreachable, malformed, or scope-limited
 - Agent config read/write/sync helpers in `domains/agent-config.ts`
 - Channel log/config route discovery in `domains/channels.ts`
 - Channel and surface provisioning orchestration in `application/channel-service.ts`
@@ -88,8 +94,8 @@ These operations intentionally remain CLI-backed:
 
 Reasons:
 
-- Gateway mutation schemas do not match AgentOS' existing create/update inputs and side effects.
-- Agent run/streaming method names exist, but transcript/session side effects and streaming event semantics were not proven equivalent in this environment.
+- AgentOS owns workspace metadata, policy skills, bootstrap files, local session-store coordination, and registry side effects around Gateway calls.
+- Direct streaming still depends on transcript/session behavior when `events.subscribe` is unavailable or incomplete.
 - Channel/provider provisioning has AgentOS registry, routing, session-store, and credential/setup side effects that are not represented by a single confirmed Gateway method.
 - Local `openclaw gateway call` probes are blocked by pairing in this environment, so runtime confirmation is limited without a valid Gateway token/device auth path.
 
@@ -115,8 +121,8 @@ Latest runtime smoke result:
 
 - `pnpm typecheck`: passed.
 - `pnpm lint`: passed.
-- `pnpm test`: passed, 108 tests.
-- `pnpm build`: sandboxed run failed with the known Turbopack worker/port `Operation not permitted` error; rerun outside the sandbox passed.
+- `pnpm test`: passed, 128 tests.
+- `pnpm build`: passed.
 - `node scripts/openclaw-runtime-smoke.mjs`: sandboxed localhost fetch failed; rerun outside the sandbox passed all non-blocked checks and reported channel/provider status as blocked by Gateway pairing/auth.
 
 ## SDK Replacement Point
@@ -129,7 +135,7 @@ A future SDK-backed client should implement the existing `OpenClawGatewayClient`
 
 ## Remaining Risks
 
-- Agent run/streaming is still the highest-risk migration area because AgentOS depends on transcript polling, session runtime cards, partial output, final payload shape, timeout behavior, and abort behavior.
-- Agent create/update/delete remain fragile against OpenClaw CLI changes because the confirmed Gateway schemas do not support AgentOS' current `id`/`agentDir`/model creation contract.
+- Direct chat streaming remains the highest-risk migration area because AgentOS depends on transcript polling, session runtime cards, partial output, final payload shape, timeout behavior, and abort behavior.
+- Agent update remains application/config-backed because AgentOS metadata and OpenClaw config side effects exceed a simple Gateway mutation.
 - Channel/provider provisioning remains CLI/application-service backed because it spans credentials, OpenClaw config, AgentOS registry metadata, managed route sync, and local session-store updates.
 - Native WS successful-auth runtime validation still requires a real Gateway token/password or a supported device-auth path.

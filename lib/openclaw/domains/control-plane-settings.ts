@@ -3,10 +3,16 @@ import os from "node:os";
 import path from "node:path";
 
 import type { OpenClawRuntimeSmokeTest } from "@/lib/agentos/contracts";
+import {
+  buildOpenAiCodexAuthLoginCommand,
+  isOpenAiCodexAuthFailure,
+  resolveOpenAiCodexAuthRecoveryMessage
+} from "@/lib/openclaw/model-auth-errors";
 
 const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const missionControlSettingsPath = path.join(missionControlRootPath, "settings.json");
 const runtimeSmokeTestTtlMs = 12 * 60 * 60 * 1000;
+const providerAuthSmokeTestTtlMs = 5 * 60 * 1000;
 
 export type RuntimeSmokeTestCacheEntry = {
   status: "passed" | "failed";
@@ -129,7 +135,7 @@ export function mapRuntimeSmokeTestEntry(
   agentId: string | null,
   entry: RuntimeSmokeTestCacheEntry | null
 ): OpenClawRuntimeSmokeTest {
-  if (!entry || !agentId) {
+  if (!entry || !agentId || isStaleProviderAuthSmokeTestFailure(entry)) {
     return {
       status: "not-run",
       checkedAt: null,
@@ -146,7 +152,7 @@ export function mapRuntimeSmokeTestEntry(
     agentId,
     runId: entry.runId ?? null,
     summary: entry.summary ?? null,
-    error: entry.error ?? null
+    error: normalizeRuntimeSmokeTestError(entry.error ?? null)
   };
 }
 
@@ -190,6 +196,33 @@ export async function persistRuntimeSmokeTest(result: OpenClawRuntimeSmokeTest) 
   });
 }
 
+export async function clearOpenAiCodexAuthRuntimeSmokeFailures() {
+  const settings = await readMissionControlSettings();
+  const smokeTests = settings.runtimePreflight?.smokeTests ?? {};
+  const nextSmokeTests = Object.fromEntries(
+    Object.entries(smokeTests).filter(([, entry]) => {
+      return !(entry.status === "failed" && isOpenAiCodexAuthFailure(entry.error ?? ""));
+    })
+  );
+
+  if (Object.keys(nextSmokeTests).length === Object.keys(smokeTests).length) {
+    return false;
+  }
+
+  await writeMissionControlSettings({
+    ...(settings.workspaceRoot ? { workspaceRoot: settings.workspaceRoot } : {}),
+    ...(Object.keys(nextSmokeTests).length > 0
+      ? {
+          runtimePreflight: {
+            smokeTests: nextSmokeTests
+          }
+        }
+      : {})
+  });
+
+  return true;
+}
+
 function listRuntimeSmokeTestEntries(settings: MissionControlSettings) {
   return Object.entries(settings.runtimePreflight?.smokeTests ?? {}).sort((left, right) => {
     const leftTs = Date.parse(left[1].checkedAt);
@@ -230,7 +263,9 @@ function normalizeRuntimePreflightSettings(value: unknown): MissionControlSettin
         checkedAt,
         ...(typeof normalizedEntry.runId === "string" ? { runId: normalizedEntry.runId } : {}),
         ...(typeof normalizedEntry.summary === "string" ? { summary: normalizedEntry.summary } : {}),
-        ...(typeof normalizedEntry.error === "string" ? { error: normalizedEntry.error } : {})
+        ...(typeof normalizedEntry.error === "string"
+          ? { error: normalizeRuntimeSmokeTestError(normalizedEntry.error) ?? normalizedEntry.error }
+          : {})
       };
       return result;
     },
@@ -238,6 +273,25 @@ function normalizeRuntimePreflightSettings(value: unknown): MissionControlSettin
   );
 
   return Object.keys(smokeTests).length > 0 ? { smokeTests } : undefined;
+}
+
+function normalizeRuntimeSmokeTestError(error: string | null) {
+  if (!error) {
+    return null;
+  }
+
+  return isOpenAiCodexAuthFailure(error)
+    ? resolveOpenAiCodexAuthRecoveryMessage(buildOpenAiCodexAuthLoginCommand("openclaw"))
+    : error;
+}
+
+function isStaleProviderAuthSmokeTestFailure(entry: RuntimeSmokeTestCacheEntry) {
+  if (entry.status !== "failed" || !isOpenAiCodexAuthFailure(entry.error ?? "")) {
+    return false;
+  }
+
+  const checkedAt = Date.parse(entry.checkedAt);
+  return Number.isFinite(checkedAt) && Date.now() - checkedAt > providerAuthSmokeTestTtlMs;
 }
 
 function expandHomeRelativePath(value: string) {

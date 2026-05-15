@@ -1,6 +1,11 @@
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import {
+  buildOpenAiCodexAuthLoginCommand,
+  isOpenAiCodexAuthFailure,
+  resolveOpenAiCodexAuthRecoveryMessage
+} from "@/lib/openclaw/model-auth-errors";
 
-type SmokeTestFailureKind = "model-route" | "plugin-runtime";
+type SmokeTestFailureKind = "model-route" | "plugin-runtime" | "provider-auth";
 
 type SmokeTestFailureClassification = {
   kind: SmokeTestFailureKind;
@@ -34,13 +39,23 @@ export function classifyOpenClawRuntimeSmokeTestFailure(output: string): SmokeTe
   }
 
   if (
-    /Unknown model:\s*openai-codex\/gpt-5\.4-mini/i.test(normalized) ||
+    isOpenAiCodexAuthFailure(normalized)
+  ) {
+    return {
+      kind: "provider-auth",
+      detail: resolveOpenAiCodexAuthRecoveryMessage(buildOpenAiCodexAuthLoginCommand("openclaw"))
+    };
+  }
+
+  if (
+    /Unknown model:\s*openai-codex\/gpt-[^\s.]+(?:[-.][^\s.]*)*/i.test(normalized) ||
+    /Do not use `?openai-codex\/gpt-\*`?/i.test(normalized) ||
     /not supported by the OpenAI Codex OAuth route/i.test(normalized)
   ) {
     return {
       kind: "model-route",
       detail:
-        "OpenClaw rejected the active Codex model route. The model can exist in Codex, but this OpenClaw provider path could not run it. Try `openai-codex/gpt-5.5`, or use `openai/gpt-5.4-mini` with an OpenAI API key."
+        "OpenClaw rejected a legacy Codex model route. Use canonical `openai/gpt-5.5` model refs with the Codex harness enabled, then run `openclaw doctor --fix` to migrate stale `openai-codex/gpt-*` config entries."
     };
   }
 
@@ -63,7 +78,11 @@ export function buildOpenClawRuntimeSmokeTestRecoveryCommand(command: string, ou
   const classification = classifyOpenClawRuntimeSmokeTestFailure(output);
 
   if (classification?.kind === "model-route") {
-    return `${command} models set openai-codex/gpt-5.5`;
+    return `${command} doctor --fix && ${command} gateway restart && ${command} gateway status --deep`;
+  }
+
+  if (classification?.kind === "provider-auth") {
+    return buildOpenAiCodexAuthLoginCommand(command);
   }
 
   return `${command} doctor --fix && ${command} gateway restart && ${command} gateway status --deep`;

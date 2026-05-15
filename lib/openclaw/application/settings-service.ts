@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { getOpenClawAdapter, type OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   clearMissionControlRuntimeHistoryCache,
   getMissionControlSnapshot,
@@ -23,6 +23,7 @@ import {
   NativeWsOpenClawGatewayClient
 } from "@/lib/openclaw/client/native-ws-gateway-client";
 import { runOpenClawJson } from "@/lib/openclaw/cli";
+import { isOpenClawInvalidConfigError } from "@/lib/openclaw/command-failure";
 import type {
   GatewayAuthSecretState,
   GatewayNativeAuthCredentialKind,
@@ -70,6 +71,16 @@ type GatewayDeviceAuthToken = {
   scopes: string[];
 };
 
+type GatewayAuthConfigSnapshot = {
+  config: Record<string, unknown>;
+  resolved: Record<string, unknown>;
+};
+
+type GatewayAuthConfigSnapshotResult = {
+  snapshot: GatewayAuthConfigSnapshot | null;
+  invalidConfig: boolean;
+};
+
 function invalidateSettingsSnapshot() {
   invalidateMissionControlSnapshotCache();
   clearMissionControlRuntimeHistoryCache();
@@ -110,19 +121,37 @@ export async function getGatewayNativeAuthStatus(
   const cwd = options.cwd ?? process.cwd();
   const checkedAt = (options.now ?? (() => new Date()))().toISOString();
   const adapter = getOpenClawAdapter();
+  const configSnapshotResult = await readGatewayAuthConfigSnapshot(adapter);
+  const configSnapshot = configSnapshotResult.snapshot;
   const [
     mode,
     authToken,
     authPassword,
     remoteToken,
     remotePassword
-  ] = await Promise.all([
-    readConfigString("gateway.auth.mode"),
-    readConfigSecretState("gateway.auth.token"),
-    readConfigSecretState("gateway.auth.password"),
-    readConfigSecretState("gateway.remote.token"),
-    readConfigSecretState("gateway.remote.password")
-  ]);
+  ] = configSnapshot
+    ? [
+        readConfigStringFromSnapshot(configSnapshot, "gateway.auth.mode"),
+        classifyGatewaySecret(readConfigValueFromSnapshot(configSnapshot, "gateway.auth.token")),
+        classifyGatewaySecret(readConfigValueFromSnapshot(configSnapshot, "gateway.auth.password")),
+        classifyGatewaySecret(readConfigValueFromSnapshot(configSnapshot, "gateway.remote.token")),
+        classifyGatewaySecret(readConfigValueFromSnapshot(configSnapshot, "gateway.remote.password"))
+      ]
+    : configSnapshotResult.invalidConfig
+      ? [
+          null,
+          "unknown" as GatewayAuthSecretState,
+          "unknown" as GatewayAuthSecretState,
+          "unknown" as GatewayAuthSecretState,
+          "unknown" as GatewayAuthSecretState
+        ]
+    : await Promise.all([
+        readConfigString("gateway.auth.mode"),
+        readConfigSecretState("gateway.auth.token"),
+        readConfigSecretState("gateway.auth.password"),
+        readConfigSecretState("gateway.remote.token"),
+        readConfigSecretState("gateway.remote.password")
+      ]);
   const disabledByEnv = (options.isNativeDisabled ?? isCliGatewayClientForcedByEnv)();
   const envToken = Boolean(
     env.AGENTOS_OPENCLAW_GATEWAY_TOKEN?.trim() || env.OPENCLAW_GATEWAY_TOKEN?.trim()
@@ -415,6 +444,73 @@ function updateEnvFileCredential(
 
 function quoteEnvValue(value: string) {
   return JSON.stringify(value);
+}
+
+async function readGatewayAuthConfigSnapshot(adapter: OpenClawAdapter): Promise<GatewayAuthConfigSnapshotResult> {
+  try {
+    const payload = await adapter.call<unknown>("config.get", {}, {
+      timeoutMs: GATEWAY_NATIVE_AUTH_CHECK_TIMEOUT_MS
+    });
+
+    return {
+      snapshot: normalizeGatewayConfigGetPayload(payload),
+      invalidConfig: false
+    };
+  } catch (error) {
+    return {
+      snapshot: null,
+      invalidConfig: isOpenClawInvalidConfigError(error)
+    };
+  }
+}
+
+function normalizeGatewayConfigGetPayload(payload: unknown): GatewayAuthConfigSnapshot | null {
+  if (!isObjectRecord(payload)) {
+    return null;
+  }
+
+  const config = isObjectRecord(payload.config) ? payload.config : null;
+  const resolved = isObjectRecord(payload.resolved) ? payload.resolved : null;
+
+  if (!config && !resolved) {
+    return null;
+  }
+
+  return {
+    config: config ?? {},
+    resolved: resolved ?? {}
+  };
+}
+
+function readConfigStringFromSnapshot(snapshot: GatewayAuthConfigSnapshot, path: string) {
+  const value = readConfigValueFromSnapshot(snapshot, path);
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readConfigValueFromSnapshot(snapshot: GatewayAuthConfigSnapshot, path: string) {
+  const value = readConfigPath(snapshot.config, path) ?? readConfigPath(snapshot.resolved, path);
+  return value === undefined ? null : value;
+}
+
+function readConfigPath(record: Record<string, unknown>, path: string) {
+  if (Object.hasOwn(record, path)) {
+    return record[path];
+  }
+
+  let current: unknown = record;
+  for (const segment of path.split(".")) {
+    if (!isObjectRecord(current) || !Object.hasOwn(current, segment)) {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return current;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function readGatewayAuthEnvFileState(cwd: string): Promise<GatewayNativeAuthStatus["envFile"]> {

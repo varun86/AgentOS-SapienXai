@@ -307,6 +307,8 @@ export interface OpenClawAddAgentInput {
   workspace: string;
   agentDir: string;
   model?: string | null;
+  bindings?: unknown;
+  skills?: string[];
 }
 
 export interface OpenClawAgentTurnInput {
@@ -315,7 +317,22 @@ export interface OpenClawAgentTurnInput {
   message: string;
   thinking?: "off" | "minimal" | "low" | "medium" | "high";
   timeoutSeconds?: number;
+  workspace?: string | null;
+  dispatchId?: string | null;
 }
+
+export interface OpenClawAbortTurnInput {
+  runId?: string | null;
+  sessionId?: string | null;
+  agentId?: string | null;
+  reason?: string | null;
+}
+
+export type OpenClawConfigSchemaPayload = Record<string, unknown> & {
+  schema?: unknown;
+  hash?: string;
+  version?: string;
+};
 
 export interface OpenClawGatewayClient {
   getStatus(options?: OpenClawCommandOptions): Promise<StatusPayload>;
@@ -343,6 +360,7 @@ export interface OpenClawGatewayClient {
   ): Promise<TPayload>;
   hasConfig(path: string, options?: OpenClawCommandOptions): Promise<boolean>;
   getConfig<TPayload>(path: string, options?: OpenClawCommandOptions): Promise<TPayload | null>;
+  getConfigSchema?(options?: OpenClawCommandOptions): Promise<OpenClawConfigSchemaPayload | null>;
   setConfig(
     path: string,
     value: unknown,
@@ -355,6 +373,7 @@ export interface OpenClawGatewayClient {
     input: OpenClawAgentTurnInput,
     options?: OpenClawCommandOptions
   ): Promise<MissionCommandPayload>;
+  abortAgentTurn?(input: OpenClawAbortTurnInput, options?: OpenClawCommandOptions): Promise<MissionCommandPayload>;
   streamAgentTurn(
     input: OpenClawAgentTurnInput,
     callbacks?: OpenClawStreamCallbacks,

@@ -15,6 +15,7 @@ import type {
   MissionControlSnapshot,
   ModelReadiness,
   OpenClawBinarySelection,
+  OpenClawCapabilityMatrix,
   OpenClawCommandDiagnostic
 } from "@/lib/openclaw/types";
 
@@ -73,6 +74,7 @@ export function buildGatewayDiagnostics(input: {
   runtimeDiagnostics: MissionControlSnapshot["diagnostics"]["runtime"];
   openClawBinarySelection: OpenClawBinarySelection;
   modelReadiness: ModelReadiness;
+  capabilityMatrix?: OpenClawCapabilityMatrix;
   commandHistory?: OpenClawCommandDiagnostic[];
   issues: string[];
   versionDiagnostics: ReturnType<typeof buildVersionDiagnostics>;
@@ -106,6 +108,7 @@ export function buildGatewayDiagnostics(input: {
     serviceLabel: input.gatewayStatus?.service?.label,
     openClawBinarySelection: input.openClawBinarySelection,
     modelReadiness: input.modelReadiness,
+    capabilityMatrix: input.capabilityMatrix,
     runtime: input.runtimeDiagnostics,
     commandHistory: input.commandHistory,
     securityWarnings: input.securityWarnings,

@@ -20,6 +20,12 @@ import {
   persistRuntimeSmokeTest,
   readMissionControlSettings
 } from "@/lib/openclaw/domains/control-plane-settings";
+import {
+  buildOpenAiCodexAuthLoginCommand,
+  isOpenAiCodexAuthFailure,
+  resolveOpenAiCodexAuthRecoveryMessage
+} from "@/lib/openclaw/model-auth-errors";
+import { resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { openClawStateRootPath } from "@/lib/openclaw/state/paths";
 import { inspectOpenClawRuntimeState } from "@/lib/openclaw/state/runtime-state";
 import type {
@@ -131,13 +137,19 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
     invalidateRuntimeSnapshotCache();
     return result;
   } catch (error) {
+    const rawError = stringifyCommandFailure(error) || "OpenClaw runtime smoke test failed.";
+    const errorMessage = isOpenAiCodexAuthFailure(rawError)
+      ? resolveOpenAiCodexAuthRecoveryMessage(
+          buildOpenAiCodexAuthLoginCommand(await resolveOpenClawBin().catch(() => "openclaw"))
+        )
+      : rawError;
     const result: OpenClawRuntimeSmokeTest = {
       status: "failed",
       checkedAt: new Date().toISOString(),
       agentId,
       runId: null,
       summary: null,
-      error: stringifyCommandFailure(error) || "OpenClaw runtime smoke test failed."
+      error: errorMessage
     };
 
     await persistRuntimeSmokeTest(result);

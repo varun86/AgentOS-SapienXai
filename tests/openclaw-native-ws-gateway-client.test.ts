@@ -21,7 +21,9 @@ type SentFrame = {
 
 class FallbackGatewayClient implements OpenClawGatewayClient {
   calls: Array<{ method: string; params?: Record<string, unknown>; options?: OpenClawCommandOptions }> = [];
+  configCalls: string[] = [];
   config = new Map<string, unknown>();
+  failConfigWithInvalidConfig = false;
   failStatus = false;
   statusPayload: Record<string, unknown> = {};
 
@@ -102,7 +104,18 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
   }
 
   async getConfig<TPayload>(path: string) {
+    this.configCalls.push(path);
+    if (this.failConfigWithInvalidConfig) {
+      throw new Error(
+        "OpenClaw config is invalid\nStatus, health, logs, and doctor commands still run with invalid config."
+      );
+    }
+
     return (this.config.has(path) ? this.config.get(path) : null) as TPayload | null;
+  }
+
+  async getConfigSchema() {
+    return null;
   }
 
   async hasConfig() {
@@ -129,6 +142,11 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
 
   async runAgentTurn() {
     this.calls.push({ method: "runAgentTurn" });
+    return {};
+  }
+
+  async abortAgentTurn() {
+    this.calls.push({ method: "abortAgentTurn" });
     return {};
   }
 
@@ -276,6 +294,8 @@ test("native WS gateway client uses Gateway first for typed status requests", as
     platform: process.platform,
     mode: "cli"
   });
+  assert.equal(sentFrames[0]?.params.minProtocol, 4);
+  assert.equal(sentFrames[0]?.params.maxProtocol, 4);
   assert.deepEqual(sentFrames[0]?.params.scopes, [
     "operator.admin",
     "operator.read",
@@ -422,6 +442,70 @@ test("native WS gateway client prefers remote auth for remote Gateway URLs", asy
   assert.deepEqual(sentFrames[0]?.params.auth, {
     token: "remote-token"
   });
+});
+
+test("native WS gateway client uses env token without config secret probes", async () => {
+  const previousToken = process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN;
+  process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN = "env-token";
+  const fallback = new FallbackGatewayClient();
+  fallback.failConfigWithInvalidConfig = true;
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 3 } : { version: "9.9.9" }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  try {
+    await client.getStatus();
+
+    assert.deepEqual(sentFrames[0]?.params.auth, {
+      token: "env-token"
+    });
+    assert.deepEqual(fallback.configCalls, []);
+  } finally {
+    if (previousToken === undefined) {
+      delete process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN;
+    } else {
+      process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN = previousToken;
+    }
+  }
+});
+
+test("native WS gateway client stops config auth probing after invalid config", async () => {
+  const fallback = new FallbackGatewayClient();
+  fallback.failConfigWithInvalidConfig = true;
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 3 } : { version: "9.9.9" }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await client.getStatus();
+
+  assert.equal(sentFrames[0]?.params.auth, undefined);
+  assert.deepEqual(fallback.configCalls, ["gateway.auth.token"]);
 });
 
 test("native WS gateway client does not send redacted OpenClaw secrets", async () => {
@@ -784,9 +868,16 @@ test("native WS gateway client mutates config through Gateway snapshots", async 
   const result = await client.setConfig("gateway.remote.url", "ws://127.0.0.1:18789");
 
   assert.match(result.stdout, /"ok":true/);
-  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "config.get", "connect", "config.set"]);
-  assert.deepEqual(sentFrames[3]?.params, {
-    raw: JSON.stringify({ gateway: { remote: { url: "ws://127.0.0.1:18789" } } }),
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "config.get",
+    "connect",
+    "config.schema",
+    "connect",
+    "config.patch"
+  ]);
+  assert.deepEqual(sentFrames[5]?.params, {
+    patches: [{ op: "replace", path: "/gateway/remote/url", value: "ws://127.0.0.1:18789" }],
     baseHash: "hash-1"
   });
   assert.deepEqual(fallback.calls, []);
@@ -901,7 +992,7 @@ test("native WS gateway client classifies unknown Gateway methods as unsupported
   assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.kind, "unsupported");
 });
 
-test("native WS gateway client keeps unsupported critical workflows on CLI fallback", async () => {
+test("native WS gateway client uses Gateway first for critical workflows", async () => {
   const fallback = new FallbackGatewayClient();
   const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
     globalThis.queueMicrotask(() => {
@@ -909,7 +1000,7 @@ test("native WS gateway client keeps unsupported critical workflows on CLI fallb
         type: "res",
         id: frame.id,
         ok: true,
-        payload: { protocol: 3 }
+        payload: frame.method === "connect" ? { protocol: 3 } : { runId: "run-1", status: "running" }
       });
     });
   });
@@ -923,13 +1014,17 @@ test("native WS gateway client keeps unsupported critical workflows on CLI fallb
   await client.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" });
   await client.deleteAgent("agent-1");
   await client.runAgentTurn({ agentId: "agent-1", message: "hello" });
-  await client.streamAgentTurn({ agentId: "agent-1", message: "hello" });
+  await client.abortAgentTurn({ runId: "run-1", reason: "stop" });
 
-  assert.deepEqual(sentFrames, []);
-  assert.deepEqual(fallback.calls.map((call) => call.method), [
-    "addAgent",
-    "deleteAgent",
-    "runAgentTurn",
-    "streamAgentTurn"
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "agents.create",
+    "connect",
+    "agents.delete",
+    "connect",
+    "chat.send",
+    "connect",
+    "chat.abort"
   ]);
+  assert.deepEqual(fallback.calls, []);
 });

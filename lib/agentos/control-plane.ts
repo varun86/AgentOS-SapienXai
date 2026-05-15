@@ -47,7 +47,7 @@ import { normalizeControlPlaneSnapshot } from "@/lib/agentos/acl/openclaw";
 import type { ControlPlaneSnapshot } from "@/lib/agentos/contracts";
 
 export async function getControlPlaneSnapshot(
-  options: { force?: boolean; includeHidden?: boolean } = {}
+  options: { force?: boolean; includeHidden?: boolean; loadProfile?: "interactive" | "refresh" | "system" } = {}
 ): Promise<ControlPlaneSnapshot> {
   const snapshot = await getOpenClawMissionControlSnapshot(options);
   return normalizeControlPlaneSnapshot(snapshot);

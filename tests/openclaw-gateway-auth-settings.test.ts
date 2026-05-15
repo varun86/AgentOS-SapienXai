@@ -58,6 +58,9 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
     async getConfig<TPayload>(path: string) {
       return (Object.hasOwn(mutableConfig, path) ? mutableConfig[path] : null) as TPayload | null;
     },
+    async getConfigSchema() {
+      return null;
+    },
     async hasConfig(path: string) {
       return Object.hasOwn(mutableConfig, path);
     },
@@ -75,6 +78,9 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
       return { stdout: "", stderr: "", code: 0 };
     },
     async runAgentTurn() {
+      return {};
+    },
+    async abortAgentTurn() {
       return {};
     },
     async streamAgentTurn() {
@@ -165,6 +171,33 @@ test("Gateway native auth status reports ready when env credentials authenticate
   assert.equal(status.env.token, true);
   assert.equal(status.config.authToken, "redacted");
   assert.equal(status.recommendation, "Native OpenClaw Gateway WS auth is ready.");
+});
+
+test("Gateway native auth status does not fan out config probes after invalid config", async () => {
+  let getConfigCalls = 0;
+  const adapter = createSettingsAdapter();
+  setOpenClawAdapterForTesting({
+    ...adapter,
+    async call() {
+      throw new Error(
+        "OpenClaw config is invalid\nStatus, health, logs, and doctor commands still run with invalid config."
+      );
+    },
+    async getConfig() {
+      getConfigCalls += 1;
+      return null;
+    }
+  });
+
+  const status = await getGatewayNativeAuthStatus({
+    env: {},
+    nativeProbe: async () => ({ version: "9.9.9" })
+  });
+
+  assert.equal(getConfigCalls, 0);
+  assert.equal(status.config.authToken, "unknown");
+  assert.equal(status.config.authPassword, "unknown");
+  assert.equal(status.native.ok, true);
 });
 
 test("Gateway native auth status directs scope-limited failures to local access repair", async () => {

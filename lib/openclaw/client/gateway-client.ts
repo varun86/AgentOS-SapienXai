@@ -15,8 +15,10 @@ export type {
   OpenClawPluginListPayload,
   OpenClawSkillListPayload,
   OpenClawAddAgentInput,
+  OpenClawAbortTurnInput,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
+  OpenClawConfigSchemaPayload,
   OpenClawListModelsInput,
   OpenClawListSessionsInput,
   OpenClawGatewayClient,
@@ -36,6 +38,7 @@ export {
 } from "@/lib/openclaw/client/native-ws-gateway-client";
 export type {
   OpenClawGatewayFallbackDiagnostic,
+  OpenClawGatewayEventSubscription,
   NativeWsOpenClawGatewayClientOptions,
   WebSocketFactory
 } from "@/lib/openclaw/client/native-ws-gateway-client";

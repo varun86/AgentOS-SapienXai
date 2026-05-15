@@ -9,8 +9,10 @@ import type {
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawAbortTurnInput,
   OpenClawChannelStatusInput,
   OpenClawChannelStatusPayload,
+  OpenClawConfigSchemaPayload,
   OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
@@ -44,6 +46,7 @@ export interface OpenClawAdapter {
     noProbe?: boolean;
   }): Promise<OpenClawModelScanPayload>;
   getConfig<TPayload>(path: string, options?: OpenClawCommandOptions): Promise<TPayload | null>;
+  getConfigSchema(options?: OpenClawCommandOptions): Promise<OpenClawConfigSchemaPayload | null>;
   hasConfig(path: string, options?: OpenClawCommandOptions): Promise<boolean>;
   setConfig(
     path: string,
@@ -57,6 +60,7 @@ export interface OpenClawAdapter {
   ): Promise<CommandResult>;
   deleteAgent(agentId: string, options?: OpenClawCommandOptions): Promise<CommandResult>;
   runAgentTurn(input: OpenClawAgentTurnInput, options?: OpenClawCommandOptions): Promise<MissionCommandPayload>;
+  abortAgentTurn(input: OpenClawAbortTurnInput, options?: OpenClawCommandOptions): Promise<MissionCommandPayload>;
   streamAgentTurn(
     input: OpenClawAgentTurnInput,
     callbacks?: OpenClawStreamCallbacks,
@@ -121,6 +125,10 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
     return this.getClient().getConfig<TPayload>(path, options);
   }
 
+  getConfigSchema(options: OpenClawCommandOptions = {}) {
+    return this.getClient().getConfigSchema?.(options) ?? Promise.resolve(null);
+  }
+
   hasConfig(path: string, options: OpenClawCommandOptions = {}) {
     return this.getClient().hasConfig(path, options);
   }
@@ -143,6 +151,13 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
 
   runAgentTurn(input: OpenClawAgentTurnInput, options: OpenClawCommandOptions = {}) {
     return this.getClient().runAgentTurn(input, options);
+  }
+
+  abortAgentTurn(input: OpenClawAbortTurnInput, options: OpenClawCommandOptions = {}) {
+    const client = this.getClient();
+    return client.abortAgentTurn
+      ? client.abortAgentTurn(input, options)
+      : client.call<MissionCommandPayload>("chat.abort", { ...input }, options);
   }
 
   streamAgentTurn(

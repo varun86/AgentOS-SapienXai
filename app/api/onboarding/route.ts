@@ -7,6 +7,9 @@ import { z } from "zod";
 
 import { formatOpenClawCommand, resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { createDefaultOpenClawBinarySelection, writeOpenClawBinarySelection } from "@/lib/openclaw/binary-selection";
+import { probeLocalGatewayStatus } from "@/lib/openclaw/client/local-gateway-probe";
+import { settleAgentConfigFromStateFile } from "@/lib/openclaw/state/agent-config-payload";
+import { openClawStateRootPath } from "@/lib/openclaw/state/paths";
 import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
 import {
   OPENCLAW_INSTALL_DOCS_URL,
@@ -143,7 +146,9 @@ export async function POST(request: Request) {
 
     const loadSnapshot = async (force = false): Promise<MissionControlSnapshot> => {
       if (force || !snapshot) {
-        snapshot = force ? await getMissionControlSnapshot({ force: true }) : await getMissionControlSnapshot();
+        snapshot = force
+          ? await getMissionControlSnapshot({ force: true, loadProfile: "system" })
+          : await getMissionControlSnapshot();
       }
 
       return snapshot as MissionControlSnapshot;
@@ -202,28 +207,7 @@ export async function POST(request: Request) {
 
       const gatewayStatus = await readGatewayStatus(openClawBin);
 
-      if (gatewayStatus?.rpc?.ok) {
-        const readySnapshot = await loadSnapshot(true);
-
-        if (isOpenClawReady(readySnapshot)) {
-          await send({
-            type: "done",
-            ok: true,
-            phase: "ready",
-            message: "OpenClaw system setup is already complete.",
-            exitCode: 0,
-            stdout: aggregatedStdout,
-            stderr: aggregatedStderr,
-            snapshot: readySnapshot
-          });
-          await closeWriter();
-          return;
-        }
-
-        snapshot = readySnapshot;
-      }
-
-      if (gatewayStatus && (await needsGatewayRegistrationRepair(gatewayStatus))) {
+      if (!gatewayStatus?.rpc?.ok && gatewayStatus && (await needsGatewayRegistrationRepair(gatewayStatus))) {
         await send({
           type: "status",
           phase: "installing-gateway",
@@ -374,12 +358,14 @@ export async function POST(request: Request) {
         }
       }
 
-      snapshot = await loadSnapshot(true);
-
       try {
-        const runtimeSnapshot = await loadSnapshot(true);
-        snapshot = runtimeSnapshot;
-        const runtimeAgentId = runtimeSnapshot.agents.find((agent) => agent.isDefault)?.id || runtimeSnapshot.agents[0]?.id || null;
+        await send({
+          type: "status",
+          phase: "verifying",
+          message: "Verifying runtime state access..."
+        });
+
+        const runtimeAgentId = await resolveRuntimeAgentIdFromState();
         await touchOpenClawRuntimeStateAccess({
           agentId: runtimeAgentId
         });
@@ -396,13 +382,11 @@ export async function POST(request: Request) {
           "verifying",
           "OpenClaw is online, but AgentOS cannot write to the OpenClaw runtime state yet.",
           {
-            snapshot: snapshot ?? (await loadSnapshot())
+            snapshot: snapshot ?? (await loadSnapshot(true))
           }
         );
         return;
       }
-
-      snapshot = await loadSnapshot(true);
 
       await send({
         type: "done",
@@ -545,10 +529,20 @@ async function installOpenClawCli(
   }
 }
 
+async function resolveRuntimeAgentIdFromState() {
+  const agentConfig = await settleAgentConfigFromStateFile(openClawStateRootPath);
+
+  if (agentConfig.status !== "fulfilled") {
+    return null;
+  }
+
+  return agentConfig.value.find((agent) => typeof agent.id === "string" && agent.id.trim())?.id ?? null;
+}
+
 async function waitForReadySnapshot() {
   const startedAt = Date.now();
 
-  const immediateSnapshot = await getMissionControlSnapshot({ force: true });
+  const immediateSnapshot = await getMissionControlSnapshot({ force: true, loadProfile: "system" });
 
   if (isOpenClawReady(immediateSnapshot)) {
     return immediateSnapshot;
@@ -557,7 +551,7 @@ async function waitForReadySnapshot() {
   while (Date.now() - startedAt < readyTimeoutMs) {
     await delay(readyPollIntervalMs);
 
-    const snapshot = await getMissionControlSnapshot({ force: true });
+    const snapshot = await getMissionControlSnapshot({ force: true, loadProfile: "system" });
 
     if (isOpenClawReady(snapshot)) {
       return snapshot;
@@ -611,7 +605,13 @@ async function repairGatewayModeIfNeeded(
   return true;
 }
 
-async function readGatewayStatus(openClawBin: string) {
+async function readGatewayStatus(openClawBin: string): Promise<GatewayStatusPayload | null> {
+  const localProbe = await probeLocalGatewayStatus();
+
+  if (localProbe?.rpc?.ok) {
+    return localProbe as GatewayStatusPayload;
+  }
+
   const result = await runCommand(openClawBin, ["gateway", "status", "--json"], async () => {}, {
     timeoutMs: gatewayStatusTimeoutMs
   });
@@ -633,7 +633,7 @@ function needsGatewayModeLocalRepair(payload: GatewayStatusPayload | null) {
 }
 
 async function needsGatewayRegistrationRepair(payload: GatewayStatusPayload | null) {
-  if (!payload?.service?.loaded) {
+  if (!payload?.service?.loaded || payload.rpc?.ok) {
     return false;
   }
 

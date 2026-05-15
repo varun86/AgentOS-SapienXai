@@ -9,18 +9,22 @@ import { z } from "zod";
 
 import { CliOpenClawGatewayClient } from "@/lib/openclaw/client/cli-gateway-client";
 import type { CommandResult } from "@/lib/openclaw/cli";
+import { isOpenClawInvalidConfigError } from "@/lib/openclaw/command-failure";
 import { compareVersionStrings } from "@/lib/openclaw/domains/control-plane-normalization";
 import type {
   GatewayProbePayload,
   GatewayStatusPayload,
+  MissionCommandPayload,
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawAbortTurnInput,
   OpenClawChannelStatusInput,
   OpenClawChannelStatusPayload,
   OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
+  OpenClawConfigSchemaPayload,
   OpenClawGatewayClient,
   OpenClawListModelsInput,
   OpenClawListSessionsInput,
@@ -35,7 +39,7 @@ import type {
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_NATIVE_TIMEOUT_MS = 3_000;
 const CONNECT_METHOD = "connect";
-const CONTROL_PROTOCOL_VERSION = 3;
+const CONTROL_PROTOCOL_VERSION = 4;
 const SERVER_OPERATOR_CLIENT_ID = "cli";
 const SERVER_OPERATOR_CLIENT_MODE = "cli";
 const OPENCLAW_DEVICE_AUTH_FILE_NAME = "device-auth.json";
@@ -78,6 +82,10 @@ export type NativeWsOpenClawGatewayClientOptions = {
   webSocketFactory?: WebSocketFactory;
   forceCli?: boolean;
   onNativeFailure?: (error: unknown, method: string) => void;
+};
+
+export type OpenClawGatewayEventSubscription = {
+  close: () => void;
 };
 
 type GatewayResponseFrame = {
@@ -749,6 +757,35 @@ function unsetConfigPathValue(config: Record<string, unknown>, path: string) {
   }
 }
 
+function escapeJsonPointerSegment(segment: string | number) {
+  return String(segment).replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function configPathToJsonPointer(path: string) {
+  const segments = parseConfigPath(path);
+  if (segments.length === 0) {
+    throw new OpenClawGatewayClientError("Config path is required.", "unknown");
+  }
+
+  return `/${segments.map(escapeJsonPointerSegment).join("/")}`;
+}
+
+function containsRedactedOpenClawSecret(value: unknown): boolean {
+  if (typeof value === "string") {
+    return isRedactedOpenClawSecret(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsRedactedOpenClawSecret(entry));
+  }
+
+  if (isObjectRecord(value)) {
+    return Object.values(value).some((entry) => containsRedactedOpenClawSecret(entry));
+  }
+
+  return false;
+}
+
 function commandResultFromGatewayPayload(payload: unknown): CommandResult {
   return {
     stdout: JSON.stringify(payload ?? {}),
@@ -763,10 +800,34 @@ function isRedactedOpenClawSecret(value: string) {
 async function resolveConfiguredGatewaySecret(
   fallback: OpenClawGatewayClient,
   paths: string[],
-  options: OpenClawCommandOptions
+  options: OpenClawCommandOptions,
+  configOptions: { readLocalConfigFile: boolean }
 ) {
+  if (configOptions.readLocalConfigFile) {
+    const localResult = await resolveConfiguredGatewaySecretFromLocalConfig(paths);
+
+    if (localResult.fromConfigFile) {
+      return localResult;
+    }
+  }
+
   for (const path of paths) {
-    const value = readConfigString(await fallback.getConfig<unknown>(path, options).catch(() => null));
+    let rawValue: unknown = null;
+
+    try {
+      rawValue = await fallback.getConfig<unknown>(path, options);
+    } catch (error) {
+      if (isOpenClawInvalidConfigError(error)) {
+        return {
+          value: "",
+          invalidConfig: true
+        };
+      }
+
+      continue;
+    }
+
+    const value = readConfigString(rawValue);
     if (isRedactedOpenClawSecret(value)) {
       throw new OpenClawGatewayClientError(
         `${path} is configured but OpenClaw returned a redacted secret. Set AGENTOS_OPENCLAW_GATEWAY_TOKEN/PASSWORD or OPENCLAW_GATEWAY_TOKEN/PASSWORD to enable native Gateway WS; using CLI fallback.`,
@@ -774,11 +835,54 @@ async function resolveConfiguredGatewaySecret(
       );
     }
     if (value) {
-      return value;
+      return {
+        value,
+        invalidConfig: false
+      };
     }
   }
 
-  return "";
+  return {
+    value: "",
+    invalidConfig: false
+  };
+}
+
+async function resolveConfiguredGatewaySecretFromLocalConfig(paths: string[]) {
+  const config = await readJsonFile<Record<string, unknown>>(resolveOpenClawConfigPath());
+
+  if (!config) {
+    return {
+      value: "",
+      invalidConfig: false,
+      fromConfigFile: false
+    };
+  }
+
+  for (const path of paths) {
+    const value = readConfigString(readConfigPath(config, path));
+
+    if (isRedactedOpenClawSecret(value)) {
+      throw new OpenClawGatewayClientError(
+        `${path} is configured but OpenClaw returned a redacted secret. Set AGENTOS_OPENCLAW_GATEWAY_TOKEN/PASSWORD or OPENCLAW_GATEWAY_TOKEN/PASSWORD to enable native Gateway WS; using CLI fallback.`,
+        "auth"
+      );
+    }
+
+    if (value) {
+      return {
+        value,
+        invalidConfig: false,
+        fromConfigFile: true
+      };
+    }
+  }
+
+  return {
+    value: "",
+    invalidConfig: false,
+    fromConfigFile: true
+  };
 }
 
 async function resolveGatewayAuth(
@@ -793,18 +897,50 @@ async function resolveGatewayAuth(
   const configPasswordPaths = isLocalGatewayUrl(url)
     ? ["gateway.auth.password", "gateway.remote.password"]
     : ["gateway.remote.password", "gateway.auth.password"];
-  const token =
+  const explicitToken =
     options.token?.trim() ||
     process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN?.trim() ||
-    process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-    await resolveConfiguredGatewaySecret(fallback, configTokenPaths, commandOptions);
-  const password =
+    process.env.OPENCLAW_GATEWAY_TOKEN?.trim();
+
+  if (explicitToken) {
+    return {
+      token: explicitToken,
+      password: ""
+    };
+  }
+
+  const explicitPassword =
     options.password?.trim() ||
     process.env.AGENTOS_OPENCLAW_GATEWAY_PASSWORD?.trim() ||
-    process.env.OPENCLAW_GATEWAY_PASSWORD?.trim() ||
-    await resolveConfiguredGatewaySecret(fallback, configPasswordPaths, commandOptions);
+    process.env.OPENCLAW_GATEWAY_PASSWORD?.trim();
 
-  return { token, password };
+  if (explicitPassword) {
+    return {
+      token: "",
+      password: explicitPassword
+    };
+  }
+
+  const tokenResult = await resolveConfiguredGatewaySecret(fallback, configTokenPaths, commandOptions, {
+    readLocalConfigFile: !options.webSocketFactory
+  });
+
+  if (tokenResult.value || tokenResult.invalidConfig) {
+    return {
+      token: tokenResult.value,
+      password: ""
+    };
+  }
+
+  const passwordResult = await resolveConfiguredGatewaySecret(fallback, configPasswordPaths, commandOptions, {
+    readLocalConfigFile: !options.webSocketFactory
+  });
+  const password = passwordResult.invalidConfig ? "" : passwordResult.value;
+
+  return {
+    token: "",
+    password
+  };
 }
 
 function isLocalGatewayUrl(rawUrl: string) {
@@ -863,10 +999,19 @@ async function resolveLocalGatewayDeviceAuth(
 function resolveOpenClawStateDir() {
   const override = process.env.OPENCLAW_STATE_DIR?.trim();
   if (override) {
-    return override.startsWith("~") ? join(homedir(), override.slice(1)) : override;
+    return expandHomePath(override);
   }
 
   return join(homedir(), ".openclaw");
+}
+
+function resolveOpenClawConfigPath() {
+  const override = process.env.OPENCLAW_CONFIG_PATH?.trim();
+  return override ? expandHomePath(override) : join(resolveOpenClawStateDir(), "openclaw.json");
+}
+
+function expandHomePath(value: string) {
+  return value.startsWith("~") ? join(homedir(), value.slice(1)) : value;
 }
 
 async function readJsonFile<TPayload>(path: string): Promise<TPayload | null> {
@@ -948,8 +1093,10 @@ async function buildConnectParams(
   commandOptions: OpenClawCommandOptions,
   nonce?: string | null
 ): Promise<ConnectParamsContext> {
-  const { token, password } = await resolveGatewayAuth(fallback, options, url, commandOptions);
   const deviceAuth = await resolveLocalGatewayDeviceAuth(url, options);
+  const { token, password } = deviceAuth?.token
+    ? { token: "", password: "" }
+    : await resolveGatewayAuth(fallback, options, url, commandOptions);
   const authToken = deviceAuth?.token ?? token;
   const auth = authToken
     ? { token: authToken }
@@ -1377,6 +1524,16 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     );
   }
 
+  getConfigSchema(options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawConfigSchemaPayload | null>(
+      "config.schema",
+      {},
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawConfigSchemaPayload : null),
+      () => this.fallback.getConfigSchema?.(options) ?? Promise.resolve(null)
+    );
+  }
+
   async hasConfig(path: string, options: OpenClawCommandOptions = {}) {
     try {
       const value = await this.getConfig(path, options);
@@ -1389,6 +1546,8 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   setConfig(path: string, value: unknown, options: OpenClawCommandOptions & { strictJson?: boolean } = {}) {
     return this.gatewayConfigMutationFirst(
       "config.set",
+      path,
+      value,
       options,
       (config) => setConfigPathValue(config, path, value),
       () => this.fallback.setConfig(path, value, options)
@@ -1398,6 +1557,8 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   unsetConfig(path: string, options: OpenClawCommandOptions = {}) {
     return this.gatewayConfigMutationFirst(
       "config.unset",
+      path,
+      undefined,
       options,
       (config) => unsetConfigPathValue(config, path),
       () => this.fallback.unsetConfig(path, options)
@@ -1405,15 +1566,80 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   addAgent(input: OpenClawAddAgentInput, options: OpenClawCommandOptions = {}) {
-    return this.fallback.addAgent(input, options);
+    const params = {
+      id: input.id,
+      workspace: input.workspace,
+      agentDir: input.agentDir,
+      model: input.model ?? undefined,
+      bindings: input.bindings,
+      skills: input.skills
+    };
+
+    return this.gatewayFirst(
+      "agents.create",
+      params,
+      options,
+      commandResultFromGatewayPayload,
+      () => this.gatewayFirst(
+        "agents.add",
+        params,
+        options,
+        commandResultFromGatewayPayload,
+        () => this.fallback.addAgent(input, options)
+      )
+    );
   }
 
   deleteAgent(agentId: string, options: OpenClawCommandOptions = {}) {
-    return this.fallback.deleteAgent(agentId, options);
+    return this.gatewayFirst(
+      "agents.delete",
+      { agentId },
+      options,
+      commandResultFromGatewayPayload,
+      () => this.fallback.deleteAgent(agentId, options)
+    );
   }
 
   runAgentTurn(input: OpenClawAgentTurnInput, options: OpenClawCommandOptions = {}) {
-    return this.fallback.runAgentTurn(input, options);
+    const params = {
+      agentId: input.agentId,
+      sessionId: input.sessionId,
+      message: input.message,
+      thinking: input.thinking,
+      timeoutSeconds: input.timeoutSeconds,
+      workspace: input.workspace ?? undefined,
+      dispatchId: input.dispatchId ?? undefined
+    };
+
+    return this.gatewayFirst(
+      "chat.send",
+      params,
+      options,
+      (payload) => payload as MissionCommandPayload,
+      () => this.gatewayFirst(
+        "sessions.chat.send",
+        params,
+        options,
+        (payload) => payload as MissionCommandPayload,
+        () => this.fallback.runAgentTurn(input, options)
+      )
+    );
+  }
+
+  abortAgentTurn(input: OpenClawAbortTurnInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst(
+      "chat.abort",
+      {
+        runId: input.runId ?? undefined,
+        sessionId: input.sessionId ?? undefined,
+        agentId: input.agentId ?? undefined,
+        reason: input.reason ?? undefined
+      },
+      options,
+      (payload) => payload as MissionCommandPayload,
+      () => this.fallback.abortAgentTurn?.(input, options) ??
+        this.fallback.call<MissionCommandPayload>("chat.abort", { ...input }, options)
+    );
   }
 
   streamAgentTurn(
@@ -1523,6 +1749,128 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     }
   }
 
+  async subscribeNativeEvents(
+    params: Record<string, unknown>,
+    callbacks: {
+      onEvent: (event: GatewayEventFrame) => void;
+      onError?: (error: unknown) => void;
+      onClose?: () => void;
+    },
+    options: OpenClawCommandOptions = {}
+  ): Promise<OpenClawGatewayEventSubscription> {
+    const timeoutMs = resolveNativeTimeoutMs(options.timeoutMs ?? this.options.timeoutMs);
+    const url = resolveGatewayUrl(this.options.url);
+    const WebSocketImpl = resolveWebSocketFactory(this.options.webSocketFactory);
+    const connectContext = await buildConnectParams(this.fallback, this.options, url, options);
+    const socket = new WebSocketImpl(url);
+    const pending = new Map<string, PendingRequest>();
+    const cleanupCallbacks: Array<() => void> = [];
+    let closed = false;
+
+    const rejectPending = (error: unknown) => {
+      for (const [id, request] of pending) {
+        globalThis.clearTimeout(request.timer);
+        pending.delete(id);
+        request.reject(error);
+      }
+    };
+
+    cleanupCallbacks.push(
+      addSocketListener(socket, "message", (event) => {
+        try {
+          const data = (event as { data?: unknown })?.data ?? event;
+          const frame = parseGatewayFrameData(data);
+
+          if (!frame) {
+            return;
+          }
+
+          if (frame.type === "event") {
+            callbacks.onEvent(frame as GatewayEventFrame);
+            return;
+          }
+
+          if (frame.type !== "res" || frame.id === undefined) {
+            return;
+          }
+
+          const requestId = String(frame.id);
+          const request = pending.get(requestId);
+          if (!request) {
+            return;
+          }
+
+          pending.delete(requestId);
+          globalThis.clearTimeout(request.timer);
+
+          if (frame.ok === false) {
+            request.reject(new NativeGatewayError(normalizeGatewayResponseFailure(frame), { cause: frame }));
+            return;
+          }
+
+          request.resolve(frame.payload);
+        } catch (error) {
+          callbacks.onError?.(error);
+          rejectPending(error);
+        }
+      }),
+      addSocketListener(socket, "error", (event) => {
+        callbacks.onError?.(new NativeGatewayError("OpenClaw Gateway WebSocket error.", { cause: event }));
+      }),
+      addSocketListener(socket, "close", () => {
+        if (!closed) {
+          callbacks.onClose?.();
+        }
+        rejectPending(new NativeGatewayError("OpenClaw Gateway event subscription closed."));
+      })
+    );
+
+    try {
+      await waitForSocketOpen(socket, timeoutMs, options.signal);
+      const connectParams = connectContext.deviceAuth
+        ? (await buildConnectParams(
+          this.fallback,
+          this.options,
+          url,
+          options,
+          await waitForConnectChallenge(socket, timeoutMs, options.signal)
+        )).params
+        : connectContext.params;
+      await sendGatewayRequest(socket, pending, CONNECT_METHOD, connectParams, timeoutMs, options.signal);
+      await sendGatewayRequest(socket, pending, "events.subscribe", params, timeoutMs, options.signal);
+    } catch (error) {
+      for (const cleanup of cleanupCallbacks) {
+        cleanup();
+      }
+      rejectPending(error);
+      try {
+        socket.close();
+      } catch {
+        // Ignore close errors during cleanup.
+      }
+      throw error;
+    }
+
+    return {
+      close: () => {
+        if (closed) {
+          return;
+        }
+
+        closed = true;
+        for (const cleanup of cleanupCallbacks) {
+          cleanup();
+        }
+        rejectPending(new NativeGatewayError("OpenClaw Gateway event subscription was closed."));
+        try {
+          socket.close();
+        } catch {
+          // Ignore close errors during cleanup.
+        }
+      }
+    };
+  }
+
   private async gatewayFirst<TPayload>(
     method: string,
     params: Record<string, unknown>,
@@ -1547,6 +1895,8 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
 
   private async gatewayConfigMutationFirst(
     operation: string,
+    path: string,
+    value: unknown,
     options: OpenClawCommandOptions,
     mutate: (config: Record<string, unknown>) => void,
     fallback: () => Promise<CommandResult>
@@ -1563,15 +1913,48 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       );
       const config = cloneJsonObject(isObjectRecord(snapshot.config) ? snapshot.config : {});
       mutate(config);
-      const params: Record<string, unknown> = {
-        raw: JSON.stringify(config)
+      await this.callNative<unknown>("config.schema", {}, options).catch(() => null);
+
+      const baseHash = typeof snapshot.hash === "string" && snapshot.hash.trim() ? snapshot.hash : undefined;
+      const patch = operation === "config.unset"
+        ? { op: "remove", path: configPathToJsonPointer(path) }
+        : { op: "replace", path: configPathToJsonPointer(path), value };
+      const patchParams: Record<string, unknown> = {
+        patches: [patch]
       };
 
-      if (typeof snapshot.hash === "string" && snapshot.hash.trim()) {
-        params.baseHash = snapshot.hash;
+      if (baseHash) {
+        patchParams.baseHash = baseHash;
       }
+      let payload: unknown;
 
-      const payload = await this.callNative<unknown>("config.set", params, options);
+      try {
+        payload = await this.callNative<unknown>("config.patch", patchParams, options);
+      } catch (patchError) {
+        try {
+          payload = await this.callNative<unknown>("config.apply", patchParams, options);
+        } catch (applyError) {
+          if (containsRedactedOpenClawSecret(snapshot.config)) {
+            throw new OpenClawGatewayClientError(
+              "OpenClaw returned redacted secrets in the config snapshot; refusing full Gateway config overwrite and using path-level CLI fallback.",
+              "auth",
+              { cause: applyError }
+            );
+          }
+
+          const params: Record<string, unknown> = {
+            raw: JSON.stringify(config)
+          };
+
+          if (baseHash) {
+            params.baseHash = baseHash;
+          }
+
+          payload = await this.callNative<unknown>("config.set", params, options).catch(() => {
+            throw patchError;
+          });
+        }
+      }
       clearGatewayFallbackDiagnostic(operation);
       return commandResultFromGatewayPayload(payload);
     } catch (error) {

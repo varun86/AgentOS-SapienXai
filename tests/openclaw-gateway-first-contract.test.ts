@@ -1,0 +1,320 @@
+import assert from "node:assert/strict";
+import { afterEach, test } from "node:test";
+
+import {
+  clearOpenClawCapabilityMatrixCacheForTesting,
+  getOpenClawCapabilityMatrix,
+  setOpenClawCapabilityMatrixNativeCallerForTesting
+} from "@/lib/openclaw/application/capability-matrix-service";
+import { normalizeOpenClawGatewayEventToRuntime } from "@/lib/openclaw/application/event-bridge-service";
+import { setOpenClawAdapterForTesting, type OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { submitMissionDispatch } from "@/lib/openclaw/domains/mission-dispatch-workflow";
+import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+
+afterEach(() => {
+  clearOpenClawCapabilityMatrixCacheForTesting();
+  setOpenClawAdapterForTesting(null);
+});
+
+test("capability matrix detects advertised Gateway-first methods", async () => {
+  setOpenClawAdapterForTesting(createContractAdapter());
+  setOpenClawCapabilityMatrixNativeCallerForTesting(async (method) => {
+    assert.equal(method, "rpc.discover");
+    return {
+      protocolVersion: 4,
+      auth: { mode: "device" },
+      methods: [
+        "chat.send",
+        "chat.abort",
+        "events.subscribe",
+        "config.schema",
+        "config.patch",
+        "agents.create",
+        "agents.delete",
+        "channels.status",
+        "skills.list",
+        "approvals.list",
+        "updates.status"
+      ]
+    };
+  });
+
+  const matrix = await getOpenClawCapabilityMatrix({ force: true });
+
+  assert.equal(matrix.openClawVersion, "9.9.9");
+  assert.equal(matrix.gatewayProtocolVersion, "4");
+  assert.equal(matrix.authMode, "device");
+  assert.equal(matrix.nativeMissionDispatch, "supported");
+  assert.equal(matrix.nativeAgentLifecycle, "supported");
+  assert.equal(matrix.configPatch, "supported");
+  assert.equal(matrix.eventBridge, "supported");
+  assert.equal(matrix.channels, "supported");
+  assert.equal(matrix.approvals, "supported");
+  assert.ok(matrix.unsupportedGatewayMethods.includes("models.list"));
+});
+
+test("mission dispatch uses native chat when capability matrix supports it", async () => {
+  const calls: string[] = [];
+  setOpenClawCapabilityMatrixNativeCallerForTesting(async () => ({
+    protocolVersion: 4,
+    methods: ["chat.send"]
+  }));
+  setOpenClawAdapterForTesting(createContractAdapter({
+    async runAgentTurn(input) {
+      calls.push(`run:${input.agentId}:${input.dispatchId ?? "none"}`);
+      return {
+        runId: "run-native-1",
+        status: "running",
+        summary: "Queued by Gateway"
+      };
+    }
+  }));
+
+  const response = await submitMissionDispatch({ mission: "Ship it", workspaceId: "workspace-1" }, {
+    getMissionControlSnapshot: async () => createSnapshot(),
+    resolveAgentForMission: () => "agent-1",
+    invalidateMissionControlCaches: () => {}
+  });
+
+  assert.equal(response.runId, "run-native-1");
+  assert.equal(response.status, "running");
+  assert.deepEqual(calls, [`run:agent-1:${response.dispatchId}`]);
+});
+
+test("Gateway event bridge normalizes chat, tool, session, and approval events into runtimes", () => {
+  const runtime = normalizeOpenClawGatewayEventToRuntime({
+    type: "event",
+    event: "approval.requested",
+    payload: {
+      agentId: "agent-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      approvalId: "approval-1",
+      toolName: "shell",
+      status: "queued",
+      message: "Approval needed"
+    }
+  });
+
+  assert.ok(runtime);
+  assert.equal(runtime.agentId, "agent-1");
+  assert.equal(runtime.sessionId, "session-1");
+  assert.equal(runtime.runId, "run-1");
+  assert.equal(runtime.status, "queued");
+  assert.deepEqual(runtime.toolNames, ["shell"]);
+  assert.equal(runtime.metadata.origin, "openclaw-gateway-event");
+  assert.equal(runtime.metadata.approvalId, "approval-1");
+});
+
+function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenClawAdapter {
+  return {
+    async getStatus() {
+      return { version: "9.9.9" };
+    },
+    async getGatewayStatus() {
+      return {};
+    },
+    async getModelStatus() {
+      return {};
+    },
+    async listAgents() {
+      return { agents: [] };
+    },
+    async listSessions() {
+      return { sessions: [] };
+    },
+    async getChannelStatus() {
+      return {
+        ts: 0,
+        channelOrder: [],
+        channelLabels: {},
+        channels: {},
+        channelAccounts: {},
+        channelDefaultAccountId: {}
+      };
+    },
+    async listModels() {
+      return { models: [] };
+    },
+    async listSkills() {
+      return { skills: [] };
+    },
+    async listPlugins() {
+      return { plugins: [] };
+    },
+    async scanModels() {
+      return [];
+    },
+    async getConfig() {
+      return null;
+    },
+    async getConfigSchema() {
+      return null;
+    },
+    async hasConfig() {
+      return false;
+    },
+    async setConfig() {
+      return { stdout: "", stderr: "" };
+    },
+    async unsetConfig() {
+      return { stdout: "", stderr: "" };
+    },
+    async addAgent() {
+      return { stdout: "", stderr: "" };
+    },
+    async deleteAgent() {
+      return { stdout: "", stderr: "" };
+    },
+    async runAgentTurn() {
+      return {};
+    },
+    async abortAgentTurn() {
+      return {};
+    },
+    async streamAgentTurn() {
+      return {};
+    },
+    async probeGateway() {
+      return {};
+    },
+    async controlGateway() {
+      return {};
+    },
+    async call<TPayload>() {
+      return {} as TPayload;
+    },
+    ...overrides
+  };
+}
+
+function createSnapshot(): MissionControlSnapshot {
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: "live",
+    diagnostics: {
+      installed: true,
+      loaded: true,
+      rpcOk: true,
+      health: "healthy",
+      workspaceRoot: "/tmp",
+      configuredWorkspaceRoot: null,
+      dashboardUrl: "http://127.0.0.1:18789/",
+      gatewayUrl: "ws://127.0.0.1:18789",
+      configuredGatewayUrl: null,
+      openClawBinarySelection: {
+        mode: "auto",
+        path: null,
+        resolvedPath: null,
+        label: "Auto",
+        detail: "Auto"
+      },
+      modelReadiness: {
+        ready: true,
+        defaultModel: "openai/test",
+        resolvedDefaultModel: "openai/test",
+        defaultModelReady: true,
+        recommendedModelId: null,
+        preferredLoginProvider: null,
+        totalModelCount: 1,
+        availableModelCount: 1,
+        localModelCount: 0,
+        remoteModelCount: 1,
+        missingModelCount: 0,
+        authProviders: [],
+        issues: []
+      },
+      runtime: {
+        stateRoot: "/tmp/.openclaw",
+        stateWritable: true,
+        sessionStoreWritable: true,
+        sessionStores: [],
+        smokeTest: {
+          status: "passed",
+          checkedAt: new Date().toISOString(),
+          agentId: "agent-1",
+          runId: "run-smoke",
+          summary: "ok",
+          error: null
+        },
+        issues: []
+      },
+      securityWarnings: [],
+      issues: []
+    },
+    presence: [],
+    channelAccounts: [],
+    workspaces: [{
+      id: "workspace-1",
+      name: "Workspace",
+      slug: "workspace",
+      path: "/tmp/agentos-contract-workspace",
+      kind: "workspace",
+      agentIds: ["agent-1"],
+      modelIds: [],
+      activeRuntimeIds: [],
+      totalSessions: 0,
+      health: "ready",
+      bootstrap: {
+        template: null,
+        sourceMode: null,
+        agentTemplate: null,
+        coreFiles: [],
+        optionalFiles: [],
+        folders: [],
+        projectShell: [],
+        localSkillIds: []
+      },
+      capabilities: {
+        skills: [],
+        tools: [],
+        workspaceOnlyAgentCount: 0
+      },
+      channels: []
+    }],
+    agents: [{
+      id: "agent-1",
+      name: "Agent",
+      workspaceId: "workspace-1",
+      workspacePath: "/tmp/agentos-contract-workspace",
+      modelId: "openai/test",
+      isDefault: true,
+      status: "ready",
+      sessionCount: 0,
+      lastActiveAt: null,
+      currentAction: "Idle",
+      activeRuntimeIds: [],
+      heartbeat: {
+        enabled: false,
+        every: null,
+        everyMs: null
+      },
+      identity: {},
+      profile: {
+        purpose: null,
+        operatingInstructions: [],
+        responseStyle: [],
+        outputPreference: null,
+        sourceFiles: []
+      },
+      skills: [],
+      tools: [],
+      policy: {
+        preset: "worker",
+        missingToolBehavior: "fallback",
+        installScope: "workspace",
+        fileAccess: "workspace-only",
+        networkAccess: "restricted"
+      }
+    }],
+    models: [],
+    runtimes: [],
+    tasks: [],
+    relationships: [],
+    missionPresets: [],
+    channelRegistry: {
+      version: 1,
+      channels: []
+    }
+  };
+}

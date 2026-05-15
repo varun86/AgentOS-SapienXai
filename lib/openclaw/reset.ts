@@ -7,6 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { resetOpenClawBinCache, runOpenClaw } from "@/lib/openclaw/cli";
+import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
 import {
   clearMissionControlCaches,
   deleteAgent,
@@ -137,25 +138,10 @@ export async function executeReset(
       message: "Removing the OpenClaw service and local state..."
     });
 
-    const openClawResult = await runOpenClaw([
-      "uninstall",
-      "--all",
-      "--yes",
-      "--non-interactive"
-    ]);
+    const openClawUninstallSucceeded = await runOpenClawFullUninstall(emit);
 
-    if (openClawResult.stdout.trim()) {
-      await emit({
-        type: "log",
-        text: openClawResult.stdout.trim()
-      });
-    }
-
-    if (openClawResult.stderr.trim()) {
-      await emit({
-        type: "log",
-        text: openClawResult.stderr.trim()
-      });
+    if (!openClawUninstallSucceeded) {
+      await removeOpenClawLocalState(preview.openClawPaths, emit);
     }
 
     const scheduledCommands = preview.packageActions
@@ -194,7 +180,7 @@ export async function executeReset(
 
   clearMissionControlCaches();
 
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await refreshSnapshotAfterReset(target, emit);
 
   return {
     message:
@@ -206,6 +192,28 @@ export async function executeReset(
     snapshot,
     backgroundLogPath
   };
+}
+
+async function refreshSnapshotAfterReset(
+  target: ResetTarget,
+  emit: (event: ResetStreamEvent) => Promise<void>
+): Promise<MissionControlSnapshot | undefined> {
+  try {
+    return await getMissionControlSnapshot({
+      force: true,
+      loadProfile: target === "full-uninstall" ? "system" : "interactive"
+    });
+  } catch (error) {
+    if (target !== "full-uninstall") {
+      throw error;
+    }
+
+    await emit({
+      type: "log",
+      text: `Snapshot refresh skipped after full uninstall: ${error instanceof Error ? error.message : "Unknown snapshot error."}`
+    });
+    return undefined;
+  }
 }
 
 function buildResetPreviewWorkspaces(
@@ -324,6 +332,7 @@ async function runMissionControlReset(
   preview: ResetPreview,
   emit: (event: ResetStreamEvent) => Promise<void>
 ) {
+  const fullUninstall = preview.target === "full-uninstall";
   const deleteFolderWorkspaces = preview.workspaces.filter((workspace) => workspace.action === "delete-folder");
   const metadataOnlyWorkspaces = preview.workspaces.filter((workspace) => workspace.action === "clean-integration");
 
@@ -347,6 +356,12 @@ async function runMissionControlReset(
         type: "log",
         text: `Deleting workspace folder: ${workspace.name} (${workspace.path})`
       });
+
+      if (fullUninstall) {
+        await removeWorkspaceFolderDirectly(workspace, emit);
+        continue;
+      }
+
       await deleteWorkspaceProject({
         workspaceId: workspace.workspaceId
       });
@@ -366,6 +381,11 @@ async function runMissionControlReset(
           type: "log",
           text: `Skipping OpenClaw state workspace during AgentOS reset: ${workspace.name} (${workspace.path})`
         });
+        continue;
+      }
+
+      if (fullUninstall) {
+        await removeWorkspaceIntegrationDirectory(workspace, emit);
         continue;
       }
 
@@ -395,17 +415,34 @@ async function runMissionControlReset(
           throw error;
         }
       }
-
-      const workspaceOpenClawPath = path.join(/*turbopackIgnore: true*/ workspace.path, ".openclaw");
-      await rm(workspaceOpenClawPath, { recursive: true, force: true });
-      await emit({
-        type: "log",
-        text: `Removed integration directory: ${workspaceOpenClawPath}`
-      });
+      await removeWorkspaceIntegrationDirectory(workspace, emit);
     }
   }
 
   await removeMissionControlState(preview.target, emit);
+}
+
+async function removeWorkspaceFolderDirectly(
+  workspace: ResetPreviewWorkspace,
+  emit: (event: ResetStreamEvent) => Promise<void>
+) {
+  await rm(workspace.path, { recursive: true, force: true });
+  await emit({
+    type: "log",
+    text: `Removed workspace folder directly: ${workspace.name} (${workspace.path})`
+  });
+}
+
+async function removeWorkspaceIntegrationDirectory(
+  workspace: ResetPreviewWorkspace,
+  emit: (event: ResetStreamEvent) => Promise<void>
+) {
+  const workspaceOpenClawPath = path.join(/*turbopackIgnore: true*/ workspace.path, ".openclaw");
+  await rm(workspaceOpenClawPath, { recursive: true, force: true });
+  await emit({
+    type: "log",
+    text: `Removed integration directory: ${workspaceOpenClawPath}`
+  });
 }
 
 async function removeMissionControlState(
@@ -438,6 +475,94 @@ async function removeMissionControlState(
         ? `Removed AgentOS state root: ${missionControlRootPath}`
         : `Removed AgentOS state under ${missionControlRootPath}`
   });
+}
+
+async function runOpenClawFullUninstall(
+  emit: (event: ResetStreamEvent) => Promise<void>
+) {
+  try {
+    const openClawResult = await runOpenClaw([
+      "uninstall",
+      "--all",
+      "--yes",
+      "--non-interactive"
+    ]);
+
+    await emitCommandOutput(openClawResult.stdout, emit);
+    await emitCommandOutput(openClawResult.stderr, emit);
+    return true;
+  } catch (error) {
+    const detail = stringifyCommandFailure(error).trim() || "OpenClaw uninstall command failed.";
+
+    await emit({
+      type: "log",
+      text:
+        "OpenClaw uninstall command failed. AgentOS will continue with local state cleanup because full uninstall was confirmed."
+    });
+    await emit({
+      type: "log",
+      text: detail
+    });
+    return false;
+  }
+}
+
+async function emitCommandOutput(
+  text: string,
+  emit: (event: ResetStreamEvent) => Promise<void>
+) {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return;
+  }
+
+  await emit({
+    type: "log",
+    text: trimmed
+  });
+}
+
+async function removeOpenClawLocalState(
+  openClawPaths: string[],
+  emit: (event: ResetStreamEvent) => Promise<void>
+) {
+  const uniquePaths = uniqueRootPaths(openClawPaths);
+
+  if (uniquePaths.length === 0) {
+    return;
+  }
+
+  await emit({
+    type: "status",
+    phase: "openclaw-state",
+    message: "Removing OpenClaw local state directly..."
+  });
+
+  for (const targetPath of uniquePaths) {
+    await rm(targetPath, { recursive: true, force: true });
+    await emit({
+      type: "log",
+      text: `Removed OpenClaw local state path: ${targetPath}`
+    });
+  }
+}
+
+function uniqueRootPaths(paths: string[]) {
+  const normalizedPaths = paths
+    .map((entry) => path.resolve(entry))
+    .sort((left, right) => left.length - right.length);
+  const roots: string[] = [];
+
+  for (const candidate of normalizedPaths) {
+    if (roots.some((root) => candidate === root || candidate.startsWith(`${root}${path.sep}`))) {
+      continue;
+    }
+
+    roots.push(candidate);
+  }
+
+  return roots;
 }
 
 function resolveMissionControlResetPaths(target: ResetTarget) {

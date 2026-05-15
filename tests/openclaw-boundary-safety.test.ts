@@ -115,6 +115,32 @@ test("OpenClaw direct CLI command usage remains in documented fallback/provision
   assert.deepEqual(offenders, []);
 });
 
+test("full uninstall reset avoids OpenClaw-dependent workspace cleanup", () => {
+  const source = readFileSync(path.join(rootDir, "lib/openclaw/reset.ts"), "utf8");
+
+  assert.match(
+    source,
+    /if \(fullUninstall\) \{\s*await removeWorkspaceFolderDirectly\(workspace, emit\);\s*continue;\s*\}\s*await deleteWorkspaceProject/
+  );
+  assert.match(
+    source,
+    /if \(fullUninstall\) \{\s*await removeWorkspaceIntegrationDirectory\(workspace, emit\);\s*continue;\s*\}\s*const snapshot = await getMissionControlSnapshot/
+  );
+  assert.match(source, /OpenClaw uninstall command failed\. AgentOS will continue with local state cleanup/);
+  assert.match(source, /Snapshot refresh skipped after full uninstall/);
+});
+
+test("AgentOS does not seed legacy openai-codex model refs in production code", () => {
+  const offenders = [
+    path.join(rootDir, "app/api/models/providers/route.ts"),
+    path.join(rootDir, "lib/openclaw/fallback.ts")
+  ]
+    .filter((filePath) => readFileSync(filePath, "utf8").includes("openai-codex/gpt-"))
+    .map(toProjectPath);
+
+  assert.deepEqual(offenders, []);
+});
+
 test("OpenClaw local module imports do not introduce cycles", () => {
   const files = readProjectSourceFiles(["lib/openclaw"]);
   const fileSet = new Set(files.map(toProjectPath));
@@ -208,6 +234,14 @@ test("update check treats loading registry status as loading instead of up to da
   assert.match(source, /const isUpdateRegistryLoading =/);
   assert.match(source, /toast\.message\("Update registry is still loading\."/,);
   assert.match(source, /if \(isUpdateRegistryLoading\) \{/);
+});
+
+test("diagnostics command stats count the visible recent command window", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/settings-control-center.tsx"), "utf8");
+
+  assert.match(source, /const latestCommands = commandHistory\.slice\(0, 6\);/);
+  assert.match(source, /ok: latestCommands\.filter\(\(command\) => command\.status === "ok"\)\.length/);
+  assert.match(source, /failed: latestCommands\.filter\(\(command\) => command\.status !== "ok"\)\.length/);
 });
 
 function resolveLocalOpenClawImport(filePath: string, specifier: string) {

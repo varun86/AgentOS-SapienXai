@@ -51,25 +51,25 @@ Built on top of OpenClaw, the agent orchestration kernel.
 
 ## Try AgentOS in 5 minutes
 
-1. Install AgentOS:
+Install AgentOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash
 ```
 
-Or install it with your package manager:
+Or use a package manager:
 
 ```bash
 pnpm add -g @sapienx/agentos
 ```
 
-2. Open the UI:
+Open the UI:
 
 ```bash
 agentos start --open
 ```
 
-3. Verify the runtime:
+Verify the local runtime:
 
 ```bash
 agentos doctor
@@ -162,7 +162,7 @@ AgentOS is built for that coordination problem:
 
 ## Quick Start
 
-Install the packaged launcher:
+Use the packaged launcher:
 
 ```bash
 pnpm add -g @sapienx/agentos
@@ -202,12 +202,14 @@ flowchart TD
 ```mermaid
 flowchart LR
     UI["AgentOS UI<br/>Sidebar / Canvas / Inspector / Command Bar / Planner"] --> API["Next.js App Router + API routes"]
-    API --> SERVICE["OpenClaw service adapter<br/>snapshot normalization + write actions"]
-    SERVICE --> CLI["OpenClaw CLI"]
-    CLI --> GATEWAY["Gateway status + presence"]
-    CLI --> CONFIG["Agent config + workspace bindings"]
-    CLI --> SESSIONS["Sessions + transcript files"]
-    SERVICE --> FS["Workspace filesystem + .mission-control state"]
+    API --> APP["OpenClaw application services<br/>workspace, agent, mission, runtime, settings"]
+    APP --> ADAPTER["OpenClawAdapter<br/>stable compatibility boundary"]
+    ADAPTER --> CLIENT["OpenClawGatewayClient<br/>Gateway-first client"]
+    CLIENT --> GATEWAY["OpenClaw Gateway RPC + WebSocket events"]
+    CLIENT --> CLI["OpenClaw CLI fallback<br/>install, recovery, unsupported operations"]
+    GATEWAY --> STATE["Gateway state<br/>models, agents, sessions, channels, skills, approvals, config"]
+    CLI --> STATE
+    APP --> FS["Workspace filesystem + .mission-control state"]
     API --> STREAM["SSE snapshot stream"]
     STREAM --> UI
 ```
@@ -223,30 +225,36 @@ Instead, it reads live OpenClaw state, normalizes it into a control-plane snapsh
 
 In practice, that means:
 
-- OpenClaw remains the source of truth for agents, sessions, models, and gateway status.
-- AgentOS translates UI actions into real OpenClaw commands and real filesystem changes.
+- OpenClaw remains the source of truth for gateway state, models, agents, sessions, channels, skills, approvals, config, and runtime execution.
+- AgentOS uses native OpenClaw Gateway RPC first for supported operations.
+- AgentOS keeps the OpenClaw CLI as fallback for install, recovery, gateway process control, and unsupported or older Gateway methods.
+- AgentOS translates UI actions into OpenClaw Gateway calls, documented CLI fallbacks, and real filesystem changes.
 - AgentOS is intentionally not a mock dashboard; it is a control surface over live operational state.
 
 ## How The System Works
 
-1. AgentOS reads live OpenClaw surfaces such as gateway status, agent inventory, config, models, sessions, presence, and transcript files.
-2. The service layer normalizes that data into a single `MissionControlSnapshot`.
-3. The UI renders that snapshot as a control-plane surface with a topology canvas, sidebar, inspector, and command bar.
-4. Operator actions such as mission dispatch, workspace creation, agent updates, planner deploys, gateway changes, or file reveal calls are translated into OpenClaw CLI commands and local filesystem operations.
-5. Snapshot state is refreshed over Server-Sent Events so the UI can stay close to real runtime activity.
+1. AgentOS detects the OpenClaw version, Gateway protocol, auth mode, and advertised RPC capabilities.
+2. AgentOS reads live OpenClaw surfaces through Gateway-first RPC calls, with CLI fallback when the Gateway is unavailable, scope-limited, malformed, or does not support a method yet.
+3. The application layer normalizes gateway state, sessions, local transcripts, workspace metadata, and AgentOS sidecar state into a single `MissionControlSnapshot`.
+4. The UI renders that snapshot as a control-plane surface with a topology canvas, sidebar, inspector, and command bar.
+5. Operator actions such as mission dispatch, workspace creation, agent updates, planner deploys, gateway changes, or file reveal calls pass through the OpenClaw adapter boundary before touching Gateway RPC, CLI fallback, or local filesystem state.
+6. Gateway WebSocket events and Server-Sent Events keep runtime and task views close to live OpenClaw activity without replacing existing snapshot rendering.
 
 ## Key Features
 
 - Live topology canvas for real workspace -> agent -> runtime relationships.
-- Mission dispatch that targets real OpenClaw agents and supports thinking levels.
+- Gateway-first mission dispatch that targets real OpenClaw agents and supports thinking levels.
 - Transcript-backed runtime inspection, including final output, warnings, token usage, and created files.
+- Persistent Gateway event bridge for chat, tool, log, session, and approval activity where supported by OpenClaw.
 - File reveal actions from the inspector for artifacts written to the local filesystem.
 - Workspace wizard with basic create flow and advanced planner mode, including source modes (`empty`, `clone`, `existing`), templates, team presets, model profiles, and kickoff missions.
 - Structured workspace scaffolding with `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`, `docs/`, `memory/`, `deliverables/`, `skills/`, and `.openclaw/project-shell/`.
 - Agent creation and editing with policy presets (`worker`, `setup`, `browser`, `monitoring`, `custom`) plus heartbeat, file-access, install-scope, and network controls.
 - Guided workspace planner that models company, product, workspace, team, operations, and deploy decisions inside the workspace wizard.
 - Planner deploy flows that can turn a plan into a live workspace, agent team, automations, channels, and first missions.
-- OpenClaw onboarding, model setup, gateway control, reset, and update flows directly from the UI.
+- OpenClaw onboarding, model setup, Gateway diagnostics, native auth repair, reset, and update flows directly from the UI.
+- Capability diagnostics for Gateway protocol, auth mode, supported RPC methods, config schema/patch support, channel support, skills support, approvals support, and update support.
+- Gateway-first config reads and patch/apply writes with base-hash concurrency protection and redacted-secret safety.
 - Configurable gateway endpoint and default workspace root from settings.
 - Explicit fallback mode when OpenClaw is unavailable, rather than pretending live control exists.
 
@@ -259,9 +267,10 @@ In practice, that means:
 - Workspace overview and live control-plane snapshot.
 - Agent creation and editing with presets and policies.
 - Workspace creation and guided workspace wizard.
-- Mission dispatch to OpenClaw-backed agents.
+- Gateway-first mission dispatch to OpenClaw-backed agents.
 - Runtime and transcript inspection.
-- Gateway diagnostics and control actions.
+- Gateway event bridge for supported OpenClaw chat, tool, log, session, and approval events.
+- Gateway diagnostics, capability matrix, native auth repair, and control actions.
 - Local-first settings for gateway endpoint and workspace root.
 - Install paths through the release installer and package manager.
 
@@ -336,8 +345,8 @@ hooks/
 
 lib/openclaw/
   agent-heartbeat.ts
-  cli.ts
   agent-presets.ts
+  cli.ts
   fallback.ts
   operation-progress.ts
   planner.ts
@@ -348,6 +357,11 @@ lib/openclaw/
   reset.ts
   service.ts
   types.ts
+  adapter/
+  application/
+  client/
+  domains/
+  state/
   workspace-presets.ts
   workspace-wizard-inference.ts
   workspace-wizard-mappers.ts
@@ -502,7 +516,8 @@ pnpm build
 
 - AgentOS is currently local-first. Several API routes spawn local processes, inspect transcript files, and mutate workspace directories.
 - This makes the current implementation best suited for operator workstations or trusted environments, not serverless-only deployments.
-- OpenClaw remains the primary runtime source of truth; AgentOS adds control-plane state rather than a separate database layer.
+- OpenClaw remains the runtime source of truth; AgentOS adds operator-facing control-plane state rather than a separate orchestration database.
+- The OpenClaw integration is Gateway-first through a stable adapter/client boundary. CLI fallback remains intentional for install, recovery, gateway process control, and unsupported Gateway operations.
 - The app is configured for standalone Next.js output via `next.config.mjs`.
 
 ## Control-Plane APIs
@@ -511,7 +526,7 @@ pnpm build
 | --- | --- | --- |
 | `/api/snapshot` | `GET` | Return the normalized AgentOS snapshot |
 | `/api/stream` | `GET` | Stream snapshot updates over SSE |
-| `/api/diagnostics` | `GET` | Return gateway diagnostics and presence |
+| `/api/diagnostics` | `GET` | Return gateway diagnostics, capabilities, and presence |
 | `/api/mission` | `POST` | Dispatch a mission to a real OpenClaw agent |
 | `/api/agents` | `GET`, `POST`, `PATCH`, `DELETE` | Read and mutate agents |
 | `/api/workspaces` | `GET`, `POST`, `PATCH`, `DELETE` | Read and mutate workspace projects |
@@ -535,7 +550,8 @@ pnpm build
 
 AgentOS keeps most durable operational state close to the workspace and to OpenClaw itself.
 
-- OpenClaw-backed runtime state comes from gateway status, agent config, models, sessions, presence, and transcript files.
+- OpenClaw-backed runtime state comes from Gateway status, agent config, models, sessions, presence, Gateway events, and transcript files.
+- Gateway event bridge state is stored under `.mission-control/gateway-events/` and merged into runtime/task snapshots when available.
 - AgentOS settings are stored under the legacy `.mission-control/settings.json` path.
 - Planner drafts and planner runtime assets are stored under the legacy `.mission-control/planner/` path.
 - Planner deploys write workspace-specific planning artifacts under `.openclaw/planner/`, including `blueprint.json` and `deploy-report.json`.

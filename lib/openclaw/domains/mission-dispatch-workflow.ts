@@ -3,6 +3,8 @@ import {
   prepareMissionOutputPlan
 } from "@/lib/openclaw/domains/mission-routing";
 import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { getOpenClawCapabilityMatrix } from "@/lib/openclaw/application/capability-matrix-service";
 import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
 import {
   createMissionDispatchRecord,
@@ -105,7 +107,43 @@ export async function submitMissionDispatch(
   }
 
   try {
-    dispatchRecord = await launchMissionDispatchRunner(dispatchRecord);
+    const capabilityMatrix = await getOpenClawCapabilityMatrix().catch(() => null);
+
+    if (capabilityMatrix?.nativeMissionDispatch === "supported") {
+      const payload = await getOpenClawAdapter().runAgentTurn(
+        {
+          agentId,
+          sessionId: dispatchRecord.sessionId ?? undefined,
+          message: routedMission,
+          thinking,
+          timeoutSeconds: 45,
+          workspace: missionWorkspace?.path ?? null,
+          dispatchId: dispatchRecord.id
+        },
+        { timeoutMs: 60_000 }
+      );
+      const now = new Date().toISOString();
+      dispatchRecord = {
+        ...dispatchRecord,
+        status: payload.status === "completed" ? "completed" : payload.status === "stalled" ? "stalled" : "running",
+        updatedAt: now,
+        runner: {
+          ...dispatchRecord.runner,
+          startedAt: now,
+          finishedAt: payload.status === "completed" || payload.status === "stalled" ? now : null,
+          lastHeartbeatAt: now
+        },
+        observation: {
+          runtimeId: payload.runId ? `runtime:gateway:${payload.runId}` : dispatchRecord.observation.runtimeId,
+          observedAt: now
+        },
+        result: payload,
+        error: payload.status === "stalled" ? payload.summary ?? "OpenClaw Gateway dispatch stalled." : null
+      };
+      await writeMissionDispatchRecord(dispatchRecord);
+    } else {
+      dispatchRecord = await launchMissionDispatchRunner(dispatchRecord);
+    }
   } catch (error) {
     dispatchRecord = {
       ...dispatchRecord,
@@ -122,7 +160,7 @@ export async function submitMissionDispatch(
 
   return {
     dispatchId: dispatchRecord.id,
-    runId: null,
+    runId: dispatchRecord.result?.runId ?? null,
     agentId,
     status: dispatchRecord.status,
     summary: "Mission accepted and queued for OpenClaw execution.",
@@ -187,7 +225,18 @@ export async function abortMissionDispatchTask(
   await writeMissionDispatchRecord(nextRecord);
   deps.invalidateMissionControlCaches();
 
-  const killedChildPid = await stopMissionDispatchChildProcess(nextRecord);
+  let killedChildPid: number | null = null;
+  const runId = dispatchRecord.result?.runId ?? null;
+  if (runId || dispatchRecord.sessionId) {
+    await getOpenClawAdapter().abortAgentTurn({
+      runId,
+      sessionId: dispatchRecord.sessionId,
+      agentId: dispatchRecord.agentId,
+      reason: abortReason
+    }, { timeoutMs: 15_000 }).catch(() => null);
+  }
+
+  killedChildPid = await stopMissionDispatchChildProcess(nextRecord);
 
   return {
     taskId,
