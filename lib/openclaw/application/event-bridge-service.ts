@@ -19,6 +19,7 @@ let subscription: OpenClawGatewayEventSubscription | null = null;
 let starting: Promise<void> | null = null;
 let lastError: string | null = null;
 let lastEventAt: string | null = null;
+const bridgeEventSubscribers = new Set<(frame: GatewayEventFrame) => void>();
 
 export function getOpenClawEventBridgeStatus() {
   return {
@@ -37,6 +38,15 @@ export function startOpenClawEventBridge() {
     starting = null;
   });
   void starting;
+}
+
+export function subscribeOpenClawEventBridgeEvents(callback: (frame: GatewayEventFrame) => void) {
+  bridgeEventSubscribers.add(callback);
+  startOpenClawEventBridge();
+
+  return () => {
+    bridgeEventSubscribers.delete(callback);
+  };
 }
 
 export async function readOpenClawEventBridgeRuntimes(): Promise<RuntimeRecord[]> {
@@ -121,6 +131,7 @@ async function startEventBridge() {
       },
       {
         onEvent: (frame) => {
+          notifyBridgeEventSubscribers(frame);
           void persistGatewayEvent(frame).catch((error) => {
             lastError = error instanceof Error ? error.message : String(error);
           });
@@ -138,6 +149,16 @@ async function startEventBridge() {
   } catch (error) {
     subscription = null;
     lastError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function notifyBridgeEventSubscribers(frame: GatewayEventFrame) {
+  for (const subscriber of [...bridgeEventSubscribers]) {
+    try {
+      subscriber(frame);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
   }
 }
 

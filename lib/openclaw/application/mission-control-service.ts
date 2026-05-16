@@ -74,6 +74,7 @@ import {
   type PresencePayload,
   type StatusPayload
 } from "@/lib/openclaw/client/gateway-client";
+import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
 import {
   buildOpenClawBinarySelectionSnapshot,
   readOpenClawBinarySelection
@@ -706,6 +707,7 @@ async function loadMissionControlSnapshots({
       modelReadiness,
       capabilityMatrix,
       commandHistory: getRecentOpenClawCommandDiagnostics(),
+      transport: getOpenClawGatewayClient().getDiagnostics?.(),
       versionDiagnostics,
       issues: buildDiagnosticIssues({
         payloadResults: snapshotIssueResults,

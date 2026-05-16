@@ -1,13 +1,17 @@
 import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
+import { subscribeOpenClawEventBridgeEvents } from "@/lib/openclaw/application/event-bridge-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const encoder = new TextEncoder();
-const STREAM_SNAPSHOT_INTERVAL_MS = 30_000;
+const STREAM_RECONCILIATION_INTERVAL_MS = 60_000;
+const STREAM_EVENT_DEBOUNCE_MS = 300;
 
 export async function GET(request: Request) {
   let interval: ReturnType<typeof setInterval> | undefined;
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let unsubscribeGatewayEvents: (() => void) | undefined;
   let closed = false;
   let snapshotTask: Promise<void> | null = null;
 
@@ -22,6 +26,12 @@ export async function GET(request: Request) {
           clearInterval(interval);
           interval = undefined;
         }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = undefined;
+        }
+        unsubscribeGatewayEvents?.();
+        unsubscribeGatewayEvents = undefined;
 
         request.signal.removeEventListener("abort", handleAbort);
       };
@@ -82,9 +92,28 @@ export async function GET(request: Request) {
         return snapshotTask;
       };
 
+      const scheduleSnapshot = (delayMs: number) => {
+        if (closed) {
+          return;
+        }
+
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+
+        debounceTimer = setTimeout(() => {
+          debounceTimer = undefined;
+          void sendSnapshot();
+        }, delayMs);
+      };
+
+      unsubscribeGatewayEvents = subscribeOpenClawEventBridgeEvents(() => {
+        scheduleSnapshot(STREAM_EVENT_DEBOUNCE_MS);
+      });
+
       interval = setInterval(() => {
         void sendSnapshot();
-      }, STREAM_SNAPSHOT_INTERVAL_MS);
+      }, STREAM_RECONCILIATION_INTERVAL_MS);
 
       sendEvent("ready", { ok: true });
       void sendSnapshot();
@@ -95,6 +124,10 @@ export async function GET(request: Request) {
       if (interval) {
         clearInterval(interval);
       }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      unsubscribeGatewayEvents?.();
     }
   });
 

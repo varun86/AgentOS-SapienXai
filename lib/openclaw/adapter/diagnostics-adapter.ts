@@ -76,6 +76,7 @@ export function buildGatewayDiagnostics(input: {
   modelReadiness: ModelReadiness;
   capabilityMatrix?: OpenClawCapabilityMatrix;
   commandHistory?: OpenClawCommandDiagnostic[];
+  transport?: MissionControlSnapshot["diagnostics"]["transport"];
   issues: string[];
   versionDiagnostics: ReturnType<typeof buildVersionDiagnostics>;
 }): MissionControlSnapshot["diagnostics"] {
@@ -111,6 +112,7 @@ export function buildGatewayDiagnostics(input: {
     capabilityMatrix: input.capabilityMatrix,
     runtime: input.runtimeDiagnostics,
     commandHistory: input.commandHistory,
+    transport: input.transport,
     securityWarnings: input.securityWarnings,
     issues: input.issues
   };

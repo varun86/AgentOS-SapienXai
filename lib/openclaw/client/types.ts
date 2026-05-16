@@ -6,6 +6,30 @@ export interface OpenClawCommandOptions {
   forceCli?: boolean;
 }
 
+export type OpenClawGatewayConnectionState =
+  | "cli-forced"
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "closed"
+  | "error";
+
+export type OpenClawGatewayClientDiagnostics = {
+  mode: "native-ws" | "cli";
+  connectionState: OpenClawGatewayConnectionState;
+  protocolVersion: number | null;
+  fallbackCounts: Record<string, number>;
+  lastNativeError: string | null;
+  lastConnectedAt: string | null;
+  lastDisconnectedAt: string | null;
+};
+
+export type OpenClawGatewayRequestPolicy = {
+  safety: "read" | "mutation";
+  timeoutMs?: number;
+  allowCliFallback?: boolean;
+};
+
 export interface OpenClawStreamCallbacks {
   onStdout?: (text: string) => Promise<void> | void;
   onStderr?: (text: string) => Promise<void> | void;
@@ -479,4 +503,6 @@ export interface OpenClawGatewayClient {
   ): Promise<OpenClawExecApprovalResolvePayload>;
   getCronStatus?(options?: OpenClawCommandOptions): Promise<OpenClawCronStatusPayload>;
   listCronJobs?(input?: OpenClawCronListInput, options?: OpenClawCommandOptions): Promise<OpenClawCronListPayload>;
+  close?(reason?: string): Promise<void> | void;
+  getDiagnostics?(): OpenClawGatewayClientDiagnostics;
 }

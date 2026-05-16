@@ -18,6 +18,8 @@ export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
 const initialOpenClawBinEnv = process.env.OPENCLAW_BIN?.trim() || "";
 let resolvedOpenClawBin = "";
 let resolveOpenClawBinPromise: Promise<string> | null = null;
+let resolvedOpenClawVersion: { value: string | null; expiresAt: number } | null = null;
+const OPENCLAW_VERSION_CACHE_TTL_MS = 5 * 60_000;
 const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
 const commandDiagnosticsLimit = 25;
 let commandDiagnosticSequence = 0;
@@ -325,10 +327,24 @@ export async function runOpenClawJsonStream<T>(
 }
 
 export async function resolveOpenClawVersion(): Promise<string | null> {
+  const now = Date.now();
+  if (resolvedOpenClawVersion && resolvedOpenClawVersion.expiresAt > now) {
+    return resolvedOpenClawVersion.value;
+  }
+
   try {
     const result = await runOpenClaw(["--version"], { timeoutMs: 5_000 });
-    return parseOpenClawVersion(result.stdout || result.stderr);
+    const value = parseOpenClawVersion(result.stdout || result.stderr);
+    resolvedOpenClawVersion = {
+      value,
+      expiresAt: now + OPENCLAW_VERSION_CACHE_TTL_MS
+    };
+    return value;
   } catch {
+    resolvedOpenClawVersion = {
+      value: null,
+      expiresAt: now + 30_000
+    };
     return null;
   }
 }
@@ -392,6 +408,7 @@ export function resetOpenClawBinCache() {
 
   resolvedOpenClawBin = "";
   resolveOpenClawBinPromise = null;
+  resolvedOpenClawVersion = null;
 }
 
 export function getOpenClawBinCandidates() {

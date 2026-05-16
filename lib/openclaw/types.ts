@@ -177,6 +177,7 @@ export interface GatewayDiagnostics {
   capabilityMatrix?: OpenClawCapabilityMatrix;
   runtime: OpenClawRuntimeDiagnostics;
   commandHistory?: OpenClawCommandDiagnostic[];
+  transport?: import("@/lib/openclaw/client/types").OpenClawGatewayClientDiagnostics;
   securityWarnings: string[];
   issues: string[];
 }
