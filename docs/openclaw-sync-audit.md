@@ -59,7 +59,7 @@ The CLI fallback remains intentional for:
 - Gateway process control: start/stop/restart still uses CLI because the Gateway cannot fully control its own process lifecycle from an unavailable or restarting state.
 - `models.scan`, because the current Gateway source does not expose a native `models.scan` method.
 - Gateway probe/discovery helpers, because the current supported native read surface is `health`/`status`; CLI `gateway probe` still provides broader reachability diagnostics.
-- Agent create/update fallback, when the Gateway does not advertise `agents.create` / `agents.update` or rejects the request. AgentOS still owns policy skills, bootstrap files, identity files, workspace manifests, and local metadata around those Gateway calls.
+- Agent create/update fallback, when the Gateway does not advertise `agents.create` / `agents.update` or rejects the request. AgentOS sends its requested agent `id` and `agentDir` to native create, then still owns policy skills, bootstrap files, identity files, workspace manifests, and local metadata around those Gateway calls.
 - Streaming chat transcript fallback where native session events are unavailable or older Gateways do not advertise compatible event subscriptions.
 - Channel/provider provisioning and route discovery with side effects across OpenClaw config, channel registries, logs, session stores, and AgentOS managed surface records.
 - Legacy planner/runtime compatibility paths that still depend on local OpenClaw state and CLI behavior.
@@ -116,6 +116,7 @@ AgentOS now treats the current method names listed above as the native path and 
 ## Remaining Risks
 
 - `agents.create` does not accept every AgentOS metadata side effect directly. AgentOS uses the native method first, then applies AgentOS-owned policy skills, bootstrap files, identity files, workspace manifests, and local metadata. Unsupported Gateways still use CLI/application fallback.
+- Older native-create attempts could leave a duplicate global OpenClaw agent beside the AgentOS workspace-local agent when the Gateway generated its own id/path. AgentOS suppresses that legacy duplicate in snapshots when the workspace and display name match and the workspace-local agent is present.
 - Direct streamed chat UI currently forces CLI transcript streaming because current Gateway session events can be status-only and may omit assistant response text. The native stream adapter remains covered for Gateway versions that emit usable assistant deltas/finals.
 - Config merge-patch paths cannot represent array-index writes safely; those paths continue through CLI fallback.
 - Some Gateway methods are available in source but not yet integrated because AgentOS does not add higher-level operator/workspace value there today, for example low-level `tools.*`, `agent.wait`, `sessions.preview`, device/node pairing APIs, and wizard RPCs.

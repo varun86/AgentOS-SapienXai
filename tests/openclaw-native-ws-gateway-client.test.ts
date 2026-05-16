@@ -1271,6 +1271,13 @@ test("native WS gateway client uses Gateway first for critical workflows", async
     "sessions.abort"
   ]);
   assert.deepEqual(fallback.calls.map((call) => call.method), []);
+  assert.deepEqual(sentFrames.find((frame) => frame.method === "agents.create")?.params, {
+    id: "agent-1",
+    agentId: "agent-1",
+    name: "agent-1",
+    workspace: "/workspace",
+    agentDir: "/agent"
+  });
   assert.equal(sentFrames.find((frame) => frame.method === "chat.send")?.params.sessionKey, "agent:agent-1:main");
   assert.equal(sentFrames.find((frame) => frame.method === "sessions.abort")?.params.runId, "run-1");
 });

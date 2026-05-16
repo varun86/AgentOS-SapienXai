@@ -26,7 +26,7 @@ Evidence sources:
 Confirmed Gateway methods relevant to this pass:
 
 - `agents.list`: already Gateway-first.
-- `agents.create`: method exists, but the current native shape does not cover AgentOS' custom `id`, `agentDir`, bindings, skills, and workspace metadata side effects.
+- `agents.create`: method exists. AgentOS passes its requested `id` and `agentDir` to avoid Gateway-generated duplicate agent records, but AgentOS still owns bindings, skills, and workspace metadata side effects.
 - `agents.update`: method exists, but only accepts `agentId`, optional `name`, optional `workspace`, optional `model`, and optional `avatar`.
 - `agents.delete`: method exists, accepts `agentId` and optional `deleteFiles`.
 - `chat.send`, `sessions.send`, `sessions.abort`, and `chat.abort` exist for native mission dispatch and abort.
@@ -137,5 +137,6 @@ A future SDK-backed client should implement the existing `OpenClawGatewayClient`
 
 - Direct chat streaming remains a compatibility-sensitive area because current Gateway session events can omit assistant text. AgentOS therefore keeps direct chat on CLI transcript streaming while retaining native adapter coverage for Gateway versions that emit usable assistant response content.
 - Agent create/update still require AgentOS-owned metadata/config side effects around the native lifecycle calls.
+- Agent list snapshots suppress legacy native-create duplicates when a global OpenClaw agent and an AgentOS workspace-local agent have the same workspace/display name. This is a compatibility guard for records produced before native create carried AgentOS `id` and `agentDir`.
 - Channel/provider provisioning remains CLI/application-service backed because it spans credentials, OpenClaw config, AgentOS registry metadata, managed route sync, and local session-store updates.
 - Native WS successful-auth runtime validation still requires a real Gateway token/password or a supported device-auth path.

@@ -1944,8 +1944,11 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
 
   addAgent(input: OpenClawAddAgentInput, options: OpenClawCommandOptions = {}) {
     const params: Record<string, unknown> = {
+      id: input.id,
+      agentId: input.id,
       name: input.name?.trim() || input.id,
-      workspace: input.workspace
+      workspace: input.workspace,
+      agentDir: input.agentDir
     };
 
     if (input.model) {

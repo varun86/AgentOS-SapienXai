@@ -11,7 +11,7 @@ export function buildAgentPayloadsFromConfig(
   agentConfig: AgentConfigPayload,
   openClawStateRootPath: string
 ): AgentPayload {
-  return agentConfig.map((entry) => ({
+  return dedupeLegacyAgentPayloads(agentConfig.map((entry) => ({
     id: entry.id,
     name: entry.name || entry.identity?.name || entry.id,
     identityName: entry.identity?.name,
@@ -21,7 +21,7 @@ export function buildAgentPayloadsFromConfig(
     agentDir: entry.agentDir || path.join(openClawStateRootPath, "agents", entry.id, "agent"),
     model: entry.model,
     isDefault: Boolean(entry.default)
-  }));
+  })), openClawStateRootPath);
 }
 
 export function buildAgentPayloadsFromGatewayList(
@@ -31,7 +31,7 @@ export function buildAgentPayloadsFromGatewayList(
 ): AgentPayload {
   const configByAgent = new Map(agentConfig.map((entry) => [entry.id, entry]));
 
-  return gatewayPayload.agents.map((entry) => {
+  return dedupeLegacyAgentPayloads(gatewayPayload.agents.map((entry) => {
     const configured = configByAgent.get(entry.id);
     const identity = entry.identity ?? configured?.identity;
     const workspace = normalizeOptionalValue(entry.workspace) ?? normalizeOptionalValue(configured?.workspace) ?? "";
@@ -48,5 +48,84 @@ export function buildAgentPayloadsFromGatewayList(
       model,
       isDefault: entry.id === gatewayPayload.defaultId || Boolean(configured?.default)
     };
-  });
+  }), openClawStateRootPath);
+}
+
+function dedupeLegacyAgentPayloads(agents: AgentPayload, openClawStateRootPath: string): AgentPayload {
+  const removableKeys = new Set<string>();
+  const groups = new Map<string, AgentPayload>();
+
+  for (const agent of agents) {
+    const key = buildLegacyDuplicateKey(agent);
+    if (!key) {
+      continue;
+    }
+
+    const group = groups.get(key) ?? [];
+    group.push(agent);
+    groups.set(key, group);
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) {
+      continue;
+    }
+
+    const workspaceManagedAgents = group.filter(isWorkspaceManagedAgent);
+    if (workspaceManagedAgents.length === 0) {
+      continue;
+    }
+
+    for (const candidate of group) {
+      if (
+        workspaceManagedAgents.includes(candidate) ||
+        !isGlobalStateAgentDir(candidate, openClawStateRootPath)
+      ) {
+        continue;
+      }
+
+      removableKeys.add(buildAgentPayloadKey(candidate));
+    }
+  }
+
+  return agents.filter((agent) => !removableKeys.has(buildAgentPayloadKey(agent)));
+}
+
+function buildLegacyDuplicateKey(agent: AgentPayload[number]) {
+  const workspace = normalizePathForComparison(agent.workspace);
+  const name = normalizeAgentNameForComparison(agent.identityName || agent.name || agent.id);
+
+  return workspace && name ? `${workspace}\0${name}` : null;
+}
+
+function buildAgentPayloadKey(agent: AgentPayload[number]) {
+  return `${agent.id}\0${normalizePathForComparison(agent.agentDir)}`;
+}
+
+function isWorkspaceManagedAgent(agent: AgentPayload[number]) {
+  const workspace = normalizePathForComparison(agent.workspace);
+  const agentDir = normalizePathForComparison(agent.agentDir);
+
+  if (!workspace || !agentDir) {
+    return false;
+  }
+
+  return agentDir.startsWith(`${path.join(workspace, ".openclaw", "agents")}${path.sep}`);
+}
+
+function isGlobalStateAgentDir(agent: AgentPayload[number], openClawStateRootPath: string) {
+  const agentDir = normalizePathForComparison(agent.agentDir);
+  const globalAgentRoot = normalizePathForComparison(path.join(openClawStateRootPath, "agents"));
+
+  return Boolean(agentDir && globalAgentRoot && agentDir.startsWith(`${globalAgentRoot}${path.sep}`));
+}
+
+function normalizePathForComparison(value: string | null | undefined) {
+  const normalized = normalizeOptionalValue(value);
+
+  return normalized ? path.normalize(normalized) : "";
+}
+
+function normalizeAgentNameForComparison(value: string | null | undefined) {
+  return normalizeOptionalValue(value)?.toLocaleLowerCase("en-US") ?? "";
 }
