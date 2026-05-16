@@ -46,6 +46,8 @@ Gateway-first now covers these operations when the Gateway is reachable, native 
 - `skills.status`
 - `plugins.uiDescriptors`
 - `agents.list`
+- `agents.create`
+- `agents.update`
 - `agents.delete`
 - `sessions.list`
 - `sessions.subscribe`
@@ -55,8 +57,12 @@ Gateway-first now covers these operations when the Gateway is reachable, native 
 - `chat.send`
 - `chat.abort`
 - `config.get` through Gateway config snapshots with AgentOS path extraction
+- `config.schema.lookup`
 - `config.schema`
 - `config.patch` / `config.apply` with `baseHash` concurrency protection
+- `logs.tail`
+- `exec.approval.list` / `exec.approval.resolve`
+- `cron.status` / `cron.list`
 - generic `call(method, params)`
 
 The same operations fall back to CLI on Gateway timeout, auth failure, unreachable socket, scope-limited response, malformed response, unavailable native credentials, or other Gateway failure.
@@ -64,7 +70,7 @@ The same operations fall back to CLI on Gateway timeout, auth failure, unreachab
 CLI remains intentional for operations without a confirmed stable Gateway contract or exact behavior match in this codebase:
 
 - gateway start/stop/restart
-- agent creation/update when AgentOS' custom workspace metadata, `agentDir`, bindings, or skills semantics cannot be represented safely by the current Gateway create/update payload
+- agent creation/update fallback when `agents.create` or `agents.update` is unavailable; AgentOS still applies policy skills, identity files, bootstrap files, workspace metadata, and local config side effects around the native calls
 - mission dispatch only when native Gateway methods are unsupported or fail
 - agent stream transcript behavior when native event subscription is unavailable
 - agent config read/write/sync helpers
@@ -85,8 +91,8 @@ Direct CLI usage is guarded by boundary tests. Current allowed files are fallbac
 | models status/list/scan | `openclaw models ... --json` | `models.authStatus`, `models.list`; no confirmed `models.scan` Gateway method | Gateway-first typed RPC for status/list; scan remains CLI | Yes | Low |
 | plugins / skills list | `openclaw plugins/skills list --json` | `plugins.uiDescriptors`, `skills.status` | Gateway-first typed RPC | Yes | Low |
 | agents list | `openclaw agents list --json` | `agents.list` | Gateway-first typed RPC, merged with local config for AgentOS fields | Yes | Medium |
-| agents create/update/delete | `openclaw agents add/delete` plus AgentOS config writes | `agents.create`, `agents.update`, `agents.delete` | Delete is Gateway-first; create/update remain CLI/application-owned until AgentOS metadata semantics are represented safely | Yes | Medium |
-| agent turn / stream | `openclaw agent --json` / JSON stream | `chat.send`, `sessions.send`, `sessions.abort`, `chat.abort`, `sessions.subscribe`, `sessions.messages.subscribe` | Gateway-first dispatch and abort; CLI runner/eventless transcript fallback | Yes; event subscription can be absent on older Gateway versions | High |
+| agents create/update/delete | `openclaw agents add/delete` plus AgentOS config writes | `agents.create`, `agents.update`, `agents.delete` | Gateway-first lifecycle calls; AgentOS-owned metadata side effects remain in application services | Yes, for unsupported older Gateway versions and local metadata side effects | Medium |
+| agent turn / stream | `openclaw agent --json` / JSON stream | `chat.send`, `sessions.send`, `sessions.abort`, `chat.abort`, `sessions.subscribe`, `sessions.messages.subscribe` | Gateway-first mission dispatch/abort and native stream adapter support; direct chat UI forces CLI transcript streaming until Gateway events include assistant text | Yes; event subscription can be absent or status-only on older/current Gateway versions | High |
 | sessions / recent activity | filesystem catalog plus status/session data | `sessions.list` | Gateway-first typed RPC with filesystem catalog fallback | Yes, for unavailable Gateway or CLI gateway-call failure | Medium |
 | config reads | `openclaw config get <path> --json` | `config.get` snapshot | Gateway-first snapshot read with AgentOS path extraction | Yes | Medium |
 | config set/unset | `openclaw config set/unset <path>` | `config.schema`, `config.patch`, `config.apply`, legacy `config.set` | Gateway-first path patch with base hash | Yes; CLI path-level set/unset is preferred over full overwrite when snapshots contain redacted secrets | Medium |
@@ -117,7 +123,7 @@ Mission-control diagnostics now exposes recent Gateway-first fallback issues as 
 Capability detection:
 
 - `OpenClawCapabilityMatrix` probes the native Gateway `connect` handshake and reads `hello-ok.features.methods` / `hello-ok.features.events`. Test hooks still support older discovery-shaped payloads.
-- Diagnostics and Settings expose OpenClaw version, Gateway protocol version, auth mode, advertised RPC methods, native mission dispatch support, config schema/patch support, event bridge support, channel support, skills support, approval support, and update support.
+- Diagnostics and Settings expose OpenClaw version, AgentOS' requested protocol range, negotiated Gateway protocol version, auth mode, auth role/scopes, advertised RPC methods/events, per-operation Gateway/CLI/degraded decisions, native mission dispatch support, config schema/lookup/patch support, event bridge support, logs support, cron support, channel support, skills support, approval support, and update support.
 - When OpenClaw does not advertise a method list, support is reported as `unknown` and the operation still degrades through the existing Gateway-first/CLI fallback path.
 
 Persistent event bridge:
@@ -128,7 +134,7 @@ Persistent event bridge:
 
 Config writes:
 
-- `setConfig` and `unsetConfig` now read the current Gateway config snapshot, probe `config.schema`, then prefer `config.patch` or `config.apply` with the snapshot `baseHash`.
+- `setConfig` and `unsetConfig` now read the current Gateway config snapshot, probe `config.schema.lookup` with `config.schema` fallback, then prefer `config.patch` or `config.apply` with the snapshot `baseHash`.
 - If patch/apply is unavailable, AgentOS only attempts legacy full `config.set` when the snapshot does not contain redacted OpenClaw secrets.
 - Redacted secrets such as `__OPENCLAW_REDACTED__` are never written back through a full Gateway overwrite; AgentOS falls back to CLI path-level `config set/unset` instead.
 
@@ -166,7 +172,7 @@ Current fragile areas:
 - Native WS cannot use secrets that OpenClaw only returns in redacted form. Set an env token/password or use a future stable SDK/device-auth path to avoid CLI fallback in those environments.
 - AgentOS Settings now exposes native Gateway auth status, a secure credential form, and a server-side auth test. It reports redacted config secrets, env credential presence, disabled native WS flags, and the current recovery recommendation without returning raw token/password values. Saved credentials are written only to local `.env.local`, which is gitignored, and are applied to the current server session.
 - Gateway start/stop/restart still cannot be Gateway-first because it controls the Gateway process itself.
-- Agent delete is Gateway-first when `agents.delete` is available. Agent creation remains CLI-backed because current `agents.create` does not cover AgentOS' custom `id`, `agentDir`, bindings, skills, and workspace metadata semantics.
+- Agent create/update/delete are Gateway-first when the Gateway advertises the lifecycle methods. AgentOS still owns local metadata, identity, policy skill, bootstrap, and workspace manifest side effects around those native calls.
 - Mission dispatch and abort are Gateway-first when `chat.send`/`sessions.send` and `sessions.abort`/`chat.abort` are available. CLI runner fallback remains for older or unsupported Gateway versions.
 - Native streaming is represented through the persistent Gateway event bridge when `sessions.subscribe` / `sessions.messages.subscribe` is available; CLI/session transcript fallback remains for current snapshot compatibility.
 - Channel/provider provisioning remains CLI-backed because it has side effects across OpenClaw config, channel registries, discovery, and managed routing.
@@ -177,7 +183,9 @@ Current fragile areas:
 
 - Gateway available uses native Gateway for typed status requests.
 - Capability matrix detection maps advertised methods into feature support flags and unsupported-method diagnostics.
+- Protocol mismatch diagnostics include the negotiated protocol, AgentOS' supported range, and recovery guidance.
 - Native mission dispatch uses `chat.send` when the capability matrix advertises it.
+- Direct agent chat covers native stream adapter support and per-request CLI stream fallback. The agent-card chat route currently forces CLI transcript streaming because current Gateway session events can be status-only and omit assistant text.
 - Gateway event bridge frames normalize into AgentOS runtime records.
 - Gateway malformed response falls back to CLI.
 - Gateway failure followed by CLI failure returns the actionable CLI failure while recording Gateway diagnostics.
@@ -186,6 +194,7 @@ Current fragile areas:
 - Settings auth status explains redacted secrets, env credential readiness, force-disabled native WS, and local `.env.local` credential saves without leaking secrets.
 - Recovered Gateway operations clear stale fallback diagnostics for that operation.
 - Agent list/lifecycle, session list, config path reads, config path mutations, mission dispatch, and mission abort use Gateway first where the Gateway contract is usable.
+- Native `logs.tail`, `exec.approval.*`, `cron.status`, and `cron.list` adapter methods are wired for diagnostics/integration use.
 - The provider factory accepts a replacement client provider for a future SDK-backed implementation.
 - Components, hooks, and non-transitional app routes cannot import low-level CLI/raw Gateway clients.
 - Existing boundary tests continue to block production imports from `lib/openclaw/service.ts`, direct undocumented CLI JSON usage, direct undocumented CLI command usage, and OpenClaw import cycles.
@@ -225,7 +234,7 @@ Critical CLI-backed migration review:
 
 - See `docs/openclaw-critical-cli-backed-migration.md` for the detailed agent mutation, agent run/streaming, and channel/provider provisioning matrix.
 - `channels.status` is now Gateway-first behind `OpenClawGatewayClient` and `OpenClawAdapter`.
-- Agent create/update/delete and agent run/streaming remain CLI fallback required because the confirmed Gateway schemas do not preserve AgentOS' current inputs and transcript/session side effects.
+- Agent create/update/delete and agent run/streaming are Gateway-first where advertised. CLI/application fallback remains required for unsupported older Gateway versions, Gateway failures, and AgentOS-owned local metadata/transcript compatibility side effects.
 
 ## Remaining Risks
 

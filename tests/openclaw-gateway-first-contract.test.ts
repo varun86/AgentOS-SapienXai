@@ -22,20 +22,27 @@ test("capability matrix detects advertised Gateway-first methods", async () => {
     assert.equal(method, "rpc.discover");
     return {
       protocolVersion: 4,
-      auth: { mode: "device" },
+      auth: { mode: "device", role: "operator", scopes: ["operator.read", "operator.write"] },
       methods: [
         "chat.send",
         "chat.abort",
         "sessions.subscribe",
         "config.schema",
+        "config.schema.lookup",
         "config.patch",
+        "logs.tail",
         "agents.create",
+        "agents.update",
         "agents.delete",
         "channels.status",
         "skills.status",
         "exec.approval.list",
+        "exec.approval.resolve",
+        "cron.list",
+        "cron.status",
         "update.status"
-      ]
+      ],
+      events: ["session.message", "session.tool"]
     };
   });
 
@@ -44,12 +51,20 @@ test("capability matrix detects advertised Gateway-first methods", async () => {
   assert.equal(matrix.openClawVersion, "9.9.9");
   assert.equal(matrix.gatewayProtocolVersion, "4");
   assert.equal(matrix.authMode, "device");
+  assert.equal(matrix.authRole, "operator");
+  assert.deepEqual(matrix.authScopes, ["operator.read", "operator.write"]);
+  assert.deepEqual(matrix.requestedProtocolRange, { min: 3, max: 4 });
+  assert.equal(matrix.configSchemaLookup, "supported");
   assert.equal(matrix.nativeMissionDispatch, "supported");
   assert.equal(matrix.nativeAgentLifecycle, "supported");
   assert.equal(matrix.configPatch, "supported");
   assert.equal(matrix.eventBridge, "supported");
   assert.equal(matrix.channels, "supported");
   assert.equal(matrix.approvals, "supported");
+  assert.equal(matrix.logsTail, "supported");
+  assert.equal(matrix.cronRead, "supported");
+  assert.equal(matrix.operations?.agentCreate.mode, "gateway-native");
+  assert.equal(matrix.operations?.missionStream.mode, "gateway-native");
   assert.ok(matrix.unsupportedGatewayMethods.includes("models.list"));
 });
 
@@ -136,6 +151,9 @@ test("Gateway event bridge normalizes chat, tool, session, and approval events i
 
 function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenClawAdapter {
   return {
+    async getHealth() {
+      return { ok: true };
+    },
     async getStatus() {
       return { version: "9.9.9" };
     },
@@ -179,6 +197,9 @@ function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenCl
     async getConfigSchema() {
       return null;
     },
+    async lookupConfigSchema() {
+      return null;
+    },
     async hasConfig() {
       return false;
     },
@@ -189,6 +210,9 @@ function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenCl
       return { stdout: "", stderr: "" };
     },
     async addAgent() {
+      return { stdout: "", stderr: "" };
+    },
+    async updateAgent() {
       return { stdout: "", stderr: "" };
     },
     async deleteAgent() {
@@ -211,6 +235,21 @@ function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenCl
     },
     async call<TPayload>() {
       return {} as TPayload;
+    },
+    async tailLogs() {
+      return {};
+    },
+    async listExecApprovals() {
+      return {};
+    },
+    async resolveExecApproval() {
+      return {};
+    },
+    async getCronStatus() {
+      return {};
+    },
+    async listCronJobs() {
+      return {};
     },
     ...overrides
   };

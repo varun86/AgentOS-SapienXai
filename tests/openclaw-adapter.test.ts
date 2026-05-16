@@ -27,6 +27,10 @@ type MockCall = {
 function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {}) {
   const calls: MockCall[] = [];
   const client: OpenClawGatewayClient = {
+    async getHealth(options?: OpenClawCommandOptions) {
+      calls.push({ method: "getHealth", options });
+      return { ok: true };
+    },
     async getStatus(options?: OpenClawCommandOptions) {
       calls.push({ method: "getStatus", options });
       return { version: "1.2.3" };
@@ -70,6 +74,26 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "call", action: method, options });
       return { params } as TPayload;
     },
+    async tailLogs(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "tailLogs", options });
+      return { lines: [] };
+    },
+    async listExecApprovals(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "listExecApprovals", options });
+      return { approvals: [] };
+    },
+    async resolveExecApproval(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "resolveExecApproval", action: input.approvalId, options });
+      return { ok: true, approvalId: input.approvalId };
+    },
+    async getCronStatus(options?: OpenClawCommandOptions) {
+      calls.push({ method: "getCronStatus", options });
+      return { enabled: true };
+    },
+    async listCronJobs(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "listCronJobs", options });
+      return { jobs: [] };
+    },
     async getConfig<TPayload>(path: string, options?: OpenClawCommandOptions) {
       calls.push({ method: "getConfig", action: path, options });
       return { path } as TPayload;
@@ -77,6 +101,10 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
     async getConfigSchema(options?: OpenClawCommandOptions) {
       calls.push({ method: "getConfigSchema", options });
       return null;
+    },
+    async lookupConfigSchema(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "lookupConfigSchema", action: input.path, options });
+      return { path: input.path };
     },
     async hasConfig(path: string, options?: OpenClawCommandOptions) {
       calls.push({ method: "hasConfig", action: path, options });
@@ -92,6 +120,10 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
     },
     async addAgent(input, options?: OpenClawCommandOptions) {
       calls.push({ method: "addAgent", action: input.id, options });
+      return { stdout: "", stderr: "", code: 0 };
+    },
+    async updateAgent(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "updateAgent", action: input.id, options });
       return { stdout: "", stderr: "", code: 0 };
     },
     async deleteAgent(agentId: string, options?: OpenClawCommandOptions) {
@@ -197,6 +229,7 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   setOpenClawGatewayClientForTesting(client);
 
   const adapter = getOpenClawAdapter();
+  await adapter.getHealth({ timeoutMs: 0 });
   await adapter.listSkills({ eligible: true, timeoutMs: 1 });
   await adapter.listPlugins({ timeoutMs: 2 });
   await adapter.listModels({ all: true }, { timeoutMs: 3 });
@@ -206,10 +239,14 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   await adapter.getChannelStatus({ probe: true }, { timeoutMs: 4 });
   assert.deepEqual(await adapter.getConfig("gateway", { timeoutMs: 5 }), { path: "gateway" });
   assert.equal(await adapter.getConfigSchema({ timeoutMs: 5 }), null);
+  assert.deepEqual(await adapter.lookupConfigSchema({ path: "gateway.remote.url" }, { timeoutMs: 5 }), {
+    path: "gateway.remote.url"
+  });
   assert.equal(await adapter.hasConfig("gateway.remote.url", { timeoutMs: 6 }), true);
   await adapter.setConfig("gateway.remote.url", "ws://127.0.0.1:18789", { strictJson: true, timeoutMs: 7 });
   await adapter.unsetConfig("gateway.remote.url", { timeoutMs: 8 });
   await adapter.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" }, { timeoutMs: 9 });
+  await adapter.updateAgent({ id: "agent-1", name: "Agent One" }, { timeoutMs: 9 });
   await adapter.deleteAgent("agent-1", { timeoutMs: 10 });
   assert.deepEqual(await adapter.runAgentTurn({ agentId: "agent-1", message: "hello" }, { timeoutMs: 11 }), {
     runId: "run-1"
@@ -223,8 +260,14 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   );
   await adapter.probeGateway({ timeoutMs: 13 });
   assert.deepEqual(await adapter.call("health", { probe: true }, { timeoutMs: 14 }), { params: { probe: true } });
+  await adapter.tailLogs({ limit: 10 }, { timeoutMs: 15 });
+  await adapter.listExecApprovals({ status: "pending" }, { timeoutMs: 16 });
+  await adapter.resolveExecApproval({ approvalId: "approval-1", decision: "allow" }, { timeoutMs: 17 });
+  await adapter.getCronStatus({ timeoutMs: 18 });
+  await adapter.listCronJobs({ includeDisabled: true }, { timeoutMs: 19 });
 
   assert.deepEqual(calls, [
+    { method: "getHealth", options: { timeoutMs: 0 } },
     { method: "listSkills", options: { eligible: true, timeoutMs: 1 } },
     { method: "listPlugins", options: { timeoutMs: 2 } },
     { method: "listModels", options: { timeoutMs: 3 } },
@@ -234,15 +277,22 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "getChannelStatus", options: { timeoutMs: 4 } },
     { method: "getConfig", action: "gateway", options: { timeoutMs: 5 } },
     { method: "getConfigSchema", options: { timeoutMs: 5 } },
+    { method: "lookupConfigSchema", action: "gateway.remote.url", options: { timeoutMs: 5 } },
     { method: "hasConfig", action: "gateway.remote.url", options: { timeoutMs: 6 } },
     { method: "setConfig", action: "gateway.remote.url", options: { strictJson: true, timeoutMs: 7 } },
     { method: "unsetConfig", action: "gateway.remote.url", options: { timeoutMs: 8 } },
     { method: "addAgent", action: "agent-1", options: { timeoutMs: 9 } },
+    { method: "updateAgent", action: "agent-1", options: { timeoutMs: 9 } },
     { method: "deleteAgent", action: "agent-1", options: { timeoutMs: 10 } },
     { method: "runAgentTurn", action: "agent-1", options: { timeoutMs: 11 } },
     { method: "abortAgentTurn", action: "run-1", options: { timeoutMs: 11 } },
     { method: "streamAgentTurn", action: "agent-1", options: { timeoutMs: 12 } },
     { method: "probeGateway", options: { timeoutMs: 13 } },
-    { method: "call", action: "health", options: { timeoutMs: 14 } }
+    { method: "call", action: "health", options: { timeoutMs: 14 } },
+    { method: "tailLogs", options: { timeoutMs: 15 } },
+    { method: "listExecApprovals", options: { timeoutMs: 16 } },
+    { method: "resolveExecApproval", action: "approval-1", options: { timeoutMs: 17 } },
+    { method: "getCronStatus", options: { timeoutMs: 18 } },
+    { method: "listCronJobs", options: { timeoutMs: 19 } }
   ]);
 });

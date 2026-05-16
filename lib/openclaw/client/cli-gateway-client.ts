@@ -19,14 +19,27 @@ import type {
   OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
+  OpenClawConfigSchemaLookupInput,
+  OpenClawConfigSchemaLookupPayload,
+  OpenClawCronListInput,
+  OpenClawCronListPayload,
+  OpenClawCronStatusPayload,
+  OpenClawExecApprovalListInput,
+  OpenClawExecApprovalListPayload,
+  OpenClawExecApprovalResolveInput,
+  OpenClawExecApprovalResolvePayload,
   OpenClawGatewayClient,
+  OpenClawHealthPayload,
   OpenClawListModelsInput,
   OpenClawListSessionsInput,
+  OpenClawLogsTailInput,
+  OpenClawLogsTailPayload,
   OpenClawModelScanPayload,
   OpenClawPluginListPayload,
   OpenClawSessionsPayload,
   OpenClawSkillListPayload,
   OpenClawStreamCallbacks,
+  OpenClawUpdateAgentInput,
   StatusPayload
 } from "@/lib/openclaw/client/types";
 
@@ -55,6 +68,10 @@ function buildAgentTurnArgs(input: OpenClawAgentTurnInput) {
 }
 
 export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
+  getHealth(options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawHealthPayload>("health", {}, options);
+  }
+
   getStatus(options: OpenClawCommandOptions = {}) {
     return runOpenClawJson<StatusPayload>(["status", "--json"], options);
   }
@@ -161,6 +178,11 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     return this.call<Record<string, unknown>>("config.schema", {}, options).catch(() => null);
   }
 
+  async lookupConfigSchema(input: OpenClawConfigSchemaLookupInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawConfigSchemaLookupPayload>("config.schema.lookup", { path: input.path }, options)
+      .catch(() => null);
+  }
+
   async hasConfig(path: string, options: OpenClawCommandOptions = {}) {
     try {
       await runOpenClaw(["config", "get", path, "--json"], options);
@@ -214,6 +236,12 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     return runOpenClaw(args, options);
   }
 
+  async updateAgent(input: OpenClawUpdateAgentInput, options: OpenClawCommandOptions = {}) {
+    void input;
+    void options;
+    return { stdout: JSON.stringify({ ok: true, fallback: "application-config" }), stderr: "" };
+  }
+
   deleteAgent(agentId: string, options: OpenClawCommandOptions = {}) {
     return runOpenClaw(["agents", "delete", agentId, "--force", "--json"], options);
   }
@@ -243,5 +271,29 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
       ...options,
       ...callbacks
     });
+  }
+
+  tailLogs(input: OpenClawLogsTailInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawLogsTailPayload>("logs.tail", { ...input }, options);
+  }
+
+  listExecApprovals(input: OpenClawExecApprovalListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawExecApprovalListPayload>("exec.approval.list", { ...input }, options);
+  }
+
+  resolveExecApproval(input: OpenClawExecApprovalResolveInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawExecApprovalResolvePayload>("exec.approval.resolve", {
+      approvalId: input.approvalId,
+      decision: input.decision,
+      reason: input.reason ?? undefined
+    }, options);
+  }
+
+  getCronStatus(options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawCronStatusPayload>("cron.status", {}, options);
+  }
+
+  listCronJobs(input: OpenClawCronListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawCronListPayload>("cron.list", { ...input }, options);
   }
 }

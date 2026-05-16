@@ -349,7 +349,7 @@ function renderAgentReplyText(result: MissionResponse) {
     .map((entry) => sanitizeAgentChatReplyText(entry.text))
     .filter(Boolean)
     .join("\n\n");
-  return payloadText || sanitizeAgentChatReplyText(result.summary) || "No response text was returned.";
+  return payloadText || sanitizeAgentChatReplyText(result.summary);
 }
 
 function recoverDirectIdentityText(text: string, agentName: string, operatorMessage: string) {

@@ -27,6 +27,11 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
   failStatus = false;
   statusPayload: Record<string, unknown> = {};
 
+  async getHealth() {
+    this.calls.push({ method: "getHealth" });
+    return { ok: true };
+  }
+
   async getStatus() {
     this.calls.push({ method: "getStatus" });
     if (this.failStatus) {
@@ -285,6 +290,35 @@ test("native WS gateway client exposes handshake feature discovery", async () =>
   assert.deepEqual(fallback.calls, []);
 });
 
+test("native WS gateway client records protocol mismatch recovery diagnostics", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  fallback.statusPayload = { version: "fallback" };
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: { protocol: 99 }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(await client.getStatus(), { version: "fallback" });
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect"]);
+  const [diagnostic] = getRecentOpenClawGatewayFallbackDiagnostics();
+  assert.equal(diagnostic.operation, "status");
+  assert.equal(diagnostic.kind, "protocol-mismatch");
+  assert.match(diagnostic.recovery, /supported range 3-4/);
+});
+
 test("native WS gateway client uses Gateway first for typed status requests", async () => {
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();
@@ -331,7 +365,7 @@ test("native WS gateway client uses Gateway first for typed status requests", as
     platform: process.platform,
     mode: "backend"
   });
-  assert.equal(sentFrames[0]?.params.minProtocol, 4);
+  assert.equal(sentFrames[0]?.params.minProtocol, 3);
   assert.equal(sentFrames[0]?.params.maxProtocol, 4);
   assert.deepEqual(sentFrames[0]?.params.scopes, [
     "operator.admin",
@@ -963,7 +997,7 @@ test("native WS gateway client mutates config through Gateway snapshots", async 
     "connect",
     "config.get",
     "connect",
-    "config.schema",
+    "config.schema.lookup",
     "connect",
     "config.patch"
   ]);
@@ -971,6 +1005,65 @@ test("native WS gateway client mutates config through Gateway snapshots", async 
     raw: JSON.stringify({ gateway: { remote: { url: "ws://127.0.0.1:18789" } } }),
     baseHash: "hash-1"
   });
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client falls back from config.patch to config.apply", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      if (frame.method === "config.patch") {
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: false,
+          error: { message: "unknown method: config.patch" }
+        });
+        return;
+      }
+
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? { protocol: 4 }
+          : frame.method === "config.get"
+            ? {
+                exists: true,
+                valid: true,
+                hash: "hash-2",
+                config: {
+                  gateway: {
+                    remote: {}
+                  }
+                }
+              }
+            : { ok: true, method: frame.method }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.setConfig("gateway.remote.url", "ws://127.0.0.1:18789");
+
+  assert.match(result.stdout, /"ok":true/);
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "config.get",
+    "connect",
+    "config.schema.lookup",
+    "connect",
+    "config.patch",
+    "connect",
+    "config.apply"
+  ]);
   assert.deepEqual(fallback.calls, []);
 });
 
@@ -1073,6 +1166,48 @@ test("native WS gateway client falls back to CLI client on timeout", async () =>
   assert.equal(fallback.calls.length, 1);
 });
 
+test("native WS gateway client honors forced CLI mode without opening a socket", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket(() => {
+    throw new Error("socket should not be used");
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250,
+    forceCli: true
+  });
+
+  const result = await client.call<{ fallback: boolean; method: string }>("health", { probe: true });
+
+  assert.deepEqual(result, { fallback: true, method: "health", params: { probe: true } });
+  assert.deepEqual(sentFrames, []);
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["health"]);
+});
+
+test("native WS gateway client honors per-request CLI stream fallback", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket(() => {
+    throw new Error("socket should not be used");
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await client.streamAgentTurn(
+    { agentId: "agent-1", sessionId: "session-1", message: "hello" },
+    {},
+    { forceCli: true }
+  );
+
+  assert.deepEqual(sentFrames, []);
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["streamAgentTurn"]);
+});
+
 test("native WS gateway client classifies unknown Gateway methods as unsupported", async () => {
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();
@@ -1127,15 +1262,275 @@ test("native WS gateway client uses Gateway first for critical workflows", async
 
   assert.deepEqual(sentFrames.map((frame) => frame.method), [
     "connect",
+    "agents.create",
+    "connect",
     "agents.delete",
     "connect",
     "chat.send",
     "connect",
     "sessions.abort"
   ]);
-  assert.deepEqual(fallback.calls.map((call) => call.method), ["addAgent"]);
+  assert.deepEqual(fallback.calls.map((call) => call.method), []);
   assert.equal(sentFrames.find((frame) => frame.method === "chat.send")?.params.sessionKey, "agent:agent-1:main");
   assert.equal(sentFrames.find((frame) => frame.method === "sessions.abort")?.params.runId, "run-1");
+});
+
+test("native WS gateway client falls back before agents.create when method is not advertised", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["agents.list", "agents.delete"]
+              }
+            }
+          : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await client.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" });
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect"]);
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["addAgent"]);
+  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.operation, "agents.create");
+  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.kind, "unsupported");
+});
+
+test("native WS gateway client uses agents.update when supported", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 4 } : { ok: true, agentId: "agent-1" }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await client.updateAgent({ id: "agent-1", name: "Agent One", workspace: "/workspace", model: "openai/test" });
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "agents.update"]);
+  assert.deepEqual(sentFrames[1]?.params, {
+    agentId: "agent-1",
+    name: "Agent One",
+    workspace: "/workspace",
+    model: "openai/test"
+  });
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client exposes optional Gateway support methods", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? { protocol: 4 }
+          : frame.method === "logs.tail"
+            ? { lines: ["log"] }
+            : frame.method === "exec.approval.list"
+              ? { approvals: [{ id: "approval-1" }] }
+              : frame.method === "exec.approval.resolve"
+                ? { ok: true, approvalId: "approval-1" }
+                : frame.method === "cron.status"
+                  ? { enabled: true }
+                  : frame.method === "cron.list"
+                    ? { jobs: [{ id: "job-1" }] }
+                    : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(await client.tailLogs({ limit: 1 }), { lines: ["log"] });
+  assert.deepEqual(await client.listExecApprovals({ status: "pending" }), { approvals: [{ id: "approval-1" }] });
+  assert.deepEqual(await client.resolveExecApproval({ approvalId: "approval-1", decision: "allow" }), {
+    ok: true,
+    approvalId: "approval-1"
+  });
+  assert.deepEqual(await client.getCronStatus(), { enabled: true });
+  assert.deepEqual(await client.listCronJobs({ includeDisabled: true }), { jobs: [{ id: "job-1" }] });
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "logs.tail",
+    "connect",
+    "exec.approval.list",
+    "connect",
+    "exec.approval.resolve",
+    "connect",
+    "cron.status",
+    "connect",
+    "cron.list"
+  ]);
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client streams agent turns through chat.send and session events", async () => {
+  const fallback = new FallbackGatewayClient();
+  const stdout: string[] = [];
+  let subscriptionSocket: { emitMessage: (frame: Record<string, unknown>) => void } | null = null;
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["chat.send", "sessions.subscribe", "sessions.messages.subscribe"],
+                events: ["session.message"]
+              }
+            }
+          : { ok: true, runId: "run-1", status: "running" }
+      });
+
+      if (frame.method === "sessions.messages.subscribe") {
+        subscriptionSocket = socket;
+      }
+
+      if (frame.method === "chat.send") {
+        subscriptionSocket?.emitMessage({
+          type: "event",
+          event: "session.message",
+          payload: {
+            sessionKey: "agent:agent-1:explicit:session-1",
+            runId: "run-1",
+            status: "completed",
+            message: { text: "Done from Gateway" }
+          }
+        });
+      }
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.streamAgentTurn(
+    { agentId: "agent-1", sessionId: "session-1", message: "hello", timeoutSeconds: 1 },
+    {
+      onStdout: (text) => {
+        stdout.push(text);
+      }
+    }
+  );
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "sessions.subscribe",
+    "sessions.messages.subscribe",
+    "connect",
+    "chat.send"
+  ]);
+  assert.equal(result.runId, "run-1");
+  assert.equal(result.status, "completed");
+  assert.equal(result.payloads?.[0]?.text, "Done from Gateway");
+  assert.match(stdout.join(""), /Done from Gateway/);
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client does not synthesize final text for empty stream completion events", async () => {
+  const fallback = new FallbackGatewayClient();
+  const stdout: string[] = [];
+  let subscriptionSocket: { emitMessage: (frame: Record<string, unknown>) => void } | null = null;
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["chat.send", "sessions.subscribe", "sessions.messages.subscribe"],
+                events: ["session.message"]
+              }
+            }
+          : { runId: "run-1", status: "running" }
+      });
+
+      if (frame.method === "sessions.messages.subscribe") {
+        subscriptionSocket = socket;
+      }
+
+      if (frame.method === "chat.send") {
+        subscriptionSocket?.emitMessage({
+          type: "event",
+          event: "session.message",
+          payload: {
+            sessionKey: "agent:agent-1:explicit:session-1",
+            runId: "run-1",
+            status: "completed"
+          }
+        });
+      }
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.streamAgentTurn(
+    { agentId: "agent-1", sessionId: "session-1", message: "hello" },
+    {
+      onStdout: (text) => {
+        stdout.push(text);
+      }
+    },
+    { timeoutMs: 25 }
+  );
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "sessions.subscribe",
+    "sessions.messages.subscribe",
+    "connect",
+    "chat.send"
+  ]);
+  assert.equal(result.runId, "run-1");
+  assert.equal(result.status, "running");
+  assert.equal(result.summary, undefined);
+  assert.deepEqual(stdout, []);
+  assert.deepEqual(fallback.calls, []);
 });
 
 test("native WS gateway client subscribes to Gateway session events without legacy events.subscribe", async () => {

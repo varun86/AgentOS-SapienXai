@@ -2,8 +2,17 @@ import "server-only";
 
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import type { OpenClawGatewayClientError } from "@/lib/openclaw/client/gateway-client";
-import { NativeWsOpenClawGatewayClient, isCliGatewayClientForcedByEnv } from "@/lib/openclaw/client/gateway-client";
-import type { OpenClawCapabilityMatrix, OpenClawCapabilitySupport } from "@/lib/openclaw/types";
+import {
+  NativeWsOpenClawGatewayClient,
+  OPENCLAW_GATEWAY_PROTOCOL_RANGE,
+  getRecentOpenClawGatewayFallbackDiagnostics,
+  isCliGatewayClientForcedByEnv
+} from "@/lib/openclaw/client/gateway-client";
+import type {
+  OpenClawCapabilityMatrix,
+  OpenClawCapabilityOperation,
+  OpenClawCapabilitySupport
+} from "@/lib/openclaw/types";
 
 const capabilityCacheTtlMs = 60_000;
 const knownGatewayFirstMethods = [
@@ -47,10 +56,18 @@ const knownGatewayFirstMethods = [
   "skills.install",
   "skills.update",
   "plugins.uiDescriptors",
+  "logs.tail",
+  "exec.approval.request",
+  "exec.approval.get",
   "exec.approval.list",
   "exec.approval.resolve",
+  "exec.approval.waitDecision",
+  "exec.approvals.get",
+  "exec.approvals.set",
   "plugin.approval.list",
   "plugin.approval.resolve",
+  "cron.list",
+  "cron.status",
   "update.status",
   "update.run",
   "gateway.restart.preflight",
@@ -108,6 +125,8 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
   const version = readString(status?.runtimeVersion) ?? readString(status?.overview?.version) ?? readString(status?.version);
   let protocolVersion: string | null = null;
   let authMode: string | null = null;
+  let authRole: string | null = null;
+  let authScopes: string[] = [];
   let supportedMethods: string[] = [];
   let supportedEvents: string[] = [];
 
@@ -124,6 +143,8 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
 
       protocolVersion = readProtocolVersion(capabilityPayload);
       authMode = readAuthMode(capabilityPayload);
+      authRole = readAuthRole(capabilityPayload);
+      authScopes = readAuthScopes(capabilityPayload);
       supportedMethods = readSupportedMethods(capabilityPayload);
       supportedEvents = readSupportedEvents(capabilityPayload);
     } else {
@@ -133,6 +154,8 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
         });
         protocolVersion = readProtocolVersion(hello);
         authMode = readAuthMode(hello);
+        authRole = readAuthRole(hello);
+        authScopes = readAuthScopes(hello);
         supportedMethods = readSupportedMethods(hello);
         supportedEvents = readSupportedEvents(hello);
       } catch (error) {
@@ -153,14 +176,88 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
   const unsupportedGatewayMethods = methodSet.size > 0
     ? knownGatewayFirstMethods.filter((method) => !methodSet.has(method))
     : [];
+  const operation = (
+    methods: string[],
+    events: string[] = [],
+    fallbackAllowed = true
+  ): OpenClawCapabilityOperation => {
+    if (isCliGatewayClientForcedByEnv()) {
+      return {
+        mode: "cli-fallback",
+        methods,
+        events,
+        fallbackAllowed,
+        reason: "Native Gateway WS is disabled by environment configuration."
+      };
+    }
+
+    if (methodSet.size === 0 && eventSet.size === 0) {
+      return {
+        mode: "unknown",
+        methods,
+        events,
+        fallbackAllowed,
+        reason: "Gateway did not advertise feature metadata; AgentOS will attempt Gateway first and fall back when needed."
+      };
+    }
+
+    const methodSupported = methods.some((method) => methodSet.has(method));
+    const eventSupported = events.some((event) => eventSet.has(event));
+    if (methodSupported || eventSupported) {
+      return {
+        mode: "gateway-native",
+        methods,
+        events,
+        fallbackAllowed,
+        reason: "OpenClaw Gateway advertises native support."
+      };
+    }
+
+    return {
+      mode: fallbackAllowed ? "degraded" : "disabled",
+      methods,
+      events,
+      fallbackAllowed,
+      reason: fallbackAllowed
+        ? "OpenClaw Gateway does not advertise native support; AgentOS will use compatibility fallback."
+        : "OpenClaw Gateway does not advertise native support and no safe fallback is available."
+    };
+  };
+  const operations: Record<string, OpenClawCapabilityOperation> = {
+    health: operation(["health", "status"]),
+    logsTail: operation(["logs.tail"]),
+    configSchemaLookup: operation(["config.schema.lookup", "config.schema"]),
+    configPatch: operation(["config.patch", "config.apply", "config.set"]),
+    agentCreate: operation(["agents.create"]),
+    agentUpdate: operation(["agents.update"]),
+    agentDelete: operation(["agents.delete"]),
+    missionDispatch: operation(["chat.send", "sessions.send"]),
+    missionStream: operation(["sessions.subscribe", "sessions.messages.subscribe"], ["chat", "agent", "session.message", "session.tool"]),
+    execApprovals: operation(["exec.approval.list", "exec.approval.get", "exec.approval.resolve", "exec.approvals.get", "exec.approvals.set"]),
+    cronRead: operation(["cron.list", "cron.status"]),
+    channels: operation(["channels.status"]),
+    skills: operation(["skills.status"]),
+    updates: operation(["update.status", "update.run", "status"])
+  };
+  const fallbackReasons = getRecentOpenClawGatewayFallbackDiagnostics().map(
+    (entry) => `${entry.operation}: ${entry.kind}: ${entry.issue} Recovery: ${entry.recovery}`
+  );
+  const degradedFeatures = Object.entries(operations)
+    .filter(([, value]) => value.mode === "degraded" || value.mode === "cli-fallback")
+    .map(([name, value]) => `${name}: ${value.reason}`);
 
   return {
     detectedAt: new Date().toISOString(),
     openClawVersion: version ?? null,
     gatewayProtocolVersion: protocolVersion,
+    requestedProtocolRange: OPENCLAW_GATEWAY_PROTOCOL_RANGE,
     authMode,
+    authRole,
+    authScopes,
     supportedMethods,
+    supportedEvents,
     configSchema: support("config.schema"),
+    configSchemaLookup: support("config.schema.lookup"),
     configPatch: support("config.patch", "config.apply"),
     chatEvents: support("chat.send", "chat.history") === "supported" ||
       ["chat", "agent", "session.message", "session.tool"].some((event) => eventSet.has(event))
@@ -168,9 +265,19 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
       : methodSet.size === 0
         ? "unknown"
         : "unsupported",
+    logsTail: support("logs.tail"),
+    cronRead: support("cron.list", "cron.status"),
     channels: support("channels.status"),
     skills: support("skills.status"),
-    approvals: support("exec.approval.list", "exec.approval.resolve", "plugin.approval.list", "plugin.approval.resolve"),
+    approvals: support(
+      "exec.approval.list",
+      "exec.approval.get",
+      "exec.approval.resolve",
+      "exec.approvals.get",
+      "exec.approvals.set",
+      "plugin.approval.list",
+      "plugin.approval.resolve"
+    ),
     updates: support("update.status", "update.run", "status"),
     nativeMissionDispatch: support("chat.send", "sessions.send"),
     nativeAgentLifecycle: support("agents.create", "agents.update", "agents.delete"),
@@ -180,6 +287,9 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
       : methodSet.size === 0
         ? "unknown"
         : "unsupported",
+    operations,
+    degradedFeatures,
+    fallbackReasons,
     unsupportedGatewayMethods,
     diagnostics
   };
@@ -247,6 +357,22 @@ function readAuthMode(payload: unknown) {
     readString(readProperty(readProperty(payload, "security"), "authMode")) ??
     readString(readProperty(readProperty(payload, "snapshot"), "authMode"))
   );
+}
+
+function readAuthRole(payload: unknown) {
+  return (
+    readString(readProperty(payload, "role")) ??
+    readString(readProperty(readProperty(payload, "auth"), "role")) ??
+    readString(readProperty(readProperty(payload, "security"), "role"))
+  );
+}
+
+function readAuthScopes(payload: unknown) {
+  return Array.from(new Set([
+    ...readStringArray(readProperty(payload, "scopes")),
+    ...readStringArray(readProperty(readProperty(payload, "auth"), "scopes")),
+    ...readStringArray(readProperty(readProperty(payload, "security"), "scopes"))
+  ])).sort();
 }
 
 function readProperty(value: unknown, key: string) {

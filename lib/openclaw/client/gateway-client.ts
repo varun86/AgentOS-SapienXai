@@ -19,11 +19,24 @@ export type {
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
   OpenClawConfigSchemaPayload,
+  OpenClawConfigSchemaLookupInput,
+  OpenClawConfigSchemaLookupPayload,
+  OpenClawCronListInput,
+  OpenClawCronListPayload,
+  OpenClawCronStatusPayload,
+  OpenClawExecApprovalListInput,
+  OpenClawExecApprovalListPayload,
+  OpenClawExecApprovalResolveInput,
+  OpenClawExecApprovalResolvePayload,
+  OpenClawHealthPayload,
   OpenClawListModelsInput,
   OpenClawListSessionsInput,
+  OpenClawLogsTailInput,
+  OpenClawLogsTailPayload,
   OpenClawGatewayClient,
   OpenClawSessionsPayload,
   OpenClawStreamCallbacks,
+  OpenClawUpdateAgentInput,
   PresencePayload,
   StatusPayload
 } from "@/lib/openclaw/client/types";
@@ -34,6 +47,7 @@ export {
   getRecentOpenClawGatewayFallbackDiagnostics,
   isCliGatewayClientForcedByEnv,
   NativeWsOpenClawGatewayClient,
+  OPENCLAW_GATEWAY_PROTOCOL_RANGE,
   OpenClawGatewayClientError
 } from "@/lib/openclaw/client/native-ws-gateway-client";
 export type {

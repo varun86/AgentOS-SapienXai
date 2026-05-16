@@ -96,16 +96,35 @@ export interface ModelReadiness {
 }
 
 export type OpenClawCapabilitySupport = "supported" | "unsupported" | "unknown";
+export type OpenClawCapabilityOperationMode = "gateway-native" | "cli-fallback" | "degraded" | "disabled" | "unknown";
+
+export interface OpenClawCapabilityOperation {
+  mode: OpenClawCapabilityOperationMode;
+  methods: string[];
+  events: string[];
+  fallbackAllowed: boolean;
+  reason: string;
+}
 
 export interface OpenClawCapabilityMatrix {
   detectedAt: string;
   openClawVersion: string | null;
   gatewayProtocolVersion: string | null;
+  requestedProtocolRange?: {
+    min: number;
+    max: number;
+  };
   authMode: string | null;
+  authRole?: string | null;
+  authScopes?: string[];
   supportedMethods: string[];
+  supportedEvents?: string[];
   configSchema: OpenClawCapabilitySupport;
+  configSchemaLookup?: OpenClawCapabilitySupport;
   configPatch: OpenClawCapabilitySupport;
   chatEvents: OpenClawCapabilitySupport;
+  logsTail?: OpenClawCapabilitySupport;
+  cronRead?: OpenClawCapabilitySupport;
   channels: OpenClawCapabilitySupport;
   skills: OpenClawCapabilitySupport;
   approvals: OpenClawCapabilitySupport;
@@ -113,6 +132,9 @@ export interface OpenClawCapabilityMatrix {
   nativeMissionDispatch: OpenClawCapabilitySupport;
   nativeAgentLifecycle: OpenClawCapabilitySupport;
   eventBridge: OpenClawCapabilitySupport;
+  operations?: Record<string, OpenClawCapabilityOperation>;
+  degradedFeatures?: string[];
+  fallbackReasons?: string[];
   unsupportedGatewayMethods: string[];
   diagnostics: string[];
 }

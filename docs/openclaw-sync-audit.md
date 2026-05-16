@@ -39,16 +39,17 @@ AgentOS now prefers native Gateway RPC for these operations when the Gateway is 
 
 - Gateway health/status read: `health` and `status`
 - Model status/list: `models.authStatus` and `models.list`
-- Agent list/delete: `agents.list` and `agents.delete`
+- Agent list/create/update/delete: `agents.list`, `agents.create`, `agents.update`, and `agents.delete`
 - Sessions list: `sessions.list`
 - Mission dispatch: `chat.send`, with `sessions.send` fallback before CLI fallback
 - Mission abort: `sessions.abort`, with `chat.abort` fallback before CLI fallback
 - Channel status: `channels.status`
 - Skills/plugins catalog reads: `skills.status` and `plugins.uiDescriptors`
-- Config reads/schema/mutations: `config.get`, `config.schema`, `config.patch`, `config.apply`, and legacy `config.set` only when safe
+- Config reads/schema/mutations: `config.get`, `config.schema.lookup`, `config.schema`, `config.patch`, `config.apply`, and legacy `config.set` only when safe
+- Health/logs/approvals/cron diagnostics: `health`, `logs.tail`, `exec.approval.list`, `exec.approval.resolve`, `cron.status`, and `cron.list`
 - Persistent runtime events: Gateway WebSocket plus `sessions.subscribe` and `sessions.messages.subscribe`
 
-Capability detection now probes the native Gateway handshake and reads advertised methods/events from `hello-ok.features`. Diagnostics/settings continue to expose the capability matrix, including OpenClaw version, protocol version, auth mode, supported methods, config support, chat/event support, channel support, skills support, approval support, update support, native mission support, native agent lifecycle support, and fallback diagnostics.
+Capability detection now probes the native Gateway handshake and reads advertised methods/events from `hello-ok.features`. Diagnostics/settings continue to expose the capability matrix, including OpenClaw version, AgentOS' requested protocol range, negotiated protocol version, auth mode, auth role/scopes, supported methods/events, per-operation Gateway/CLI/degraded decisions, config support, chat/event support, channel support, logs support, cron support, skills support, approval support, update support, native mission support, native agent lifecycle support, and fallback diagnostics.
 
 ## CLI Fallback Still Required
 
@@ -58,8 +59,7 @@ The CLI fallback remains intentional for:
 - Gateway process control: start/stop/restart still uses CLI because the Gateway cannot fully control its own process lifecycle from an unavailable or restarting state.
 - `models.scan`, because the current Gateway source does not expose a native `models.scan` method.
 - Gateway probe/discovery helpers, because the current supported native read surface is `health`/`status`; CLI `gateway probe` still provides broader reachability diagnostics.
-- Agent creation, because current native `agents.create` does not cover AgentOS' existing custom `id`, `agentDir`, bindings, and workspace skill provisioning semantics without losing higher-level AgentOS metadata side effects.
-- Agent update paths that touch AgentOS manifests, identity files, policy skill files, bootstrap files, or workspace metadata.
+- Agent create/update fallback, when the Gateway does not advertise `agents.create` / `agents.update` or rejects the request. AgentOS still owns policy skills, bootstrap files, identity files, workspace manifests, and local metadata around those Gateway calls.
 - Streaming chat transcript fallback where native session events are unavailable or older Gateways do not advertise compatible event subscriptions.
 - Channel/provider provisioning and route discovery with side effects across OpenClaw config, channel registries, logs, session stores, and AgentOS managed surface records.
 - Legacy planner/runtime compatibility paths that still depend on local OpenClaw state and CLI behavior.
@@ -100,18 +100,23 @@ AgentOS now treats the current method names listed above as the native path and 
 
 - Capability detection against current Gateway method/event names.
 - Native Gateway handshake feature discovery.
+- Protocol mismatch diagnostics and recovery guidance.
 - Gateway-first model auth/list normalization.
+- Gateway-first agent create/update with unsupported-method fallback.
 - Gateway-first mission dispatch path selection, including unknown capability discovery.
+- Gateway-native stream adapter behavior through `chat.send` and session events, plus direct-chat CLI fallback when events do not include assistant text.
 - Mission abort native path selection.
 - Gateway session event subscription without legacy `events.subscribe`.
 - Config patch payload shape with `baseHash`.
+- Config `patch` to `apply` fallback.
+- Native logs, cron, and exec approval adapter/client methods.
 - Redacted secret write refusal.
 - CLI fallback behavior when native Gateway responses are unsupported or malformed.
 
 ## Remaining Risks
 
-- Native `agents.create` is intentionally not used for AgentOS agent creation until OpenClaw exposes or documents a contract that preserves AgentOS' `id`, `agentDir`, bindings, skills, and workspace metadata semantics.
-- Direct streamed chat UI still depends on existing transcript/SSE compatibility paths when the Gateway event surface is unavailable or incomplete.
+- `agents.create` does not accept every AgentOS metadata side effect directly. AgentOS uses the native method first, then applies AgentOS-owned policy skills, bootstrap files, identity files, workspace manifests, and local metadata. Unsupported Gateways still use CLI/application fallback.
+- Direct streamed chat UI currently forces CLI transcript streaming because current Gateway session events can be status-only and may omit assistant response text. The native stream adapter remains covered for Gateway versions that emit usable assistant deltas/finals.
 - Config merge-patch paths cannot represent array-index writes safely; those paths continue through CLI fallback.
 - Some Gateway methods are available in source but not yet integrated because AgentOS does not add higher-level operator/workspace value there today, for example low-level `tools.*`, `agent.wait`, `sessions.preview`, device/node pairing APIs, and wizard RPCs.
 - Local installed OpenClaw may lag latest source. Capability detection and CLI fallback are the compatibility guard for that skew.

@@ -80,6 +80,9 @@ type AgentChatStreamEvent =
       response?: MissionResponse;
     };
 
+const emptyAgentChatResponseMessage =
+  "OpenClaw completed the turn without assistant response text. Check Gateway diagnostics or retry after OpenClaw writes a transcript entry.";
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ agentId: string }> }
@@ -249,7 +252,7 @@ export async function POST(
             timeoutSeconds: 90
           },
           {},
-          { timeoutMs: 120000, signal: request.signal }
+          { timeoutMs: 120000, signal: request.signal, forceCli: true }
         ) as Promise<AgentChatCommandPayload>;
 
         void (async () => {
@@ -274,7 +277,28 @@ export async function POST(
         }
 
         let response = toAgentChatResponse(agentId, result);
+        if (latestAssistantText && response.payloads.length === 0) {
+          response = {
+            ...response,
+            summary: latestAssistantText,
+            payloads: [
+              {
+                text: latestAssistantText,
+                mediaUrl: null
+              }
+            ]
+          };
+        }
         response = recoverDirectIdentityResponse(response, formatAgentDisplayName(agent), operatorMessage);
+        if (isEmptyAgentChatResponse(response)) {
+          await send({
+            type: "done",
+            ok: false,
+            message: emptyAgentChatResponseMessage
+          });
+          return;
+        }
+
         const action = readMissionControlAction(response.meta);
 
         if (action?.type === "rename_agent") {
@@ -432,25 +456,36 @@ function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload):
     action = extractedSummary.action;
   }
 
+  const hasResponseText = Boolean(
+    extractedSummary.cleanText ||
+      payloads.map((entry) => entry.text).filter(Boolean).join("\n\n") ||
+      (action?.type === "rename_agent" ? action.name : "")
+  );
   const summary =
     extractedSummary.cleanText ||
     payloads.map((entry) => entry.text).filter(Boolean).join("\n\n") ||
     (action?.type === "rename_agent" ? `Renamed agent to ${action.name}.` : "") ||
-    "No response text was returned.";
+    emptyAgentChatResponseMessage;
+  const status = normalizeStatus(resolveAgentChatStatus(payload, resultPayload));
+  const meta = action
+    ? {
+        ...resultPayload.meta,
+        missionControlAction: action
+      }
+    : resultPayload.meta;
 
   return {
     runId: typeof payload.runId === "string" && payload.runId.trim() ? payload.runId : null,
     agentId,
-    status: normalizeStatus(resolveAgentChatStatus(payload, resultPayload)),
+    status: hasResponseText ? status : "stalled",
     summary,
     payloads,
-    meta: action
-      ? {
-          ...resultPayload.meta,
-          missionControlAction: action
-        }
-      : resultPayload.meta
+    meta: hasResponseText ? meta : { ...meta, emptyAgentChatResponse: true }
   };
+}
+
+function isEmptyAgentChatResponse(response: MissionResponse) {
+  return response.meta?.emptyAgentChatResponse === true;
 }
 
 function recoverDirectIdentityResponse(response: MissionResponse, agentName: string, operatorMessage: string): MissionResponse {

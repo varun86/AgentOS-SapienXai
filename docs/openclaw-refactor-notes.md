@@ -123,20 +123,21 @@ Supported natively:
 
 - Handshake with the Gateway `connect` RPC.
 - Generic request/response RPC calls through `call(method, params)`.
-- Gateway-first typed reads for `health`, `status`, `models.authStatus`, `models.list`, `channels.status`, `skills.status`, `plugins.uiDescriptors`, `agents.list`, `agents.delete`, `sessions.list`, and `config.get`.
-- Gateway-first mission dispatch/abort through `chat.send` / `sessions.send` and `sessions.abort` / `chat.abort`, with CLI fallback.
-- Gateway-first `config.set`/`config.unset` by reading the Gateway config snapshot, applying a path-level merge patch through `config.patch` with the Gateway base hash, and using `config.apply` only when patch is unavailable.
+- Gateway-first typed reads and support methods for `health`, `status`, `models.authStatus`, `models.list`, `channels.status`, `skills.status`, `plugins.uiDescriptors`, `agents.list`, `sessions.list`, `config.get`, `logs.tail`, `exec.approval.*`, and `cron.*`.
+- Gateway-first agent lifecycle through `agents.create`, `agents.update`, and `agents.delete`, with AgentOS-owned metadata side effects preserved around those calls.
+- Gateway-first mission dispatch/abort through `chat.send` / `sessions.send` and `sessions.abort` / `chat.abort`, plus native stream adapter support through session event subscriptions. Direct chat still uses CLI transcript fallback when Gateway events omit assistant text.
+- Gateway-first `config.set`/`config.unset` by reading the Gateway config snapshot, probing `config.schema.lookup` / `config.schema`, applying a path-level merge patch through `config.patch` with the Gateway base hash, and using `config.apply` only when patch is unavailable.
 - Request id correlation.
 - Timeout and abort cleanup.
 - Error normalization, typed failure classification, malformed payload handling, conservative auth discovery, redacted-secret protection, and fallback to CLI.
 
 Still CLI-backed by design:
 
-- `agents add/update`
-- streamed agent turns
+- agent lifecycle fallback when `agents.create` / `agents.update` / `agents.delete` are unsupported
+- streamed agent turns when Gateway event subscriptions are unavailable
 - gateway start/stop/restart
 
-Reason: the current Gateway source confirms the request/response RPC envelope and safe read/status/catalog/config/session shapes. Agent creation/update and direct streaming remain fallback-backed because the confirmed Gateway mutation schemas do not exactly match AgentOS' current agent config inputs, workspace metadata side effects, or stream transcript behavior.
+Reason: Gateway methods now cover the lifecycle and streaming entry points, but AgentOS still owns metadata, policy skill, bootstrap, workspace manifest, transcript, and compatibility side effects around those native calls.
 
 ## Fallback Behavior
 
@@ -199,7 +200,7 @@ Production-safety scans:
 
 ## Prompt And Codebase Conflicts
 
-- The prompt asked for Gateway-first behavior. The codebase and local OpenClaw artifacts confirm safe request/response Gateway RPC for reads/probes and config snapshot mutation, but not a complete replacement for agent mutation, provisioning, process control, or streaming. Decision: make supported workflows Gateway-first and keep CLI fallback for unsupported or failed workflows.
+- The prompt asked for Gateway-first behavior. The codebase and local OpenClaw artifacts confirm safe request/response Gateway RPC for reads/probes, config snapshot mutation, agent lifecycle, mission dispatch, and native stream adapter support. Decision: make supported workflows Gateway-first and keep CLI/application fallback for unsupported, incomplete, or failed workflows.
 - Workspace mutation and channel/provisioning were moved incrementally with compatibility tests and CLI fallback preserved.
 - A no-restricted-imports guard is now active for production code. Compatibility tests still intentionally import `lib/openclaw/service.ts`.
 
@@ -249,7 +250,7 @@ Added/updated coverage:
 - Boundary safety coverage for production `service.ts` imports, app/component/hook low-level CLI/raw Gateway imports, allowlisted direct `runOpenClawJson` usage, allowlisted direct `runOpenClaw` usage, and `lib/openclaw` import cycles.
 - Compatibility surface coverage that keeps the explicit `service.ts` export list from changing accidentally.
 
-Native WS status: Gateway-first for supported typed read/probe workflows, config snapshot mutation, and generic RPC when usable native auth is available; CLI-backed for agent mutation, gateway process control, provisioning, streaming, and environments where OpenClaw exposes only redacted secrets to AgentOS. CLI fallback status is unchanged and remains required for production safety.
+Native WS status: Gateway-first for supported typed read/probe workflows, config snapshot mutation, agent lifecycle, mission dispatch, stream adapter support, logs, approvals, cron reads, and generic RPC when usable native auth is available; CLI-backed for gateway process control, provisioning, unsupported older Gateway versions, direct-chat transcript compatibility fallback, and environments where OpenClaw exposes only redacted secrets to AgentOS. CLI fallback status is unchanged and remains required for production safety.
 
 Current risks:
 

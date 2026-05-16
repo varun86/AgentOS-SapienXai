@@ -3,6 +3,7 @@ import type { CommandResult } from "@/lib/openclaw/cli";
 export interface OpenClawCommandOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  forceCli?: boolean;
 }
 
 export interface OpenClawStreamCallbacks {
@@ -26,6 +27,25 @@ export type GatewayStatusPayload = {
 };
 
 export type GatewayProbePayload = Record<string, unknown>;
+
+export type OpenClawHealthPayload = Record<string, unknown> & {
+  ok?: boolean;
+};
+
+export interface OpenClawLogsTailInput {
+  cursor?: number;
+  limit?: number;
+  maxBytes?: number;
+}
+
+export type OpenClawLogsTailPayload = Record<string, unknown> & {
+  file?: string;
+  cursor?: number;
+  size?: number;
+  lines?: string[];
+  truncated?: boolean;
+  reset?: boolean;
+};
 
 export type StatusPayload = {
   runtimeVersion?: string;
@@ -311,6 +331,18 @@ export interface OpenClawAddAgentInput {
   model?: string | null;
   bindings?: unknown;
   skills?: string[];
+  name?: string | null;
+  emoji?: string | null;
+  avatar?: string | null;
+}
+
+export interface OpenClawUpdateAgentInput {
+  id: string;
+  name?: string | null;
+  workspace?: string | null;
+  model?: string | null;
+  emoji?: string | null;
+  avatar?: string | null;
 }
 
 export interface OpenClawAgentTurnInput {
@@ -336,7 +368,57 @@ export type OpenClawConfigSchemaPayload = Record<string, unknown> & {
   version?: string;
 };
 
+export type OpenClawConfigSchemaLookupPayload = Record<string, unknown> & {
+  path?: string;
+  normalizedPath?: string;
+  schema?: unknown;
+  hint?: unknown;
+  hintPath?: string;
+  children?: unknown[];
+};
+
+export interface OpenClawConfigSchemaLookupInput {
+  path: string;
+}
+
+export interface OpenClawExecApprovalListInput {
+  status?: string;
+  limit?: number;
+}
+
+export type OpenClawExecApprovalListPayload = Record<string, unknown> & {
+  approvals?: unknown[];
+  pending?: unknown[];
+};
+
+export interface OpenClawExecApprovalResolveInput {
+  approvalId: string;
+  decision: "allow" | "deny" | "approved" | "rejected";
+  reason?: string | null;
+}
+
+export type OpenClawExecApprovalResolvePayload = Record<string, unknown> & {
+  ok?: boolean;
+  approvalId?: string;
+  status?: string;
+};
+
+export type OpenClawCronStatusPayload = Record<string, unknown> & {
+  enabled?: boolean;
+  jobs?: number;
+  nextWakeAtMs?: number | null;
+};
+
+export interface OpenClawCronListInput {
+  includeDisabled?: boolean;
+}
+
+export type OpenClawCronListPayload = Record<string, unknown> & {
+  jobs?: unknown[];
+};
+
 export interface OpenClawGatewayClient {
+  getHealth(options?: OpenClawCommandOptions): Promise<OpenClawHealthPayload>;
   getStatus(options?: OpenClawCommandOptions): Promise<StatusPayload>;
   getGatewayStatus(options?: OpenClawCommandOptions): Promise<GatewayStatusPayload>;
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
@@ -363,6 +445,10 @@ export interface OpenClawGatewayClient {
   hasConfig(path: string, options?: OpenClawCommandOptions): Promise<boolean>;
   getConfig<TPayload>(path: string, options?: OpenClawCommandOptions): Promise<TPayload | null>;
   getConfigSchema?(options?: OpenClawCommandOptions): Promise<OpenClawConfigSchemaPayload | null>;
+  lookupConfigSchema?(
+    input: OpenClawConfigSchemaLookupInput,
+    options?: OpenClawCommandOptions
+  ): Promise<OpenClawConfigSchemaLookupPayload | null>;
   setConfig(
     path: string,
     value: unknown,
@@ -370,6 +456,7 @@ export interface OpenClawGatewayClient {
   ): Promise<CommandResult>;
   unsetConfig(path: string, options?: OpenClawCommandOptions): Promise<CommandResult>;
   addAgent(input: OpenClawAddAgentInput, options?: OpenClawCommandOptions): Promise<CommandResult>;
+  updateAgent?(input: OpenClawUpdateAgentInput, options?: OpenClawCommandOptions): Promise<CommandResult>;
   deleteAgent(agentId: string, options?: OpenClawCommandOptions): Promise<CommandResult>;
   runAgentTurn(
     input: OpenClawAgentTurnInput,
@@ -381,4 +468,15 @@ export interface OpenClawGatewayClient {
     callbacks?: OpenClawStreamCallbacks,
     options?: OpenClawCommandOptions
   ): Promise<MissionCommandPayload>;
+  tailLogs?(input?: OpenClawLogsTailInput, options?: OpenClawCommandOptions): Promise<OpenClawLogsTailPayload>;
+  listExecApprovals?(
+    input?: OpenClawExecApprovalListInput,
+    options?: OpenClawCommandOptions
+  ): Promise<OpenClawExecApprovalListPayload>;
+  resolveExecApproval?(
+    input: OpenClawExecApprovalResolveInput,
+    options?: OpenClawCommandOptions
+  ): Promise<OpenClawExecApprovalResolvePayload>;
+  getCronStatus?(options?: OpenClawCommandOptions): Promise<OpenClawCronStatusPayload>;
+  listCronJobs?(input?: OpenClawCronListInput, options?: OpenClawCommandOptions): Promise<OpenClawCronListPayload>;
 }

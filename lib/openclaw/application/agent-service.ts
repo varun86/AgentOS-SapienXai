@@ -115,7 +115,10 @@ export async function createAgent(input: AgentCreateInput) {
     id: agentId,
     workspace: resolvedWorkspacePath,
     agentDir,
-    model: agentModelId
+    model: agentModelId,
+    name: displayName,
+    emoji,
+    avatar
   });
 
   const policySkillId = await ensureAgentPolicySkillFromProvisioning({
@@ -254,6 +257,12 @@ export async function updateAgent(input: AgentUpdateInput) {
     input.tools === undefined;
 
   if (onlyModelChanged) {
+    await getOpenClawAdapter().updateAgent({
+      id: agentId,
+      workspace: resolvedWorkspacePath,
+      model: nextModelId
+    }, { timeoutMs: 15_000 });
+
     await upsertAgentConfigEntry(
       agentId,
       resolvedWorkspacePath,
@@ -303,6 +312,15 @@ export async function updateAgent(input: AgentUpdateInput) {
   for (const skillId of nextDeclaredSkills) {
     await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
+
+  await getOpenClawAdapter().updateAgent({
+    id: agentId,
+    name: normalizeOptionalValue(input.name) ?? currentName ?? agentId,
+    workspace: resolvedWorkspacePath,
+    model: nextModelId,
+    emoji: normalizeOptionalValue(input.emoji) ?? currentEmoji,
+    avatar: normalizeOptionalValue(input.avatar)
+  }, { timeoutMs: 15_000 });
 
   const configEntry = await upsertAgentConfigEntry(
     agentId,

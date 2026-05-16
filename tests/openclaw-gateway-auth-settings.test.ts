@@ -18,6 +18,9 @@ import {
 function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAdapter {
   const mutableConfig = { ...config };
   return {
+    async getHealth() {
+      return { ok: true };
+    },
     async getStatus() {
       return {};
     },
@@ -61,6 +64,9 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
     async getConfigSchema() {
       return null;
     },
+    async lookupConfigSchema() {
+      return null;
+    },
     async hasConfig(path: string) {
       return Object.hasOwn(mutableConfig, path);
     },
@@ -72,6 +78,9 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
       return { stdout: "", stderr: "", code: 0 };
     },
     async addAgent() {
+      return { stdout: "", stderr: "", code: 0 };
+    },
+    async updateAgent() {
       return { stdout: "", stderr: "", code: 0 };
     },
     async deleteAgent() {
@@ -94,6 +103,21 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
     },
     async call<TPayload>() {
       return {} as TPayload;
+    },
+    async tailLogs() {
+      return {};
+    },
+    async listExecApprovals() {
+      return {};
+    },
+    async resolveExecApproval() {
+      return {};
+    },
+    async getCronStatus() {
+      return {};
+    },
+    async listCronJobs() {
+      return {};
     }
   };
 }

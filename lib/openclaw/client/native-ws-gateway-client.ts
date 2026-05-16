@@ -24,20 +24,38 @@ import type {
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
   OpenClawConfigSchemaPayload,
+  OpenClawConfigSchemaLookupInput,
+  OpenClawConfigSchemaLookupPayload,
+  OpenClawCronListInput,
+  OpenClawCronListPayload,
+  OpenClawCronStatusPayload,
+  OpenClawExecApprovalListInput,
+  OpenClawExecApprovalListPayload,
+  OpenClawExecApprovalResolveInput,
+  OpenClawExecApprovalResolvePayload,
   OpenClawGatewayClient,
+  OpenClawHealthPayload,
   OpenClawListModelsInput,
   OpenClawListSessionsInput,
+  OpenClawLogsTailInput,
+  OpenClawLogsTailPayload,
   OpenClawPluginListPayload,
   OpenClawSessionsPayload,
   OpenClawSkillListPayload,
   OpenClawStreamCallbacks,
+  OpenClawUpdateAgentInput,
   StatusPayload,
 } from "@/lib/openclaw/client/types";
 
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_NATIVE_TIMEOUT_MS = 3_000;
 const CONNECT_METHOD = "connect";
-const CONTROL_PROTOCOL_VERSION = 4;
+const MIN_CONTROL_PROTOCOL_VERSION = 3;
+const MAX_CONTROL_PROTOCOL_VERSION = 4;
+export const OPENCLAW_GATEWAY_PROTOCOL_RANGE = {
+  min: MIN_CONTROL_PROTOCOL_VERSION,
+  max: MAX_CONTROL_PROTOCOL_VERSION
+} as const;
 const SERVER_OPERATOR_CLIENT_ID = "gateway-client";
 const SERVER_OPERATOR_CLIENT_MODE = "backend";
 const OPENCLAW_DEVICE_AUTH_FILE_NAME = "device-auth.json";
@@ -153,6 +171,7 @@ class NativeGatewayError extends Error {
 type OpenClawGatewayClientErrorKind =
   | "auth"
   | "malformed-response"
+  | "protocol-mismatch"
   | "scope-limited"
   | "timeout"
   | "unsupported"
@@ -178,6 +197,7 @@ export type OpenClawGatewayFallbackDiagnostic = {
   operation: string;
   issue: string;
   kind: OpenClawGatewayClientErrorKind;
+  recovery: string;
 };
 
 const recentGatewayFallbackDiagnostics: OpenClawGatewayFallbackDiagnostic[] = [];
@@ -201,7 +221,8 @@ function recordGatewayFallbackDiagnostic(operation: string, error: unknown) {
     at: new Date().toISOString(),
     operation,
     issue: normalized.message,
-    kind: normalized.kind
+    kind: normalized.kind,
+    recovery: resolveGatewayRecoveryMessage(normalized)
   });
 
   recentGatewayFallbackDiagnostics.splice(maxGatewayFallbackDiagnostics);
@@ -229,6 +250,10 @@ function normalizeClientError(error: unknown) {
 }
 
 function classifyGatewayError(message: string): OpenClawGatewayClientErrorKind {
+  if (/protocol|version|hello|handshake/i.test(message)) {
+    return "protocol-mismatch";
+  }
+
   if (/unknown method|method not found|unsupported method/i.test(message)) {
     return "unsupported";
   }
@@ -254,6 +279,27 @@ function classifyGatewayError(message: string): OpenClawGatewayClientErrorKind {
   }
 
   return "unknown";
+}
+
+function resolveGatewayRecoveryMessage(error: OpenClawGatewayClientError) {
+  switch (error.kind) {
+    case "auth":
+      return "Check the OpenClaw Gateway token/password or repair local device access in Settings.";
+    case "scope-limited":
+      return "Approve AgentOS as an OpenClaw operator with the required read/write/admin scopes.";
+    case "protocol-mismatch":
+      return `Update OpenClaw or AgentOS so the Gateway protocol overlaps AgentOS' supported range ${MIN_CONTROL_PROTOCOL_VERSION}-${MAX_CONTROL_PROTOCOL_VERSION}.`;
+    case "unsupported":
+      return "OpenClaw does not advertise this Gateway method; AgentOS will use the compatibility fallback when available.";
+    case "timeout":
+      return "Check that the OpenClaw Gateway is responsive, then retry the action.";
+    case "unreachable":
+      return "Start or repair the OpenClaw Gateway, or keep using CLI fallback for recovery.";
+    case "malformed-response":
+      return "Update OpenClaw or report the incompatible Gateway response shape.";
+    default:
+      return "Inspect OpenClaw diagnostics for the underlying Gateway failure.";
+  }
 }
 
 const statusPayloadSchema = z
@@ -923,10 +969,10 @@ function buildMergePatchForConfigPath(path: string, value: unknown) {
   return root;
 }
 
-function resolveEventSubscriptionRequests(params: Record<string, unknown>) {
+function resolveEventSubscriptionRequests(params: Record<string, unknown>, hello?: NativeHandshakePayload | null) {
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
 
-  if (params.subscribeSessions !== false) {
+  if (params.subscribeSessions !== false && supportsGatewayMethod(hello, "sessions.subscribe")) {
     requests.push({ method: "sessions.subscribe", params: {} });
   }
 
@@ -935,10 +981,154 @@ function resolveEventSubscriptionRequests(params: Record<string, unknown>) {
     : [];
 
   for (const key of sessionKeys) {
-    requests.push({ method: "sessions.messages.subscribe", params: { key: key.trim() } });
+    if (supportsGatewayMethod(hello, "sessions.messages.subscribe")) {
+      requests.push({ method: "sessions.messages.subscribe", params: { key: key.trim() } });
+    }
   }
 
   return requests;
+}
+
+function readAdvertisedGatewayMethods(hello?: NativeHandshakePayload | null) {
+  return Array.isArray(hello?.features?.methods)
+    ? hello.features.methods.filter((method): method is string => typeof method === "string" && method.trim().length > 0)
+    : [];
+}
+
+function readAdvertisedGatewayEvents(hello?: NativeHandshakePayload | null) {
+  return Array.isArray(hello?.features?.events)
+    ? hello.features.events.filter((event): event is string => typeof event === "string" && event.trim().length > 0)
+    : [];
+}
+
+function supportsGatewayMethod(hello: NativeHandshakePayload | null | undefined, method: string) {
+  if (method === CONNECT_METHOD) {
+    return true;
+  }
+
+  const advertisedMethods = readAdvertisedGatewayMethods(hello);
+  return advertisedMethods.length === 0 || advertisedMethods.includes(method);
+}
+
+function supportsGatewayEvent(hello: NativeHandshakePayload | null | undefined, event: string) {
+  const advertisedEvents = readAdvertisedGatewayEvents(hello);
+  return advertisedEvents.length === 0 || advertisedEvents.includes(event);
+}
+
+function validateGatewayHandshakePayload(hello: NativeHandshakePayload | null | undefined) {
+  if (!hello || typeof hello !== "object") {
+    throw new NativeGatewayError("OpenClaw Gateway connect response was malformed.", {
+      kind: "malformed-response"
+    });
+  }
+
+  const protocol = hello.protocol;
+  if (typeof protocol !== "number" || !Number.isFinite(protocol)) {
+    return;
+  }
+
+  if (protocol < MIN_CONTROL_PROTOCOL_VERSION || protocol > MAX_CONTROL_PROTOCOL_VERSION) {
+    throw new NativeGatewayError(
+      `OpenClaw Gateway protocol ${protocol} is outside AgentOS' supported range ${MIN_CONTROL_PROTOCOL_VERSION}-${MAX_CONTROL_PROTOCOL_VERSION}.`,
+      { kind: "protocol-mismatch" }
+    );
+  }
+}
+
+function assertGatewayMethodSupported(hello: NativeHandshakePayload | null | undefined, method: string) {
+  if (supportsGatewayMethod(hello, method)) {
+    return;
+  }
+
+  throw new NativeGatewayError(`OpenClaw Gateway does not advertise method "${method}".`, {
+    kind: "unsupported"
+  });
+}
+
+function isGatewayMethodUnsupported(error: unknown) {
+  return normalizeClientError(error).kind === "unsupported";
+}
+
+function resolveAgentTurnWaitMs(input: OpenClawAgentTurnInput, options: OpenClawCommandOptions) {
+  if (typeof input.timeoutSeconds === "number" && Number.isFinite(input.timeoutSeconds) && input.timeoutSeconds > 0) {
+    return Math.floor(input.timeoutSeconds * 1000);
+  }
+
+  if (typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) {
+    return options.timeoutMs;
+  }
+
+  return 45_000;
+}
+
+function normalizeGatewayTurnEvent(
+  frame: GatewayEventFrame,
+  sessionKey: string,
+  runId: string | null
+): { text: string | null; done: boolean; payload: MissionCommandPayload } | null {
+  const payload = isObjectRecord(frame.payload) ? frame.payload : {};
+  const eventSessionKey =
+    readNonEmptyString(payload.sessionKey) ??
+    readNonEmptyString(payload.key) ??
+    readNonEmptyString(payload.sessionId);
+  const eventRunId =
+    readNonEmptyString(payload.runId) ??
+    readNonEmptyString(payload.run) ??
+    readNonEmptyString(payload.clientRunId);
+  const expectedSessionId = sessionKey.includes(":explicit:") ? sessionKey.split(":explicit:").at(1) ?? null : null;
+
+  if (eventSessionKey && eventSessionKey !== sessionKey && eventSessionKey !== expectedSessionId) {
+    return null;
+  }
+
+  if (runId && eventRunId && eventRunId !== runId) {
+    return null;
+  }
+
+  if (!eventSessionKey && !eventRunId) {
+    return null;
+  }
+
+  const state = readNonEmptyString(payload.state) ?? readNonEmptyString(payload.status) ?? readNonEmptyString(frame.event);
+  const text =
+    readGatewayMessageText(payload.message) ??
+    readNonEmptyString(payload.text) ??
+    readNonEmptyString(payload.summary) ??
+    readNonEmptyString(payload.detail);
+  const done = /final|complete|completed|aborted|abort|error|failed|stalled/i.test(state ?? "");
+  const isError = /error|failed|stalled/i.test(state ?? "");
+
+  if (done && !text && !isError) {
+    return null;
+  }
+
+  return {
+    text,
+    done,
+    payload: {
+      runId: eventRunId ?? runId ?? undefined,
+      status: isError ? "stalled" : done ? "completed" : "running",
+      summary: text ?? "OpenClaw Gateway stream failed.",
+      payloads: text ? [{ text, mediaUrl: null }] : []
+    }
+  };
+}
+
+function readGatewayMessageText(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (!isObjectRecord(value)) {
+    return null;
+  }
+
+  return (
+    readNonEmptyString(value.text) ??
+    readNonEmptyString(value.content) ??
+    readNonEmptyString(value.summary) ??
+    readNonEmptyString(value.message)
+  );
 }
 
 async function resolveConfiguredGatewaySecret(
@@ -1277,22 +1467,22 @@ async function buildConnectParams(
   return {
     deviceAuth,
     params: {
-    minProtocol: CONTROL_PROTOCOL_VERSION,
-    maxProtocol: CONTROL_PROTOCOL_VERSION,
-    client: {
-      id: options.clientName ?? SERVER_OPERATOR_CLIENT_ID,
-      version: options.clientVersion ?? "agentos",
-      platform,
-      mode: SERVER_OPERATOR_CLIENT_MODE,
-      instanceId: options.instanceId
-    },
-    role: options.role ?? "operator",
-    scopes,
-    caps: ["tool-events"],
-    ...(auth ? { auth } : {}),
-    ...(device ? { device } : {}),
-    userAgent: "AgentOS",
-    locale: "en"
+      minProtocol: MIN_CONTROL_PROTOCOL_VERSION,
+      maxProtocol: MAX_CONTROL_PROTOCOL_VERSION,
+      client: {
+        id: options.clientName ?? SERVER_OPERATOR_CLIENT_ID,
+        version: options.clientVersion ?? "agentos",
+        platform,
+        mode: SERVER_OPERATOR_CLIENT_MODE,
+        instanceId: options.instanceId
+      },
+      role: options.role ?? "operator",
+      scopes,
+      caps: ["tool-events"],
+      ...(auth ? { auth } : {}),
+      ...(device ? { device } : {}),
+      userAgent: "AgentOS",
+      locale: "en"
     }
   };
 }
@@ -1483,6 +1673,16 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
 
   constructor(private readonly options: NativeWsOpenClawGatewayClientOptions = {}) {
     this.fallback = options.fallback ?? new CliOpenClawGatewayClient();
+  }
+
+  getHealth(options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawHealthPayload>(
+      "health",
+      {},
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawHealthPayload : {}),
+      () => this.fallback.getHealth(options)
+    );
   }
 
   getStatus(options: OpenClawCommandOptions = {}) {
@@ -1701,6 +1901,16 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     );
   }
 
+  lookupConfigSchema(input: OpenClawConfigSchemaLookupInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawConfigSchemaLookupPayload | null>(
+      "config.schema.lookup",
+      { path: input.path },
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawConfigSchemaLookupPayload : null),
+      () => this.fallback.lookupConfigSchema?.(input, options) ?? Promise.resolve(null)
+    );
+  }
+
   async hasConfig(path: string, options: OpenClawCommandOptions = {}) {
     try {
       const value = await this.getConfig(path, options);
@@ -1733,7 +1943,59 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   addAgent(input: OpenClawAddAgentInput, options: OpenClawCommandOptions = {}) {
-    return this.fallback.addAgent(input, options);
+    const params: Record<string, unknown> = {
+      name: input.name?.trim() || input.id,
+      workspace: input.workspace
+    };
+
+    if (input.model) {
+      params.model = input.model;
+    }
+    if (input.emoji) {
+      params.emoji = input.emoji;
+    }
+    if (input.avatar) {
+      params.avatar = input.avatar;
+    }
+
+    return this.gatewayFirst(
+      "agents.create",
+      params,
+      options,
+      commandResultFromGatewayPayload,
+      () => this.fallback.addAgent(input, options)
+    );
+  }
+
+  updateAgent(input: OpenClawUpdateAgentInput, options: OpenClawCommandOptions = {}) {
+    const params: Record<string, unknown> = {
+      agentId: input.id
+    };
+
+    if (input.name !== undefined && input.name !== null && input.name.trim()) {
+      params.name = input.name.trim();
+    }
+    if (input.workspace !== undefined && input.workspace !== null && input.workspace.trim()) {
+      params.workspace = input.workspace.trim();
+    }
+    if (input.model !== undefined) {
+      params.model = input.model?.trim() || null;
+    }
+    if (input.emoji !== undefined) {
+      params.emoji = input.emoji?.trim() || "";
+    }
+    if (input.avatar !== undefined) {
+      params.avatar = input.avatar?.trim() || "";
+    }
+
+    return this.gatewayFirst(
+      "agents.update",
+      params,
+      options,
+      commandResultFromGatewayPayload,
+      () => this.fallback.updateAgent?.(input, options) ??
+        Promise.resolve({ stdout: JSON.stringify({ ok: true, fallback: "application-config" }), stderr: "" })
+    );
   }
 
   deleteAgent(agentId: string, options: OpenClawCommandOptions = {}) {
@@ -1746,40 +2008,21 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     );
   }
 
-  runAgentTurn(input: OpenClawAgentTurnInput, options: OpenClawCommandOptions = {}) {
-    const sessionKey = buildAgentSessionKey(input.agentId, input.sessionId);
-    const timeoutMs = typeof input.timeoutSeconds === "number" && Number.isFinite(input.timeoutSeconds)
-      ? Math.max(0, Math.floor(input.timeoutSeconds * 1000))
-      : undefined;
-    const idempotencyKey = input.dispatchId ?? createRequestId();
-    const params = {
-      sessionKey,
-      sessionId: input.sessionId,
-      message: input.message,
-      thinking: input.thinking,
-      timeoutMs,
-      idempotencyKey
-    };
+  async runAgentTurn(input: OpenClawAgentTurnInput, options: OpenClawCommandOptions = {}) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.runAgentTurn(input, options);
+    }
 
-    return this.gatewayFirst(
-      "chat.send",
-      params,
-      options,
-      (payload) => payload as MissionCommandPayload,
-      () => this.gatewayFirst(
-        "sessions.send",
-        {
-          key: sessionKey,
-          message: input.message,
-          thinking: input.thinking,
-          timeoutMs,
-          idempotencyKey
-        },
-        options,
-        (payload) => payload as MissionCommandPayload,
-        () => this.fallback.runAgentTurn(input, options)
-      )
-    );
+    try {
+      const payload = await this.runAgentTurnNative(input, options);
+      clearGatewayFallbackDiagnostic("chat.send");
+      clearGatewayFallbackDiagnostic("sessions.send");
+      return payload;
+    } catch (error) {
+      this.options.onNativeFailure?.(error, "chat.send");
+      recordGatewayFallbackDiagnostic("chat.send", error);
+      return this.fallback.runAgentTurn(input, options);
+    }
   }
 
   abortAgentTurn(input: OpenClawAbortTurnInput, options: OpenClawCommandOptions = {}) {
@@ -1807,12 +2050,172 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     );
   }
 
-  streamAgentTurn(
+  async streamAgentTurn(
     input: OpenClawAgentTurnInput,
     callbacks: OpenClawStreamCallbacks = {},
     options: OpenClawCommandOptions = {}
   ) {
-    return this.fallback.streamAgentTurn(input, callbacks, options);
+    if (options.forceCli || this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.streamAgentTurn(input, callbacks, options);
+    }
+
+    const sessionKey = buildAgentSessionKey(input.agentId, input.sessionId);
+    let subscription: OpenClawGatewayEventSubscription | null = null;
+    let dispatchedRunId: string | null = null;
+    let lastAssistantText = "";
+    let resolveFinal: (payload: MissionCommandPayload | null) => void = () => {};
+    const finalPayload = new Promise<MissionCommandPayload | null>((resolve) => {
+      resolveFinal = resolve;
+    });
+
+    try {
+      subscription = await this.subscribeNativeEvents(
+        {
+          subscribeSessions: true,
+          sessionKeys: [sessionKey]
+        },
+        {
+          onEvent: (frame) => {
+            const eventPayload = normalizeGatewayTurnEvent(frame, sessionKey, dispatchedRunId);
+            if (!eventPayload) {
+              return;
+            }
+
+            if (eventPayload.text && eventPayload.text !== lastAssistantText) {
+              lastAssistantText = eventPayload.text;
+              void callbacks.onStdout?.(`${JSON.stringify({ type: "assistant", text: eventPayload.text })}\n`);
+            }
+
+            if (eventPayload.done) {
+              resolveFinal?.(eventPayload.payload);
+            }
+          },
+          onError: (error) => {
+            void callbacks.onStderr?.(error instanceof Error ? `${error.message}\n` : `${String(error)}\n`);
+          }
+        },
+        options
+      );
+
+      const dispatchPayload = await this.runAgentTurnNative(input, options);
+      dispatchedRunId = dispatchPayload.runId ?? null;
+      clearGatewayFallbackDiagnostic("streamAgentTurn");
+
+      const waitMs = resolveAgentTurnWaitMs(input, options);
+      const settledPayload = await Promise.race([
+        finalPayload,
+        new Promise<null>((resolve) => globalThis.setTimeout(() => resolve(null), waitMs))
+      ]);
+
+      return settledPayload ?? dispatchPayload;
+    } catch (error) {
+      this.options.onNativeFailure?.(error, "streamAgentTurn");
+      recordGatewayFallbackDiagnostic("streamAgentTurn", error);
+      return this.fallback.streamAgentTurn(input, callbacks, options);
+    } finally {
+      subscription?.close();
+      resolveFinal(null);
+    }
+  }
+
+  private async runAgentTurnNative(input: OpenClawAgentTurnInput, options: OpenClawCommandOptions = {}) {
+    const sessionKey = buildAgentSessionKey(input.agentId, input.sessionId);
+    const timeoutMs = typeof input.timeoutSeconds === "number" && Number.isFinite(input.timeoutSeconds)
+      ? Math.max(0, Math.floor(input.timeoutSeconds * 1000))
+      : undefined;
+    const idempotencyKey = input.dispatchId ?? createRequestId();
+    const chatParams = {
+      sessionKey,
+      sessionId: input.sessionId,
+      message: input.message,
+      thinking: input.thinking,
+      timeoutMs,
+      idempotencyKey
+    };
+
+    try {
+      return await this.callNative<MissionCommandPayload>("chat.send", chatParams, options);
+    } catch (error) {
+      if (!isGatewayMethodUnsupported(error)) {
+        throw error;
+      }
+    }
+
+    return this.callNative<MissionCommandPayload>(
+      "sessions.send",
+      {
+        key: sessionKey,
+        message: input.message,
+        thinking: input.thinking,
+        timeoutMs,
+        idempotencyKey
+      },
+      options
+    );
+  }
+
+  tailLogs(input: OpenClawLogsTailInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawLogsTailPayload>(
+      "logs.tail",
+      { ...input },
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawLogsTailPayload : {}),
+      () => this.fallback.tailLogs?.(input, options) ?? this.fallback.call<OpenClawLogsTailPayload>("logs.tail", { ...input }, options)
+    );
+  }
+
+  listExecApprovals(input: OpenClawExecApprovalListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawExecApprovalListPayload>(
+      "exec.approval.list",
+      { ...input },
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawExecApprovalListPayload : {}),
+      () => this.fallback.listExecApprovals?.(input, options) ??
+        this.fallback.call<OpenClawExecApprovalListPayload>("exec.approval.list", { ...input }, options)
+    );
+  }
+
+  resolveExecApproval(input: OpenClawExecApprovalResolveInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawExecApprovalResolvePayload>(
+      "exec.approval.resolve",
+      {
+        approvalId: input.approvalId,
+        decision: input.decision,
+        reason: input.reason ?? undefined
+      },
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawExecApprovalResolvePayload : {}),
+      () => this.fallback.resolveExecApproval?.(input, options) ??
+        this.fallback.call<OpenClawExecApprovalResolvePayload>(
+          "exec.approval.resolve",
+          {
+            approvalId: input.approvalId,
+            decision: input.decision,
+            reason: input.reason ?? undefined
+          },
+          options
+        )
+    );
+  }
+
+  getCronStatus(options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawCronStatusPayload>(
+      "cron.status",
+      {},
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawCronStatusPayload : {}),
+      () => this.fallback.getCronStatus?.(options) ?? this.fallback.call<OpenClawCronStatusPayload>("cron.status", {}, options)
+    );
+  }
+
+  listCronJobs(input: OpenClawCronListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawCronListPayload>(
+      "cron.list",
+      { ...input },
+      options,
+      (payload) => (isObjectRecord(payload) ? payload as OpenClawCronListPayload : {}),
+      () => this.fallback.listCronJobs?.(input, options) ?? this.fallback.call<OpenClawCronListPayload>("cron.list", { ...input }, options)
+    );
   }
 
   async callNative<TPayload>(
@@ -1891,7 +2294,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
           await waitForConnectChallenge(socket, timeoutMs, options.signal)
         )).params
         : connectContext.params;
-      await sendGatewayRequest(
+      const hello = await sendGatewayRequest<NativeHandshakePayload>(
         socket,
         pending,
         CONNECT_METHOD,
@@ -1899,6 +2302,8 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         timeoutMs,
         options.signal
       );
+      validateGatewayHandshakePayload(hello);
+      assertGatewayMethodSupported(hello, method);
       return await sendGatewayRequest<TPayload>(socket, pending, method, params, timeoutMs, options.signal);
     } finally {
       for (const cleanup of cleanupCallbacks) {
@@ -1986,7 +2391,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
           await waitForConnectChallenge(socket, timeoutMs, options.signal)
         )).params
         : connectContext.params;
-      return await sendGatewayRequest<NativeHandshakePayload>(
+      const hello = await sendGatewayRequest<NativeHandshakePayload>(
         socket,
         pending,
         CONNECT_METHOD,
@@ -1994,6 +2399,8 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         timeoutMs,
         options.signal
       );
+      validateGatewayHandshakePayload(hello);
+      return hello;
     } finally {
       for (const cleanup of cleanupCallbacks) {
         cleanup();
@@ -2095,8 +2502,30 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
           await waitForConnectChallenge(socket, timeoutMs, options.signal)
         )).params
         : connectContext.params;
-      await sendGatewayRequest(socket, pending, CONNECT_METHOD, connectParams, timeoutMs, options.signal);
-      for (const request of resolveEventSubscriptionRequests(params)) {
+      const hello = await sendGatewayRequest<NativeHandshakePayload>(
+        socket,
+        pending,
+        CONNECT_METHOD,
+        connectParams,
+        timeoutMs,
+        options.signal
+      );
+      validateGatewayHandshakePayload(hello);
+      const subscriptionRequests = resolveEventSubscriptionRequests(params, hello);
+      if (
+        subscriptionRequests.length === 0 &&
+        !supportsGatewayEvent(hello, "chat") &&
+        !supportsGatewayEvent(hello, "agent") &&
+        !supportsGatewayEvent(hello, "session.message") &&
+        !supportsGatewayEvent(hello, "session.tool") &&
+        !supportsGatewayEvent(hello, "sessions.changed")
+      ) {
+        throw new NativeGatewayError(
+          "OpenClaw Gateway does not advertise compatible chat/session event streaming.",
+          { kind: "unsupported" }
+        );
+      }
+      for (const request of subscriptionRequests) {
         await sendGatewayRequest(socket, pending, request.method, request.params, timeoutMs, options.signal);
       }
     } catch (error) {
@@ -2181,7 +2610,9 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       );
       const config = cloneJsonObject(isObjectRecord(snapshot.config) ? snapshot.config : {});
       mutate(config);
-      await this.callNative<unknown>("config.schema", {}, options).catch(() => null);
+      await this.callNative<unknown>("config.schema.lookup", { path }, options)
+        .catch(() => this.callNative<unknown>("config.schema", {}, options))
+        .catch(() => null);
 
       const baseHash = typeof snapshot.hash === "string" && snapshot.hash.trim() ? snapshot.hash : undefined;
       const patch = buildMergePatchForConfigPath(path, operation === "config.unset" ? null : value);

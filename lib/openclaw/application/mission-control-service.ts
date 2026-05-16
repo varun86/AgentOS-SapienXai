@@ -680,7 +680,7 @@ async function loadMissionControlSnapshots({
       warmOpenClawCapabilityMatrix();
     }
     const gatewayFallbackIssues = getRecentOpenClawGatewayFallbackDiagnostics().map(
-      (entry) => `gateway.${entry.operation}: Gateway-first request fell back to CLI (${entry.kind}): ${entry.issue}`
+      (entry) => `gateway.${entry.operation}: Gateway-first request fell back to CLI (${entry.kind}): ${entry.issue} Recovery: ${entry.recovery}`
     );
 
     const snapshotIssueResults = {
