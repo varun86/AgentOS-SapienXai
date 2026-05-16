@@ -86,7 +86,7 @@ export function AddModelsDialog({
   const normalizedInitialProvider = normalizeAddModelsProviderId(initialProvider);
   const [activeTab, setActiveTab] = useState<"catalog" | "providers">("providers");
   const [activeProvider, setActiveProvider] = useState<AddModelsProviderId | null>(normalizedInitialProvider);
-  const [providerDrafts, setProviderDrafts] = useState<Partial<Record<AddModelsProviderId, ProviderDraft>>>({});
+  const [providerDrafts, setProviderDrafts] = useState<Partial<Record<string, ProviderDraft>>>({});
   const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
   const [isAddingCatalogModels, setIsAddingCatalogModels] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
@@ -151,7 +151,7 @@ export function AddModelsDialog({
               search: ""
             }
           ])
-        ) as Partial<Record<AddModelsProviderId, ProviderDraft>>
+    ) as Partial<Record<string, ProviderDraft>>
       );
       setIsOpeningTerminal(false);
       setIsAddingCatalogModels(false);
@@ -263,16 +263,12 @@ export function AddModelsDialog({
   );
   const catalogSelectedModelGroups = useMemo(() => {
     const selectedModelIds = new Set(catalogSelectedModelIds);
-    const groups = new Map<AddModelsProviderId, string[]>();
+    const groups = new Map<string, string[]>();
 
     for (const model of catalogModels) {
       const providerId = model.provider;
 
       if (!selectedModelIds.has(model.id) || model.alreadyAdded) {
-        continue;
-      }
-
-      if (!isAddModelsProviderId(providerId)) {
         continue;
       }
 
@@ -477,10 +473,12 @@ export function AddModelsDialog({
       let successCount = 0;
 
       for (const [providerId, modelIds] of catalogSelectedModelGroups.entries()) {
-        const didAddModels = await addSelectedModels(providerId, {
-          silent: true,
-          selectedModelIds: modelIds
-        });
+        const didAddModels = isAddModelsProviderId(providerId)
+          ? await addSelectedModels(providerId, {
+              silent: true,
+              selectedModelIds: modelIds
+            })
+          : await addCatalogProviderModels(providerId, modelIds);
 
         if (didAddModels) {
           successCount += modelIds.length;
@@ -497,9 +495,66 @@ export function AddModelsDialog({
           description: "Select a different catalog entry or open the Providers tab and try again."
         });
       }
+    } catch (error) {
+      toast.error("Models could not be added.", {
+        description: error instanceof Error ? error.message : "Select a different catalog entry or open the Providers tab and try again."
+      });
     } finally {
       setIsAddingCatalogModels(false);
     }
+  }
+
+  async function addCatalogProviderModels(providerId: string, modelIds: string[]) {
+    const selectedModelIds = modelIds.filter((modelId) => {
+      const model = catalogModelById.get(modelId);
+      return model && !model.alreadyAdded;
+    });
+
+    if (selectedModelIds.length === 0) {
+      return false;
+    }
+
+    const response = await fetch("/api/models/catalog", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        provider: providerId,
+        modelIds: selectedModelIds
+      })
+    });
+    const result = (await response.json().catch(() => null)) as
+      | {
+          error?: string;
+          message?: string;
+          snapshot?: MissionControlSnapshot;
+        }
+      | null;
+
+    if (!response.ok || !result) {
+      throw new Error(result?.error || result?.message || "Catalog models could not be added.");
+    }
+
+    if (result.snapshot) {
+      onSnapshotChange(result.snapshot);
+    }
+
+    setProviderDrafts((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([draftProviderId, draft]) => [
+          draftProviderId,
+          draft
+            ? {
+                ...draft,
+                selectedModelIds: draft.selectedModelIds.filter((modelId) => !selectedModelIds.includes(modelId))
+              }
+            : draft
+        ])
+      ) as Partial<Record<AddModelsProviderId, ProviderDraft>>
+    );
+
+    return true;
   }
 
   async function openTerminal(command: string) {
@@ -547,7 +602,7 @@ export function AddModelsDialog({
     }
   }
 
-  function updateDraft(providerId: AddModelsProviderId, patch: Partial<ProviderDraft>) {
+  function updateDraft(providerId: string, patch: Partial<ProviderDraft>) {
     setProviderDrafts((current) => ({
       ...current,
       [providerId]: {
@@ -1030,7 +1085,7 @@ export function AddModelsDialog({
                   onOpenProviders={(providerId) => {
                     setActiveTab("providers");
 
-                    if (providerId) {
+                    if (isAddModelsProviderId(providerId)) {
                       void selectProvider(providerId);
                     }
                   }}
@@ -1102,7 +1157,7 @@ function isSelectableModel(model: AddModelsCatalogModel) {
 
 function resolveConnectionDetail(
   snapshot: MissionControlSnapshot,
-  drafts: Partial<Record<AddModelsProviderId, ProviderDraft>>,
+  drafts: Partial<Record<string, ProviderDraft>>,
   providerId: AddModelsProviderId
 ) {
   const cachedConnection = drafts[providerId]?.connection;

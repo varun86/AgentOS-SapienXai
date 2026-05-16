@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatModelProviderLabel, getModelProviderDescriptor, isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { formatContextWindow } from "@/lib/openclaw/presenters";
-import type { AddModelsCatalogModel, AddModelsProviderId } from "@/lib/agentos/contracts";
+import type { AddModelsCatalogModel } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 function filterModels(models: AddModelsCatalogModel[], search: string) {
@@ -40,9 +40,9 @@ export function GlobalModelPicker({
   selectedModelIds: string[];
   search: string;
   onSearchChange: (value: string) => void;
-  onToggleModel: (providerId: AddModelsProviderId, modelId: string) => void;
+  onToggleModel: (providerId: string, modelId: string) => void;
   onAddSelected: () => void;
-  onOpenProviders: (providerId?: AddModelsProviderId | null) => void;
+  onOpenProviders: (providerId?: string | null) => void;
   onLoadMore: () => void;
   visibleModelCount: number;
   isAdding: boolean;
@@ -125,7 +125,7 @@ export function GlobalModelPicker({
                     return;
                   }
 
-                  onToggleModel(model.provider as AddModelsProviderId, model.id);
+                  onToggleModel(model.provider, model.id);
                 }}
                 className={cn(
                   "flex w-full items-start justify-between gap-2 rounded-[14px] border px-2.5 py-2 text-left transition-all",
