@@ -13,7 +13,11 @@ import {
   isOpenAiCodexDiscoveryTimeout,
   resolveOpenAiCodexAuthRecoveryMessage
 } from "@/lib/openclaw/model-auth-errors";
-import { clearOpenAiCodexAuthRuntimeSmokeFailures } from "@/lib/openclaw/domains/control-plane-settings";
+import {
+  clearOpenAiCodexAuthRuntimeSmokeFailures,
+  getLatestOpenAiCodexAuthRuntimeSmokeFailure,
+  readMissionControlSettings
+} from "@/lib/openclaw/domains/control-plane-settings";
 import { buildModelStatusConnectionStatus } from "@/lib/openclaw/domains/model-provider-connection";
 import { clearMissionControlCaches, getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import {
@@ -65,7 +69,8 @@ const optionalInputString = z.preprocess((value) => {
 const requestSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("status"),
-    provider: providerIdSchema
+    provider: providerIdSchema,
+    includeSnapshot: z.boolean().optional()
   }),
   z.object({
     action: z.literal("connect"),
@@ -154,13 +159,16 @@ async function handleProviderAction(
 
   if (input.action === "status") {
     const statusContext = await readProviderConnectionContext(input.provider);
-    await clearConnectedProviderWarnings(input.provider, statusContext.connection);
+    const snapshot = input.includeSnapshot && statusContext.connection.connected
+      ? await getMissionControlSnapshot({ force: true }).catch(() => undefined)
+      : undefined;
 
     return buildActionResult({
       ok: true,
       action: input.action,
       provider: input.provider,
       message: resolveProviderStatusMessage(input.provider, statusContext.connection),
+      snapshot,
       connection: statusContext.connection,
       models: [],
       emptyState: statusContext.ollamaState ? resolveOllamaEmptyState(statusContext.ollamaState) : null,
@@ -288,7 +296,6 @@ async function discoverProviderModels(
   commandBin = "openclaw"
 ): Promise<AddModelsProviderActionResult> {
   const { connection, ollamaState, configuredModelIds } = await readProviderConnectionContext(provider);
-  await clearConnectedProviderWarnings(provider, connection);
   let models: AddModelsCatalogModel[];
   let fallbackMessage: string | null = null;
 
@@ -654,11 +661,37 @@ async function readProviderConnectionContext(provider: AddModelsProviderId) {
   }
 
   return {
-    connection:
+    connection: await applyProviderRuntimeFailure(
+      provider,
       buildModelStatusConnectionStatus(provider, modelStatus, configuredModelIds) ??
-      await buildOpenClawFileBasedProviderConnectionStatus(provider, configuredModelIds),
+        await buildOpenClawFileBasedProviderConnectionStatus(provider, configuredModelIds)
+    ),
     configuredModelIds,
     ollamaState: null
+  };
+}
+
+async function applyProviderRuntimeFailure(
+  provider: AddModelsProviderId,
+  connection: AddModelsProviderConnectionStatus
+) {
+  if (provider !== "openai-codex") {
+    return connection;
+  }
+
+  const settings = await readMissionControlSettings().catch(() => ({}));
+  const authFailure = getLatestOpenAiCodexAuthRuntimeSmokeFailure(settings);
+
+  if (!authFailure) {
+    return connection;
+  }
+
+  return {
+    ...connection,
+    connected: false,
+    detail:
+      authFailure.error ||
+      "Reconnect ChatGPT to refresh the OpenAI Codex OAuth session."
   };
 }
 
@@ -689,19 +722,6 @@ function resolveProviderStatusMessage(
   }
 
   return `Connect ${getModelProviderDescriptor(provider).shortLabel} to start discovering models.`;
-}
-
-async function clearConnectedProviderWarnings(
-  provider: AddModelsProviderId,
-  connection: AddModelsProviderConnectionStatus
-) {
-  if (
-    provider === "openai-codex" &&
-    connection.connected &&
-    await clearOpenAiCodexAuthRuntimeSmokeFailures()
-  ) {
-    clearMissionControlCaches();
-  }
 }
 
 function resolveOllamaEmptyState(ollamaState: OllamaState | null): AddModelsEmptyState | null {

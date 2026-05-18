@@ -223,6 +223,18 @@ export async function clearOpenAiCodexAuthRuntimeSmokeFailures() {
   return true;
 }
 
+export function getLatestOpenAiCodexAuthRuntimeSmokeFailure(settings: MissionControlSettings) {
+  const latest = listRuntimeSmokeTestEntries(settings).find(([, entry]) => {
+    return (
+      entry.status === "failed" &&
+      isOpenAiCodexAuthFailure(entry.error ?? "") &&
+      !isStaleProviderAuthSmokeTestFailure(entry)
+    );
+  });
+
+  return latest?.[1] ?? null;
+}
+
 function listRuntimeSmokeTestEntries(settings: MissionControlSettings) {
   return Object.entries(settings.runtimePreflight?.smokeTests ?? {}).sort((left, right) => {
     const leftTs = Date.parse(left[1].checkedAt);

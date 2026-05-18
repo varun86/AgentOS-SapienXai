@@ -64,6 +64,7 @@ import {
   isOpenClawOnboardingSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
 import type {
+  AddModelsProviderActionResult,
   AddModelsProviderId,
   DiscoveredModelCandidate,
   MissionResponse,
@@ -82,7 +83,10 @@ import type {
   WorkspaceCreateStreamEvent,
   WorkItemRecord
 } from "@/lib/agentos/contracts";
-import { normalizeAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
+import {
+  getModelProviderDescriptor,
+  normalizeAddModelsProviderId
+} from "@/lib/openclaw/model-provider-registry";
 import { cn } from "@/lib/utils";
 
 const MissionCanvasView = dynamic(
@@ -123,6 +127,11 @@ type ResetPreviewState = "idle" | "loading" | "ready" | "error";
 type OnboardingWizardStage = "system" | "models";
 type GatewayControlAction = "start" | "stop" | "restart";
 type ModelOnboardingIntent = "auto" | "refresh" | "discover" | "set-default" | "login-provider";
+type ModelOnboardingRunOptions = {
+  autoOpenTerminal?: boolean;
+  forceOpen?: boolean;
+  verifyProvider?: AddModelsProviderId;
+};
 type InspectorTabId = "overview" | "chat" | "output" | "files" | "raw";
 
 const surfaceThemeStorageKey = "mission-control-surface-theme";
@@ -130,6 +139,8 @@ const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
 const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
 const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
 const sidebarOpenStorageKey = "mission-control-sidebar-open";
+const modelAuthTerminalAutoOpenCooldownMs = 2 * 60 * 1000;
+const modelAuthStatusPollDelaysMs = [4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
 const useIsomorphicLayoutEffect = typeof globalThis.window === "undefined" ? useEffect : useLayoutEffect;
 const initialModelSwitchFeedback: ModelSwitchFeedback = {
   phase: "idle",
@@ -256,6 +267,8 @@ export function MissionControlShell({
   const fallbackSnapshotRecoveryKeyRef = useRef<string | null>(null);
   const hydratedOnboardingModelIdRef = useRef<string | null>(null);
   const modelOperationToastIdRef = useRef<string | number | null>(null);
+  const modelAuthTerminalAutoOpenRef = useRef<{ command: string; openedAt: number } | null>(null);
+  const modelAuthStatusPollRunRef = useRef(0);
   const updateOperationToastIdRef = useRef<string | number | null>(null);
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
@@ -526,6 +539,8 @@ export function MissionControlShell({
 
   useEffect(() => {
     return () => {
+      modelAuthStatusPollRunRef.current += 1;
+
       if (recentCreatedAgentTimeoutRef.current) {
         clearTimeout(recentCreatedAgentTimeoutRef.current);
         recentCreatedAgentTimeoutRef.current = null;
@@ -1497,13 +1512,176 @@ export function MissionControlShell({
     }
   };
 
+  const readModelProviderStatus = async (
+    provider: AddModelsProviderId,
+    options: { includeSnapshot?: boolean; timeoutMs?: number } = {}
+  ) => {
+    const abortController = options.timeoutMs ? new AbortController() : null;
+    const timeoutId = options.timeoutMs
+      ? globalThis.setTimeout(() => abortController?.abort(), options.timeoutMs)
+      : null;
+
+    try {
+      const response = await fetch("/api/models/providers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "status",
+          provider,
+          includeSnapshot: options.includeSnapshot
+        }),
+        signal: abortController?.signal
+      });
+      const result = (await response.json().catch(() => null)) as
+        | (AddModelsProviderActionResult & { error?: string })
+        | null;
+
+      if (!response.ok || !result) {
+        throw new Error(result?.error || result?.message || "Provider status could not be loaded.");
+      }
+
+      return result;
+    } finally {
+      if (timeoutId) {
+        globalThis.clearTimeout(timeoutId);
+      }
+    }
+  };
+
+  const markModelProviderConnected = (
+    provider: AddModelsProviderId,
+    detail?: string | null,
+    connectedSnapshot?: MissionControlSnapshot
+  ) => {
+    const descriptor = getModelProviderDescriptor(provider);
+
+    modelAuthStatusPollRunRef.current += 1;
+    setOnboardingStage("models");
+    setIsOnboardingForcedOpen(true);
+    setIsOnboardingDismissed(false);
+    setModelOnboardingPhase("ready");
+    setModelOnboardingStatusMessage("Refreshing OpenClaw model status...");
+    setModelOnboardingManualCommand(null);
+    setModelOnboardingDocsUrl(null);
+
+    if (connectedSnapshot) {
+      setSnapshot(connectedSnapshot);
+      hydrateOnboardingModelSelection(connectedSnapshot);
+    } else {
+      void refreshOnboardingModelSnapshot(null);
+    }
+
+    setModelOnboardingStatusMessage(null);
+    setModelOnboardingRunState("success");
+    setModelOnboardingResultMessage(`${descriptor.shortLabel} is connected. You can discover or add models now.`);
+    appendModelOnboardingLog(`\n> ${descriptor.shortLabel} connected. AgentOS refreshed OpenClaw model status.\n`);
+    toast.success(`${descriptor.shortLabel} connected.`, {
+      description: detail || "AgentOS refreshed OpenClaw model status."
+    });
+  };
+
+  const startModelProviderStatusPolling = (provider: AddModelsProviderId) => {
+    const descriptor = getModelProviderDescriptor(provider);
+    const runId = modelAuthStatusPollRunRef.current + 1;
+
+    modelAuthStatusPollRunRef.current = runId;
+
+    for (const [index, delayMs] of modelAuthStatusPollDelaysMs.entries()) {
+      globalThis.setTimeout(() => {
+        if (modelAuthStatusPollRunRef.current !== runId) {
+          return;
+        }
+
+        void (async () => {
+          try {
+            const result = await readModelProviderStatus(provider);
+
+            if (modelAuthStatusPollRunRef.current !== runId) {
+              return;
+            }
+
+            if (result.connection.connected) {
+              modelAuthStatusPollRunRef.current += 1;
+              markModelProviderConnected(provider, result.connection.detail, result.snapshot);
+              return;
+            }
+
+            if (index === modelAuthStatusPollDelaysMs.length - 1) {
+              setModelOnboardingStatusMessage(null);
+              setModelOnboardingResultMessage(
+                `Still waiting for ${descriptor.shortLabel} auth. Finish the browser sign-in, then refresh models.`
+              );
+            }
+          } catch {
+            if (index === modelAuthStatusPollDelaysMs.length - 1) {
+              setModelOnboardingStatusMessage(null);
+            }
+          }
+        })();
+      }, delayMs);
+    }
+  };
+
+  const openModelOnboardingTerminal = async (command: string) => {
+    const normalizedCommand = command.trim();
+
+    if (!normalizedCommand) {
+      return false;
+    }
+
+    const lastAutoOpen = modelAuthTerminalAutoOpenRef.current;
+    const openedRecently =
+      lastAutoOpen?.command === normalizedCommand &&
+      Date.now() - lastAutoOpen.openedAt < modelAuthTerminalAutoOpenCooldownMs;
+
+    if (openedRecently) {
+      return false;
+    }
+
+    try {
+      const response = await fetch("/api/system/open-terminal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          command: normalizedCommand
+        })
+      });
+
+      const result = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok || result?.error) {
+        throw new Error(result?.error || "Unable to open Terminal.");
+      }
+
+      modelAuthTerminalAutoOpenRef.current = {
+        command: normalizedCommand,
+        openedAt: Date.now()
+      };
+
+      toast.success("Terminal opened.", {
+        description: "Finish provider auth there, then refresh models."
+      });
+      return true;
+    } catch (error) {
+      toast.error("Could not open Terminal.", {
+        description: error instanceof Error ? error.message : "Open Terminal manually and run the command."
+      });
+      return false;
+    }
+  };
+
   const runModelOnboarding = async (
     payload:
       | { intent: Extract<ModelOnboardingIntent, "auto">; modelId?: string }
       | { intent: Extract<ModelOnboardingIntent, "refresh"> }
       | { intent: Extract<ModelOnboardingIntent, "discover"> }
       | { intent: Extract<ModelOnboardingIntent, "set-default">; modelId: string }
-      | { intent: Extract<ModelOnboardingIntent, "login-provider">; provider: string }
+      | { intent: Extract<ModelOnboardingIntent, "login-provider">; provider: string },
+    options: ModelOnboardingRunOptions = {}
   ) => {
     const actionCopy = resolveModelOnboardingActionCopy(payload.intent);
     const previousDefaultModelId =
@@ -1548,6 +1726,33 @@ export function MissionControlShell({
       return true;
     };
 
+    let terminalOpenAttempted = false;
+    const maybeOpenTerminal = (event: OpenClawModelOnboardingStreamEvent) => {
+      const providerToVerify =
+        options.verifyProvider ??
+        (payload.intent === "login-provider" ? normalizeAddModelsProviderId(payload.provider) : null);
+
+      if (
+        !options.autoOpenTerminal ||
+        terminalOpenAttempted ||
+        event.type !== "done" ||
+        event.phase !== "authenticating" ||
+        !event.manualCommand
+      ) {
+        return;
+      }
+
+      terminalOpenAttempted = true;
+      void openModelOnboardingTerminal(event.manualCommand).finally(() => {
+        if (providerToVerify) {
+          startModelProviderStatusPolling(providerToVerify);
+        }
+      });
+    };
+
+    if (options.forceOpen) {
+      setIsOnboardingForcedOpen(true);
+    }
     setIsOnboardingDismissed(false);
     setOnboardingStage("models");
     setModelOnboardingRunState("running");
@@ -1633,6 +1838,7 @@ export function MissionControlShell({
               setModelOnboardingManualCommand(event.manualCommand ?? null);
               setModelOnboardingDocsUrl(event.docsUrl ?? null);
               setModelOnboardingRunState(event.ok ? "success" : "error");
+              maybeOpenTerminal(event);
               applyDiscoveredModels(event.discoveredModels);
               if (payload.intent === "set-default") {
                 setModelSwitchFeedback({
@@ -1690,6 +1896,7 @@ export function MissionControlShell({
           setModelOnboardingManualCommand(event.manualCommand ?? null);
           setModelOnboardingDocsUrl(event.docsUrl ?? null);
           setModelOnboardingRunState(event.ok ? "success" : "error");
+          maybeOpenTerminal(event);
           applyDiscoveredModels(event.discoveredModels);
           if (payload.intent === "set-default") {
             setModelSwitchFeedback({
@@ -1756,10 +1963,45 @@ export function MissionControlShell({
     });
   };
 
-  const runModelProviderLogin = async (provider: string) => {
+  const runModelProviderLogin = async (provider: string, options: ModelOnboardingRunOptions = {}) => {
+    const providerId = normalizeAddModelsProviderId(provider);
+
+    if (!providerId) {
+      toast.error("Unknown model provider.", {
+        description: "AgentOS could not match this auth request to a supported provider."
+      });
+      return;
+    }
+
+    setIsOnboardingForcedOpen(true);
+
+    const snapshotProvider = snapshot.diagnostics.modelReadiness.authProviders.find(
+      (entry) => entry.provider === providerId
+    );
+
+    if (snapshotProvider?.connected) {
+      markModelProviderConnected(providerId, snapshotProvider.detail, snapshot);
+      return;
+    }
+
+    try {
+      const status = await readModelProviderStatus(providerId, { timeoutMs: 2500 });
+
+      if (status.connection.connected) {
+        markModelProviderConnected(providerId, status.connection.detail, status.snapshot);
+        return;
+      }
+    } catch {
+      // Fall through to the OpenClaw auth handoff if status cannot be read.
+    }
+
     await runModelOnboarding({
       intent: "login-provider",
-      provider
+      provider: providerId
+    }, {
+      forceOpen: true,
+      verifyProvider: providerId,
+      ...options
     });
   };
 
@@ -3037,6 +3279,9 @@ export function MissionControlShell({
             onRefresh={refresh}
             onSnapshotChange={setSnapshot}
             onConfigureAgentCapabilities={handleConfigureAgentCapabilities}
+            onConnectModelProvider={(provider) => {
+              void runModelProviderLogin(provider, { autoOpenTerminal: true });
+            }}
             collapsed={!isInspectorOpen}
             onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
             activeTab={activeInspectorTab}

@@ -38,9 +38,14 @@ export async function ensureOpenAiCodexAuthOrderForAgent({
   try {
     status = await getOpenClawAdapter().getAgentModelStatus({ agentId }, { timeoutMs: 8_000 });
   } catch (error) {
+    const copiedProfileIds = agentDir
+      ? await copyOpenAiCodexProfilesFromMainStore(agentDir).catch(() => [])
+      : [];
+
     return {
-      repaired: false,
-      reason: "status-failed" as const,
+      repaired: copiedProfileIds.length > 0,
+      reason: copiedProfileIds.length > 0 ? "profile-copy-fallback" as const : "status-failed" as const,
+      profileIds: copiedProfileIds,
       error
     };
   }
@@ -153,6 +158,20 @@ async function persistOpenAiCodexProfileCopies(agentDir: string, profileIds: str
 
   await mkdir(path.dirname(targetStorePath), { recursive: true });
   await writeFile(targetStorePath, `${JSON.stringify(targetStore, null, 2)}\n`, "utf8");
+}
+
+async function copyOpenAiCodexProfilesFromMainStore(agentDir: string) {
+  const sourceStore = await readAuthProfileStore(mainOpenAiCodexAuthStorePath());
+  const profileIds = Object.entries(sourceStore.profiles ?? {})
+    .filter(([, profile]) => isOpenAiCodexOAuthCredential(profile))
+    .map(([profileId]) => profileId);
+
+  if (profileIds.length === 0) {
+    return [];
+  }
+
+  await persistOpenAiCodexProfileCopies(agentDir, profileIds);
+  return profileIds;
 }
 
 function mainOpenAiCodexAuthStorePath() {

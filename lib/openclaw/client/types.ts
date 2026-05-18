@@ -669,6 +669,7 @@ export interface OpenClawAgentTurnInput {
   timeoutSeconds?: number;
   workspace?: string | null;
   dispatchId?: string | null;
+  local?: boolean;
 }
 
 export interface OpenClawAbortTurnInput {

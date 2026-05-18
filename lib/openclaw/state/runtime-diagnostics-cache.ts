@@ -14,7 +14,10 @@ export class RuntimeDiagnosticsStateCache {
     private readonly options: {
       ttlMs: number;
       getGeneration: () => number;
-      loadState: (agentIds: string[]) => Promise<OpenClawRuntimeState>;
+      loadState: (
+        agentIds: string[],
+        agentDirs?: Record<string, string | null | undefined>
+      ) => Promise<OpenClawRuntimeState>;
     }
   ) {}
 
@@ -23,8 +26,12 @@ export class RuntimeDiagnosticsStateCache {
     this.promise = null;
   }
 
-  read(agentIds: string[], force = false) {
-    const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds);
+  read(
+    agentIds: string[],
+    agentDirs: Record<string, string | null | undefined> = {},
+    force = false
+  ) {
+    const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds, agentDirs);
     const cached = this.cache;
     const cacheMatches = Boolean(cached && cached.agentIdsKey === agentIdsKey);
     const cacheIsFresh = Boolean(cacheMatches && cached && cached.expiresAt > Date.now());
@@ -35,7 +42,7 @@ export class RuntimeDiagnosticsStateCache {
 
     if (!force && cacheMatches && cached) {
       if (!this.promise) {
-        this.promise = this.loadForCurrentGeneration(agentIds);
+        this.promise = this.loadForCurrentGeneration(agentIds, agentDirs);
         void this.promise.catch(() => {});
         void this.promise.finally(() => {
           this.promise = null;
@@ -57,7 +64,7 @@ export class RuntimeDiagnosticsStateCache {
       return this.promise;
     }
 
-    this.promise = this.loadForCurrentGeneration(agentIds);
+    this.promise = this.loadForCurrentGeneration(agentIds, agentDirs);
     void this.promise.catch(() => {});
     void this.promise.finally(() => {
       this.promise = null;
@@ -66,11 +73,14 @@ export class RuntimeDiagnosticsStateCache {
     return force ? this.promise.then((value) => value) : this.promise;
   }
 
-  private loadForCurrentGeneration(agentIds: string[]) {
+  private loadForCurrentGeneration(
+    agentIds: string[],
+    agentDirs: Record<string, string | null | undefined>
+  ) {
     const generation = this.options.getGeneration();
-    const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds);
+    const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds, agentDirs);
 
-    return this.options.loadState(agentIds).then((nextState) => {
+    return this.options.loadState(agentIds, agentDirs).then((nextState) => {
       if (generation === this.options.getGeneration()) {
         this.cache = {
           agentIdsKey,
@@ -84,6 +94,12 @@ export class RuntimeDiagnosticsStateCache {
   }
 }
 
-function buildRuntimeDiagnosticsAgentKey(agentIds: string[]) {
-  return [...new Set(agentIds.filter(Boolean))].sort().join("\u0000");
+function buildRuntimeDiagnosticsAgentKey(
+  agentIds: string[],
+  agentDirs: Record<string, string | null | undefined>
+) {
+  return [...new Set(agentIds.filter(Boolean))]
+    .sort()
+    .map((agentId) => `${agentId}:${agentDirs[agentId] ?? ""}`)
+    .join("\u0000");
 }

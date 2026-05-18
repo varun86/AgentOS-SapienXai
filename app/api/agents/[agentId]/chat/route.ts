@@ -17,6 +17,11 @@ import { extractMissionControlAction, type MissionControlAction } from "@/lib/op
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { ensureOpenAiCodexAuthOrderForAgent } from "@/lib/openclaw/application/model-auth-service";
 import { recordAgentChatSession } from "@/lib/openclaw/domains/agent-chat-sessions";
+import { persistRuntimeSmokeTest } from "@/lib/openclaw/domains/control-plane-settings";
+import { openClawStateRootPath } from "@/lib/openclaw/state/paths";
+import { inspectOpenClawRuntimeState } from "@/lib/openclaw/state/runtime-state";
+import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
+import { isOpenAiCodexAuthFailure } from "@/lib/openclaw/model-auth-errors";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import {
   resolveOpenClawRuntimeFailureMessage,
@@ -212,6 +217,23 @@ export async function POST(
           return;
         }
 
+        const runtimeState = await inspectOpenClawRuntimeState(openClawStateRootPath, [agentId], {
+          agentDirs: {
+            [agentId]: agent.agentDir
+          },
+          touch: true
+        });
+        if (runtimeState.issues.length > 0) {
+          await send({
+            type: "done",
+            ok: false,
+            message:
+              "AgentOS cannot write the OpenClaw session store for this agent. Start AgentOS outside the sandbox or grant write access to ~/.openclaw, then retry the chat."
+          });
+          clearMissionControlCaches();
+          return;
+        }
+
         await ensureOpenAiCodexAuthOrderForAgent({
           agentId,
           modelId: agent.modelId,
@@ -249,7 +271,8 @@ export async function POST(
             sessionId,
             message,
             thinking: input.thinking ?? "low",
-            timeoutSeconds: 90
+            timeoutSeconds: 90,
+            local: !snapshot.diagnostics.rpcOk
           },
           {},
           { timeoutMs: 120000, signal: request.signal, forceCli: true }
@@ -323,14 +346,29 @@ export async function POST(
           return;
         }
 
+        const rawFailure = stringifyCommandFailure(error) || (error instanceof Error ? error.message : "");
+        const failureMessage =
+          resolveOpenClawRuntimeFailureMessage(rawFailure) ||
+          (error instanceof Error
+            ? error.message
+            : "OpenClaw could not send the message right now. Please try again.");
+
+        if (isOpenAiCodexAuthFailure(rawFailure) || isOpenAiCodexAuthFailure(failureMessage)) {
+          await persistRuntimeSmokeTest({
+            status: "failed",
+            checkedAt: new Date().toISOString(),
+            agentId,
+            runId: null,
+            summary: null,
+            error: failureMessage
+          }).catch(() => {});
+          clearMissionControlCaches();
+        }
+
         await send({
           type: "done",
           ok: false,
-          message:
-            resolveOpenClawRuntimeFailureMessage(error instanceof Error ? error.message : "") ||
-            (error instanceof Error
-              ? error.message
-              : "OpenClaw could not send the message right now. Please try again.")
+          message: failureMessage
         });
       } finally {
         stopPolling();

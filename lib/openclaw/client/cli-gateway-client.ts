@@ -94,6 +94,10 @@ function buildAgentTurnArgs(input: OpenClawAgentTurnInput) {
     args.push("--session-id", input.sessionId);
   }
 
+  if (input.local) {
+    args.push("--local");
+  }
+
   args.push(
     "--message",
     input.message,

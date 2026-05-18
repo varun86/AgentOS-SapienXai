@@ -5,7 +5,7 @@ import {
   resolveOpenAiCodexAuthRecoveryMessage
 } from "@/lib/openclaw/model-auth-errors";
 
-type SmokeTestFailureKind = "model-route" | "plugin-runtime" | "provider-auth";
+type SmokeTestFailureKind = "model-route" | "plugin-runtime" | "provider-auth" | "session-store-permission";
 
 type SmokeTestFailureClassification = {
   kind: SmokeTestFailureKind;
@@ -48,6 +48,17 @@ export function classifyOpenClawRuntimeSmokeTestFailure(output: string): SmokeTe
   }
 
   if (
+    /\bEPERM\b/i.test(normalized) &&
+    (/\.openclaw\/agents\/.*\/sessions/i.test(normalized) || /\.fs-safe-replace/i.test(normalized))
+  ) {
+    return {
+      kind: "session-store-permission",
+      detail:
+        "AgentOS cannot write the OpenClaw agent session store. Start AgentOS outside the sandbox or grant write access to ~/.openclaw, then retry the chat."
+    };
+  }
+
+  if (
     /Unknown model:\s*openai-codex\/gpt-[^\s.]+(?:[-.][^\s.]*)*/i.test(normalized) ||
     /Do not use `?openai-codex\/gpt-\*`?/i.test(normalized) ||
     /not supported by the OpenAI Codex OAuth route/i.test(normalized)
@@ -83,6 +94,10 @@ export function buildOpenClawRuntimeSmokeTestRecoveryCommand(command: string, ou
 
   if (classification?.kind === "provider-auth") {
     return buildOpenAiCodexAuthLoginCommand(command);
+  }
+
+  if (classification?.kind === "session-store-permission") {
+    return `${command} doctor && ${command} status --json`;
   }
 
   return `${command} doctor --fix && ${command} gateway restart && ${command} gateway status --deep`;

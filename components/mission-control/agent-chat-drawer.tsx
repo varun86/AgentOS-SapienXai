@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { LoaderCircle, SendHorizontal } from "lucide-react";
+import { KeyRound, LoaderCircle, SendHorizontal } from "lucide-react";
 import { motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import {
   sendAgentChatMessage,
   type AgentChatRunSnapshot
 } from "@/components/mission-control/agent-chat-runner";
+import { resolveAgentChatAuthAction } from "@/lib/openclaw/chat-auth-actions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, AgentRecord } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
@@ -162,7 +163,8 @@ export function AgentChatDrawer({
   surfaceTheme,
   isVisible,
   onRefresh,
-  onSnapshotChange
+  onSnapshotChange,
+  onConnectModelProvider
 }: {
   agent: AgentRecord;
   snapshot: MissionControlSnapshot;
@@ -170,6 +172,7 @@ export function AgentChatDrawer({
   isVisible: boolean;
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
+  onConnectModelProvider?: (provider: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -370,6 +373,7 @@ export function AgentChatDrawer({
             const isPendingUser = entry.role === "user" && entry.id === runSnapshot.userMessageId && runSnapshot.isRunning;
             const showInlineStatus = entry.status === "sending" && isPendingUser;
             const errorMessage = entry.errorMessage?.trim();
+            const authAction = errorMessage ? resolveAgentChatAuthAction(errorMessage, agent.modelId) : null;
 
             return (
               <div key={entry.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
@@ -454,6 +458,23 @@ export function AgentChatDrawer({
                         >
                           {errorMessage}
                         </p>
+                      ) : null}
+                      {authAction && onConnectModelProvider ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => onConnectModelProvider(authAction.provider)}
+                          className={cn(
+                            "mt-1 h-8 rounded-full px-3 text-[11px]",
+                            surfaceTheme === "light"
+                              ? "border-rose-200 bg-white text-rose-800 hover:bg-rose-50"
+                              : "border-rose-300/20 bg-rose-300/10 text-rose-100 hover:bg-rose-300/16"
+                          )}
+                        >
+                          <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                          Connect {authAction.label}
+                        </Button>
                       ) : null}
                     </div>
                   ) : null}

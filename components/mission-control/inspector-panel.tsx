@@ -65,6 +65,7 @@ type InspectorPanelProps = {
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
   onConfigureAgentCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
+  onConnectModelProvider?: (provider: string) => void;
   onAbortTask?: (task: WorkItemRecord) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -95,6 +96,7 @@ function InspectorPanelContent({
   onRefresh,
   onSnapshotChange,
   onConfigureAgentCapabilities,
+  onConnectModelProvider,
   onAbortTask,
   collapsed,
   onToggleCollapsed,
@@ -475,6 +477,7 @@ function InspectorPanelContent({
                         isVisible={isChatView}
                         onRefresh={onRefresh}
                         onSnapshotChange={onSnapshotChange}
+                        onConnectModelProvider={onConnectModelProvider}
                       />
                     </div>
                   ) : null}

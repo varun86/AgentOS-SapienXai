@@ -57,8 +57,16 @@ function resolveRuntimeSmokeTestAgentId(
   return snapshot.agents.find((agent) => agent.isDefault)?.id || snapshot.agents[0]?.id || null;
 }
 
-async function assertOpenClawRuntimeStateAccess(agentId: string | null) {
+async function assertOpenClawRuntimeStateAccess(
+  agentId: string | null,
+  agentDir?: string | null
+) {
   const runtimeState = await inspectOpenClawRuntimeState(openClawStateRootPath, agentId ? [agentId] : [], {
+    agentDirs: agentId
+      ? {
+          [agentId]: agentDir
+        }
+      : undefined,
     touch: true
   });
 
@@ -72,16 +80,18 @@ async function assertOpenClawRuntimeStateAccess(agentId: string | null) {
 
 export async function ensureOpenClawRuntimeStateAccess(options: {
   agentId?: string | null;
+  agentDir?: string | null;
 } = {}) {
-  await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
+  await assertOpenClawRuntimeStateAccess(options.agentId ?? null, options.agentDir);
   invalidateRuntimeSnapshotCache();
   return getMissionControlSnapshot({ force: true, includeHidden: true });
 }
 
 export async function touchOpenClawRuntimeStateAccess(options: {
   agentId?: string | null;
+  agentDir?: string | null;
 } = {}) {
-  await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
+  await assertOpenClawRuntimeStateAccess(options.agentId ?? null, options.agentDir);
   invalidateRuntimeSnapshotCache();
 }
 
@@ -110,10 +120,10 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
     return mapRuntimeSmokeTestEntry(agentId, cached);
   }
 
-  await assertOpenClawRuntimeStateAccess(agentId);
+  const smokeAgent = snapshot.agents.find((agent) => agent.id === agentId);
+  await assertOpenClawRuntimeStateAccess(agentId, smokeAgent?.agentDir);
 
   try {
-    const smokeAgent = snapshot.agents.find((agent) => agent.id === agentId);
     await ensureOpenAiCodexAuthOrderForAgent({
       agentId,
       modelId: smokeAgent?.modelId,

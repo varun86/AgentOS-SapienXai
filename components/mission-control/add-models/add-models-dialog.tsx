@@ -310,6 +310,11 @@ export function AddModelsDialog({
       applyActionResult(providerId, result, result.emptyState ? "discovery-empty" : "idle", {
         models: currentDraft.loaded && currentDraft.models.length > 0 ? currentDraft.models : result.models
       });
+
+      if (result.snapshot) {
+        onSnapshotChange(result.snapshot);
+      }
+
       return result;
     } catch (error) {
       updateDraft(providerId, {

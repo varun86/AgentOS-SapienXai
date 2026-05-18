@@ -8,7 +8,23 @@ import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
 export type OpenClawRuntimeState = Omit<MissionControlSnapshot["diagnostics"]["runtime"], "smokeTest">;
 
-function buildOpenClawSessionStorePath(openClawStateRootPath: string, agentId: string) {
+function buildOpenClawSessionStorePath(
+  openClawStateRootPath: string,
+  agentId: string,
+  agentDir?: string | null
+) {
+  const normalizedAgentDir = typeof agentDir === "string" && agentDir.trim()
+    ? path.resolve(agentDir.trim())
+    : null;
+
+  if (normalizedAgentDir) {
+    const agentRoot = path.basename(normalizedAgentDir) === "agent"
+      ? path.dirname(normalizedAgentDir)
+      : normalizedAgentDir;
+
+    return path.join(agentRoot, "sessions");
+  }
+
   return path.join(openClawStateRootPath, "agents", agentId, "sessions");
 }
 
@@ -69,6 +85,7 @@ export async function inspectOpenClawRuntimeState(
   openClawStateRootPath: string,
   agentIds: string[],
   options: {
+    agentDirs?: Record<string, string | null | undefined>;
     touch?: boolean;
   } = {}
 ): Promise<OpenClawRuntimeState> {
@@ -79,7 +96,11 @@ export async function inspectOpenClawRuntimeState(
   });
   const sessionStores = await Promise.all(
     uniqueAgentIds.map(async (agentId) => {
-      const storePath = buildOpenClawSessionStorePath(openClawStateRootPath, agentId);
+      const storePath = buildOpenClawSessionStorePath(
+        openClawStateRootPath,
+        agentId,
+        options.agentDirs?.[agentId]
+      );
       const probe = await probeDirectoryWriteability(storePath, {
         createIfMissing: true,
         touch: options.touch

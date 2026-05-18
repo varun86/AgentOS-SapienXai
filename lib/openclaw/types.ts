@@ -818,6 +818,7 @@ export type AddModelsProviderActionRequest =
   | {
       action: "status";
       provider: AddModelsProviderId;
+      includeSnapshot?: boolean;
     }
   | {
       action: "connect";

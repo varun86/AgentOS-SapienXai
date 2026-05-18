@@ -174,7 +174,10 @@ const missionControlCacheService = new MissionControlCacheService<MissionControl
 const runtimeDiagnosticsStateCache = new RuntimeDiagnosticsStateCache({
   ttlMs: RUNTIME_DIAGNOSTICS_CACHE_TTL_MS,
   getGeneration: () => missionControlCacheService.getGeneration(),
-  loadState: (agentIds) => inspectOpenClawRuntimeState(openClawStateRootPath, agentIds)
+  loadState: (agentIds, agentDirs) =>
+    inspectOpenClawRuntimeState(openClawStateRootPath, agentIds, {
+      agentDirs
+    })
 });
 
 function clearRuntimeHistoryCache() {
@@ -486,8 +489,13 @@ async function loadMissionControlSnapshots({
       sessionsResult.status === "fulfilled" ||
       runtimeSnapshotResult.status === "fulfilled" ||
       presenceResult.status === "fulfilled";
-    const agentIds = agentsList.map((agent) => agent.id);
-    const runtimeDiagnosticsPromise = buildRuntimeDiagnostics(agentIds, settings);
+    const runtimeDiagnosticsPromise = buildRuntimeDiagnostics(
+      agentsList.map((agent) => ({
+        id: agent.id,
+        agentDir: agent.agentDir
+      })),
+      settings
+    );
     void runtimeDiagnosticsPromise.catch(() => {});
     const dispatchRecordsPromise = readMissionDispatchRecords();
     const dispatchRecords = await dispatchRecordsPromise;
@@ -654,7 +662,7 @@ async function loadMissionControlSnapshots({
           sessionList,
           manifestAgent,
           agentRuntimes,
-          gatewayRpcOk: Boolean(gatewayStatus?.rpc?.ok),
+          gatewayRpcOk: Boolean(gatewayStatus?.rpc?.ok || hasOpenClawSignal),
           heartbeat,
           profile
         });
@@ -854,8 +862,17 @@ async function buildSystemReadinessSnapshot({
   const gatewayStatus = gatewayStatusCache.resolve(gatewayStatusResult).value ?? localGatewayStatus;
   const agentConfigResult = await settleAgentConfigFromStateFile(openClawStateRootPath);
   const agentConfig = agentConfigResult.status === "fulfilled" ? agentConfigResult.value : [];
-  const agentIds = agentConfig.map((agent) => agent.id).filter(Boolean);
-  const runtimeState = await inspectOpenClawRuntimeState(openClawStateRootPath, agentIds);
+  const runtimeState = await inspectOpenClawRuntimeState(
+    openClawStateRootPath,
+    agentConfig.map((agent) => agent.id).filter(Boolean),
+    {
+      agentDirs: Object.fromEntries(
+        agentConfig
+          .filter((agent) => agent.id)
+          .map((agent) => [agent.id, agent.agentDir])
+      )
+    }
+  );
   const runtimeDiagnostics = buildRuntimeDiagnosticsFromState(
     runtimeState,
     getLatestRuntimeSmokeTest(settings)
@@ -911,8 +928,17 @@ async function buildSystemReadinessSnapshot({
   };
 }
 
-async function buildRuntimeDiagnostics(agentIds: string[], settings: MissionControlSettings) {
-  const runtimeState = await runtimeDiagnosticsStateCache.read(agentIds);
+async function buildRuntimeDiagnostics(
+  agents: Array<{ id: string; agentDir?: string | null }>,
+  settings: MissionControlSettings
+) {
+  const agentIds = agents.map((agent) => agent.id).filter(Boolean);
+  const agentDirs = Object.fromEntries(
+    agents
+      .filter((agent) => agent.id)
+      .map((agent) => [agent.id, agent.agentDir])
+  );
+  const runtimeState = await runtimeDiagnosticsStateCache.read(agentIds, agentDirs);
   const smokeTest = getLatestRuntimeSmokeTest(settings);
   return buildRuntimeDiagnosticsFromState(
     runtimeState,
