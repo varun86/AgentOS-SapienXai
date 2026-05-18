@@ -30,6 +30,12 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
     async getModelStatus() {
       return {};
     },
+    async getAgentModelStatus() {
+      return {};
+    },
+    async setModelAuthOrder() {
+      return { stdout: "", stderr: "", code: 0 };
+    },
     async listAgents() {
       return { agents: [] };
     },

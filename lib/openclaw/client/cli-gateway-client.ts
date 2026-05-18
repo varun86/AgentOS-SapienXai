@@ -14,6 +14,7 @@ import type {
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawAgentModelStatusInput,
   OpenClawArtifactDeleteInput,
   OpenClawArtifactGetInput,
   OpenClawArtifactListInput,
@@ -44,6 +45,7 @@ import type {
   OpenClawLogsTailInput,
   OpenClawLogsTailPayload,
   OpenClawModelScanPayload,
+  OpenClawModelAuthOrderSetInput,
   OpenClawPluginListPayload,
   OpenClawRuntimeEventSubscriptionInput,
   OpenClawRuntimeSnapshotInput,
@@ -111,6 +113,30 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
 
   getModelStatus(options: OpenClawCommandOptions = {}) {
     return runOpenClawJson<ModelsStatusPayload>(["models", "status", "--json"], options);
+  }
+
+  getAgentModelStatus(input: OpenClawAgentModelStatusInput, options: OpenClawCommandOptions = {}) {
+    return runOpenClawJson<ModelsStatusPayload>(
+      ["models", "status", "--agent", input.agentId, "--json"],
+      options
+    );
+  }
+
+  setModelAuthOrder(input: OpenClawModelAuthOrderSetInput, options: OpenClawCommandOptions = {}) {
+    return runOpenClaw(
+      [
+        "models",
+        "auth",
+        "order",
+        "set",
+        "--provider",
+        input.provider,
+        "--agent",
+        input.agentId,
+        ...input.profileIds
+      ],
+      options
+    );
   }
 
   async listAgents(options: OpenClawCommandOptions = {}) {

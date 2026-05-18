@@ -82,10 +82,7 @@ test("OpenClaw direct CLI JSON usage remains in documented fallback/discovery fi
     "lib/openclaw/client/cli-gateway-client.ts",
     "lib/openclaw/domains/agent-config.ts",
     "lib/openclaw/domains/channels.ts",
-    "lib/openclaw/application/model-auth-service.ts",
-    "lib/openclaw/application/settings-service.ts",
-    "lib/openclaw/planner.ts",
-    "lib/openclaw/surface-adapters.ts"
+    "lib/openclaw/application/settings-service.ts"
   ]);
   const offenders = readProjectSourceFiles(["lib/openclaw"])
     .filter((filePath) => readFileSync(filePath, "utf8").includes("runOpenClawJson"))
@@ -99,7 +96,6 @@ test("OpenClaw direct CLI command usage remains in documented fallback/provision
   const allowed = new Set([
     "lib/openclaw/client/cli-gateway-client.ts",
     "lib/openclaw/domains/agent-config.ts",
-    "lib/openclaw/application/model-auth-service.ts",
     "lib/openclaw/planner.ts",
     "lib/openclaw/reset.ts",
     "lib/openclaw/application/channel-service.ts"
@@ -202,6 +198,20 @@ test("runtime state uses Gateway snapshot and adapter event subscriptions", () =
   assert.match(eventBridgeSource, /getOpenClawAdapter\(\)\.subscribeRuntimeEvents/);
   assert.doesNotMatch(eventBridgeSource, /new NativeWsOpenClawGatewayClient/);
   assert.match(runtimeStateSource, /getOpenClawAdapter\(\)\.getRuntimeSnapshot/);
+});
+
+test("model auth repair and planner runtime turns stay behind the OpenClaw adapter", () => {
+  const modelAuthSource = readFileSync(
+    path.join(rootDir, "lib/openclaw/application/model-auth-service.ts"),
+    "utf8"
+  );
+  const plannerSource = readFileSync(path.join(rootDir, "lib/openclaw/planner.ts"), "utf8");
+
+  assert.match(modelAuthSource, /getOpenClawAdapter\(\)\.getAgentModelStatus/);
+  assert.match(modelAuthSource, /getOpenClawAdapter\(\)\.setModelAuthOrder/);
+  assert.doesNotMatch(modelAuthSource, /runOpenClaw(Json)?/);
+  assert.match(plannerSource, /getOpenClawAdapter\(\)\.runAgentTurn/);
+  assert.doesNotMatch(plannerSource, /runOpenClawJson/);
 });
 
 test("CLI runtime event subscriptions fail closed instead of pretending to stream", () => {

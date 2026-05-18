@@ -27,6 +27,7 @@ test("capability matrix detects advertised Gateway-first methods", async () => {
         "chat.send",
         "chat.abort",
         "sessions.subscribe",
+        "models.authOrder.set",
         "config.schema",
         "config.schema.lookup",
         "config.patch",
@@ -64,6 +65,7 @@ test("capability matrix detects advertised Gateway-first methods", async () => {
   assert.equal(matrix.logsTail, "supported");
   assert.equal(matrix.cronRead, "supported");
   assert.equal(matrix.operations?.agentCreate.mode, "gateway-native");
+  assert.equal(matrix.operations?.modelAuthOrder.mode, "gateway-native");
   assert.equal(matrix.operations?.missionStream.mode, "gateway-native");
   assert.ok(matrix.unsupportedGatewayMethods.includes("models.list"));
 });
@@ -193,6 +195,12 @@ function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenCl
     },
     async getModelStatus() {
       return {};
+    },
+    async getAgentModelStatus() {
+      return {};
+    },
+    async setModelAuthOrder() {
+      return { stdout: "", stderr: "" };
     },
     async listAgents() {
       return { agents: [] };

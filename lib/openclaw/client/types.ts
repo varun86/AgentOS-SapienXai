@@ -490,6 +490,7 @@ export interface OpenClawChannelStatusInput {
 }
 
 export type ModelsStatusPayload = {
+  agentDir?: string | null;
   defaultModel?: string | null;
   resolvedDefault?: string | null;
   allowed?: string[];
@@ -516,6 +517,16 @@ export type ModelsStatusPayload = {
     };
   };
 };
+
+export interface OpenClawAgentModelStatusInput {
+  agentId: string;
+}
+
+export interface OpenClawModelAuthOrderSetInput {
+  provider: string;
+  agentId: string;
+  profileIds: string[];
+}
 
 export type PresencePayload = Array<{
   host: string;
@@ -645,6 +656,8 @@ export interface OpenClawGatewayClient {
   getStatus(options?: OpenClawCommandOptions): Promise<StatusPayload>;
   getGatewayStatus(options?: OpenClawCommandOptions): Promise<GatewayStatusPayload>;
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
+  getAgentModelStatus(input: OpenClawAgentModelStatusInput, options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
+  setModelAuthOrder(input: OpenClawModelAuthOrderSetInput, options?: OpenClawCommandOptions): Promise<CommandResult>;
   listAgents(options?: OpenClawCommandOptions): Promise<OpenClawAgentListPayload>;
   listSessions(input?: OpenClawListSessionsInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionsPayload>;
   describeSession(input?: OpenClawDescribeSessionInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionPayload>;

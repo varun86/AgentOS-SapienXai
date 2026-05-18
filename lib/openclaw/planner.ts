@@ -3,7 +3,8 @@ import "server-only";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
+import { runOpenClaw } from "@/lib/openclaw/cli";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import {
   buildPlannerDeployProgressTemplate,
@@ -177,9 +178,14 @@ const plannerRuntimeAgentBlueprints: Array<WorkspaceAgentBlueprintInput> = [
 const plannerAdvisorOrder: PlannerAdvisorId[] = ["founder", "product", "ops", "growth", "reviewer"];
 
 type PlannerAgentTurnPayload = {
-  runId: string;
-  status: string;
-  summary: string;
+  runId?: string;
+  status?: string;
+  summary?: string;
+  payloads?: Array<{
+    text?: string;
+    mediaUrl?: string | null;
+  }>;
+  meta?: Record<string, unknown>;
   result?: {
     payloads?: Array<{
       text?: string;
@@ -1093,26 +1099,19 @@ async function runPlannerRuntimeAgent<T>({
   message: string;
   thinking: "off" | "minimal" | "low" | "medium" | "high";
 }) {
-  const payload = await runOpenClawJson<PlannerAgentTurnPayload>(
-    [
-      "agent",
-      "--agent",
+  const payload = await getOpenClawAdapter().runAgentTurn(
+    {
       agentId,
-      "--session-id",
       sessionId,
-      "--message",
       message,
-      "--thinking",
       thinking,
-      "--timeout",
-      "120",
-      "--json"
-    ],
+      timeoutSeconds: 120
+    },
     { timeoutMs: 125000 }
   );
   const text = extractPlannerPayloadText(payload);
   return {
-    runId: payload.runId,
+    runId: payload.runId ?? "",
     text,
     response: extractPlannerJson<T>(text)
   };
@@ -1713,7 +1712,8 @@ function mergePlannerHooks(
 }
 
 function extractPlannerPayloadText(payload: PlannerAgentTurnPayload) {
-  const payloadText = payload.result?.payloads
+  const payloads = payload.result?.payloads ?? payload.payloads;
+  const payloadText = payloads
     ?.map((entry) => entry.text?.trim())
     .filter((entry): entry is string => Boolean(entry))
     .join("\n\n");

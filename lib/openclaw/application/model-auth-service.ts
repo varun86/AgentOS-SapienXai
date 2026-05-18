@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { isOpenAiCodexBackedModel } from "@/lib/openclaw/domains/model-provider-connection";
 import type { ModelsStatusPayload } from "@/lib/openclaw/client/gateway-client";
 
@@ -36,10 +36,7 @@ export async function ensureOpenAiCodexAuthOrderForAgent({
   let status: ModelsStatusPayload;
 
   try {
-    status = await runOpenClawJson<ModelsStatusPayload>(
-      ["models", "status", "--agent", agentId, "--json"],
-      { timeoutMs: 8_000 }
-    );
+    status = await getOpenClawAdapter().getAgentModelStatus({ agentId }, { timeoutMs: 8_000 });
   } catch (error) {
     return {
       repaired: false,
@@ -108,18 +105,12 @@ async function setOpenAiCodexAuthOrderWithRetry(agentId: string, profileIds: str
     }
 
     try {
-      await runOpenClaw(
-        [
-          "models",
-          "auth",
-          "order",
-          "set",
-          "--provider",
-          "openai-codex",
-          "--agent",
+      await getOpenClawAdapter().setModelAuthOrder(
+        {
+          provider: "openai-codex",
           agentId,
-          ...profileIds
-        ],
+          profileIds
+        },
         { timeoutMs: 8_000 }
       );
       return;

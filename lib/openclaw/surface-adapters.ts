@@ -1,6 +1,6 @@
 import "server-only";
 
-import { runOpenClawJson } from "@/lib/openclaw/cli";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { formatSurfaceProviderLabel, getSurfaceKind } from "@/lib/openclaw/surface-catalog";
 import type {
   ChannelAccountRecord,
@@ -27,14 +27,14 @@ export async function readOpenClawSurfaceAccounts() {
     gmailConfig,
     emailConfig
   ] = await Promise.all([
-    readOpenClawConfig<Record<string, unknown>>(["config", "get", "channels", "--json"]),
-    readOpenClawConfig<Record<string, unknown>>(["config", "get", "hooks", "--json"]),
-    readOpenClawConfig<Record<string, unknown>>(["config", "get", "hooks.gmail", "--json"]),
-    readOpenClawConfig<Record<string, unknown>>(["config", "get", "hooks.webhook", "--json"]),
-    readOpenClawConfig<Record<string, unknown>>(["config", "get", "cron", "--json"]),
-    readOpenClawConfig<unknown>(["cron", "list", "--json"]),
-    readOpenClawConfig<Record<string, unknown>>(["config", "get", "gmail", "--json"]),
-    readOpenClawConfig<Record<string, unknown>>(["config", "get", "email", "--json"])
+    readOpenClawConfig<Record<string, unknown>>("channels"),
+    readOpenClawConfig<Record<string, unknown>>("hooks"),
+    readOpenClawConfig<Record<string, unknown>>("hooks.gmail"),
+    readOpenClawConfig<Record<string, unknown>>("hooks.webhook"),
+    readOpenClawConfig<Record<string, unknown>>("cron"),
+    readOpenClawCronJobs(),
+    readOpenClawConfig<Record<string, unknown>>("gmail"),
+    readOpenClawConfig<Record<string, unknown>>("email")
   ]);
 
   return dedupeSurfaceAccounts([
@@ -48,9 +48,17 @@ export async function readOpenClawSurfaceAccounts() {
   ]);
 }
 
-async function readOpenClawConfig<T>(args: string[]) {
+async function readOpenClawConfig<T>(path: string) {
   try {
-    return await runOpenClawJson<T>(args);
+    return await getOpenClawAdapter().getConfig<T>(path);
+  } catch {
+    return null;
+  }
+}
+
+async function readOpenClawCronJobs() {
+  try {
+    return await getOpenClawAdapter().listCronJobs();
   } catch {
     return null;
   }

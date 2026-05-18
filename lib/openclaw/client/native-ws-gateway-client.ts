@@ -17,6 +17,7 @@ import type {
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawAgentModelStatusInput,
   OpenClawAbortTurnInput,
   OpenClawArtifactDeleteInput,
   OpenClawArtifactGetInput,
@@ -51,6 +52,7 @@ import type {
   OpenClawListSessionsInput,
   OpenClawLogsTailInput,
   OpenClawLogsTailPayload,
+  OpenClawModelAuthOrderSetInput,
   OpenClawPluginListPayload,
   OpenClawRuntimeEventSubscriptionInput,
   OpenClawRuntimeSnapshotInput,
@@ -927,7 +929,9 @@ function normalizeModelStatusPayload(authPayload: unknown, modelsPayload: unknow
           provider: readNonEmptyString(entry.provider) ?? undefined,
           status: countUsableAuthProfiles(entry.profiles) > 0
             ? "ok"
-            : readNonEmptyString(entry.status) ?? undefined
+            : readNonEmptyString(entry.status) ?? undefined,
+          profiles: Array.isArray(entry.profiles) ? entry.profiles : undefined,
+          effectiveProfiles: Array.isArray(entry.effectiveProfiles) ? entry.effectiveProfiles : undefined
         }))
       }
     }
@@ -2225,6 +2229,57 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       this.recordGatewayFallback("models.authStatus", error);
       return this.fallback.getModelStatus(options);
     }
+  }
+
+  async getAgentModelStatus(input: OpenClawAgentModelStatusInput, options: OpenClawCommandOptions = {}) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.getAgentModelStatus(input, options);
+    }
+
+    try {
+      const agentId = input.agentId;
+      const [authResult, modelsResult] = await Promise.allSettled([
+        this.callNative<unknown>("models.authStatus", { agentId }, options),
+        this.callNative<unknown>("models.list", { view: "configured", agentId }, options)
+      ]);
+
+      if (authResult.status === "rejected" && modelsResult.status === "rejected") {
+        throw authResult.reason;
+      }
+
+      clearGatewayFallbackDiagnostic("models.authStatus");
+      clearGatewayFallbackDiagnostic("models.list");
+
+      const authPayload = authResult.status === "fulfilled" ? authResult.value : null;
+      const status = normalizeModelStatusPayload(
+        authPayload,
+        modelsResult.status === "fulfilled" ? modelsResult.value : null
+      );
+
+      if (isObjectRecord(authPayload)) {
+        status.agentDir = readNonEmptyString(authPayload.agentDir) ?? status.agentDir;
+      }
+
+      return status;
+    } catch (error) {
+      this.options.onNativeFailure?.(error, "models.authStatus");
+      this.recordGatewayFallback("models.authStatus", error);
+      return this.fallback.getAgentModelStatus(input, options);
+    }
+  }
+
+  setModelAuthOrder(input: OpenClawModelAuthOrderSetInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst(
+      "models.authOrder.set",
+      {
+        provider: input.provider,
+        agentId: input.agentId,
+        profileIds: input.profileIds
+      },
+      options,
+      commandResultFromGatewayPayload,
+      () => this.fallback.setModelAuthOrder(input, options)
+    );
   }
 
   listAgents(options: OpenClawCommandOptions = {}) {

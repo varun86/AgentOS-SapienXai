@@ -21,6 +21,8 @@ const knownGatewayFirstMethods = [
   "diagnostics.stability",
   "models.list",
   "models.authStatus",
+  "models.authOrder.set",
+  "models.auth.order.set",
   "agents.list",
   "agents.create",
   "agents.update",
@@ -246,6 +248,7 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
   };
   const operations: Record<string, OpenClawCapabilityOperation> = {
     health: operation(["health", "status"]),
+    modelAuthOrder: operation(["models.authOrder.set", "models.auth.order.set"]),
     logsTail: operation(["logs.tail"]),
     configSchemaLookup: operation(["config.schema.lookup", "config.schema"]),
     configPatch: operation(["config.patch", "config.apply", "config.set"]),

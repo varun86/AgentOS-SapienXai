@@ -50,6 +50,16 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
     return {};
   }
 
+  async getAgentModelStatus() {
+    this.calls.push({ method: "getAgentModelStatus" });
+    return {};
+  }
+
+  async setModelAuthOrder() {
+    this.calls.push({ method: "setModelAuthOrder" });
+    return { stdout: "", stderr: "", code: 0 };
+  }
+
   async listAgents() {
     this.calls.push({ method: "listAgents" });
     return { agents: [] };
@@ -883,6 +893,105 @@ test("native WS gateway client treats mixed model auth profiles as connected whe
   assert.deepEqual(
     sentFrames.map((frame) => frame.method).filter((method) => method !== "connect").sort(),
     ["models.authStatus", "models.list"]
+  );
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client reads agent model status through Gateway methods", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      const payload =
+        frame.method === "connect"
+          ? { protocol: 4 }
+          : frame.method === "models.authStatus"
+            ? {
+                agentDir: "/tmp/agent-1",
+                providers: [{
+                  provider: "openai-codex",
+                  status: "expired",
+                  profiles: [{ profileId: "openai-codex:user@example.com", status: "ok" }],
+                  effectiveProfiles: [{ profileId: "openai-codex:user@example.com" }]
+                }]
+              }
+            : {
+                models: [{
+                  id: "gpt-5.5",
+                  provider: "openai-codex",
+                  name: "gpt-5.5"
+                }]
+              };
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const status = await client.getAgentModelStatus({ agentId: "agent-1" });
+
+  assert.equal(status.agentDir, "/tmp/agent-1");
+  assert.deepEqual(status.allowed, ["openai-codex/gpt-5.5"]);
+  assert.equal(status.auth?.oauth?.providers?.[0]?.status, "ok");
+  assert.deepEqual(status.auth?.oauth?.providers?.[0]?.profiles, [
+    { profileId: "openai-codex:user@example.com", status: "ok" }
+  ]);
+  assert.deepEqual(status.auth?.oauth?.providers?.[0]?.effectiveProfiles, [
+    { profileId: "openai-codex:user@example.com" }
+  ]);
+  assert.deepEqual(
+    sentFrames.map((frame) => [frame.method, frame.params]).filter(([method]) => method !== "connect"),
+    [
+      ["models.authStatus", { agentId: "agent-1" }],
+      ["models.list", { view: "configured", agentId: "agent-1" }]
+    ]
+  );
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client sets model auth order through Gateway before CLI fallback", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 4 } : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.setModelAuthOrder({
+    provider: "openai-codex",
+    agentId: "agent-1",
+    profileIds: ["profile-1"]
+  });
+
+  assert.equal(result.stderr, "");
+  assert.deepEqual(
+    sentFrames.map((frame) => [frame.method, frame.params]).filter(([method]) => method !== "connect"),
+    [
+      ["models.authOrder.set", {
+        provider: "openai-codex",
+        agentId: "agent-1",
+        profileIds: ["profile-1"]
+      }]
+    ]
   );
   assert.deepEqual(fallback.calls, []);
 });

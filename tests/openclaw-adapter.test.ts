@@ -43,6 +43,14 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "getModelStatus", options });
       return { defaultModel: "openai/gpt-5" };
     },
+    async getAgentModelStatus(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getAgentModelStatus", action: input.agentId, options });
+      return { defaultModel: "openai/gpt-5", agentDir: `/tmp/${input.agentId}` };
+    },
+    async setModelAuthOrder(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "setModelAuthOrder", action: input.agentId, options });
+      return { stdout: "", stderr: "", code: 0 };
+    },
     async listAgents(options?: OpenClawCommandOptions) {
       calls.push({ method: "listAgents", options });
       return { agents: [] };
@@ -301,6 +309,11 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   await adapter.listSkills({ eligible: true, timeoutMs: 1 });
   await adapter.listPlugins({ timeoutMs: 2 });
   await adapter.listModels({ all: true }, { timeoutMs: 3 });
+  await adapter.getAgentModelStatus({ agentId: "agent-1" }, { timeoutMs: 3 });
+  await adapter.setModelAuthOrder(
+    { provider: "openai-codex", agentId: "agent-1", profileIds: ["profile-1"] },
+    { timeoutMs: 3 }
+  );
   await adapter.scanModels({ yes: true, noInput: true, timeoutMs: 4 });
   await adapter.listAgents({ timeoutMs: 4 });
   await adapter.listSessions({ limit: 1 }, { timeoutMs: 4 });
@@ -360,6 +373,8 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "listSkills", options: { eligible: true, timeoutMs: 1 } },
     { method: "listPlugins", options: { timeoutMs: 2 } },
     { method: "listModels", options: { timeoutMs: 3 } },
+    { method: "getAgentModelStatus", action: "agent-1", options: { timeoutMs: 3 } },
+    { method: "setModelAuthOrder", action: "agent-1", options: { timeoutMs: 3 } },
     { method: "scanModels", options: { yes: true, noInput: true, timeoutMs: 4 } },
     { method: "listAgents", options: { timeoutMs: 4 } },
     { method: "listSessions", options: { timeoutMs: 4 } },
