@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 type WorkspaceFlowNode = Node<WorkspaceNodeData, "workspace">;
 
 export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) {
+  const canOpenWorkspaceFiles = Boolean(data.onOpenWorkspaceFiles);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -31,9 +33,25 @@ export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) 
               <FolderKanban className="h-3 w-3" />
             </div>
             <div>
-              <p className="workspace-node__title font-display text-[12px] tracking-[0.04em]">
-                {data.workspace.name}
-              </p>
+              {canOpenWorkspaceFiles ? (
+                <button
+                  type="button"
+                  aria-label={`Open workspace files for ${data.workspace.name}`}
+                  title="Open workspace files"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    data.onOpenWorkspaceFiles?.(data.workspace.id);
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  className="workspace-node__title nodrag nopan max-w-[220px] truncate rounded-md text-left font-display text-[12px] tracking-[0.04em] transition-colors hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60"
+                >
+                  {data.workspace.name}
+                </button>
+              ) : (
+                <p className="workspace-node__title font-display text-[12px] tracking-[0.04em]">
+                  {data.workspace.name}
+                </p>
+              )}
               <p className="workspace-node__slug text-[9px] uppercase tracking-[0.22em]">
                 {data.workspace.slug}
               </p>

@@ -18,6 +18,7 @@ import { ResetDialog } from "@/components/mission-control/reset-dialog";
 import { SettingsControlCenter } from "@/components/mission-control/settings-control-center";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
 import { WorkspaceChannelsDialog } from "@/components/mission-control/workspace-channels-dialog";
+import { WorkspaceContextFilesDialog } from "@/components/mission-control/workspace-context-files-dialog";
 import { WorkspaceWizardDialog } from "@/components/mission-control/workspace-wizard/workspace-wizard-dialog";
 import dynamic from "next/dynamic";
 import { toast } from "@/components/ui/sonner";
@@ -246,6 +247,7 @@ export function MissionControlShell({
   const [workspaceWizardInitialMode, setWorkspaceWizardInitialMode] = useState<"basic" | "advanced">("basic");
   const [workspaceWizardEditId, setWorkspaceWizardEditId] = useState<string | null>(null);
   const [isWorkspaceChannelsOpen, setIsWorkspaceChannelsOpen] = useState(false);
+  const [workspaceFilesDialogId, setWorkspaceFilesDialogId] = useState<string | null>(null);
   const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
   const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
   const [agentModelRequest, setAgentModelRequest] = useState<AgentModelRequest | null>(null);
@@ -558,6 +560,21 @@ export function MissionControlShell({
     }
 
     setIsWorkspaceChannelsOpen(true);
+  }, []);
+
+  const openWorkspaceFiles = useCallback(
+    (workspaceId: string) => {
+      setActiveWorkspaceId(workspaceId);
+      selectNode(workspaceId);
+      setWorkspaceFilesDialogId(workspaceId);
+    },
+    [selectNode]
+  );
+
+  const handleWorkspaceFilesOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setWorkspaceFilesDialogId(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -2838,6 +2855,7 @@ export function MissionControlShell({
             onConfigureAgentCapabilities={handleConfigureAgentCapabilities}
             onInspectAgentDetail={handleInspectAgentDetail}
             onOpenWorkspaceChannels={openWorkspaceChannels}
+            onOpenWorkspaceFiles={openWorkspaceFiles}
             onMessageAgent={(agentId) => {
               const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
 
@@ -3193,6 +3211,13 @@ export function MissionControlShell({
           onOpenChange={setIsWorkspaceChannelsOpen}
           onRefresh={refresh}
           onSnapshotChange={setSnapshot}
+        />
+
+        <WorkspaceContextFilesDialog
+          snapshot={uiSnapshot}
+          workspaceId={workspaceFilesDialogId}
+          open={workspaceFilesDialogId !== null}
+          onOpenChange={handleWorkspaceFilesOpenChange}
         />
 
         {shouldShowOnboarding ? (

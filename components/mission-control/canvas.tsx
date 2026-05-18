@@ -69,6 +69,7 @@ export function MissionCanvas({
   onConfigureAgentCapabilities,
   onInspectAgentDetail,
   onOpenWorkspaceChannels,
+  onOpenWorkspaceFiles,
   onReplyTask,
   onCopyTaskPrompt,
   onHideTask,
@@ -101,6 +102,7 @@ export function MissionCanvas({
   onConfigureAgentCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
   onInspectAgentDetail?: (agentId: string, focus: AgentDetailFocus) => void;
   onOpenWorkspaceChannels?: (workspaceId?: string) => void;
+  onOpenWorkspaceFiles?: (workspaceId: string) => void;
   onReplyTask: (task: WorkItemRecord) => void;
   onCopyTaskPrompt: (task: WorkItemRecord) => void;
   onHideTask: (task: WorkItemRecord) => void;
@@ -153,6 +155,7 @@ export function MissionCanvas({
     onConfigureAgentCapabilities,
     onInspectAgentDetail,
     onOpenWorkspaceChannels,
+    onOpenWorkspaceFiles,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,
@@ -234,6 +237,7 @@ export function MissionCanvas({
       onConfigureAgentCapabilities,
       onInspectAgentDetail,
       onOpenWorkspaceChannels,
+      onOpenWorkspaceFiles,
       onReplyTask,
       onCopyTaskPrompt,
       onHideTask,
@@ -276,6 +280,7 @@ export function MissionCanvas({
     onConfigureAgentCapabilities,
     onInspectAgentDetail,
     onOpenWorkspaceChannels,
+    onOpenWorkspaceFiles,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,

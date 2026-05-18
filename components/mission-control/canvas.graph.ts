@@ -50,6 +50,7 @@ export function buildCanvasGraph(
   onConfigureAgentCapabilities: ((agentId: string, focus: "skills" | "tools") => void) | undefined,
   onInspectAgentDetail: ((agentId: string, focus: AgentDetailFocus) => void) | undefined,
   onOpenWorkspaceChannels: ((workspaceId?: string) => void) | undefined,
+  onOpenWorkspaceFiles: ((workspaceId: string) => void) | undefined,
   onReplyTask: (task: WorkItemRecord) => void,
   onCopyTaskPrompt: (task: WorkItemRecord) => void,
   onHideTask: (task: WorkItemRecord) => void,
@@ -297,6 +298,7 @@ export function buildCanvasGraph(
           emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
           taskCardCount: workspaceToggleTasks.length,
           taskCardsHidden: workspaceTaskCardsHidden,
+          onOpenWorkspaceFiles,
           onToggleTaskCards:
             workspaceToggleTasks.length > 0 ? () => onToggleWorkspaceTaskCards(workspace.id) : undefined
         }

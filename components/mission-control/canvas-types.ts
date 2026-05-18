@@ -15,6 +15,7 @@ export type WorkspaceNodeData = Record<string, unknown> & {
   taskCardCount: number;
   taskCardsHidden: boolean;
   onToggleTaskCards?: () => void;
+  onOpenWorkspaceFiles?: (workspaceId: string) => void;
 };
 
 export type AgentDetailFocus = "skills" | "tools" | "sessions";
