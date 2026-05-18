@@ -3,15 +3,15 @@ import "server-only";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { NativeWsOpenClawGatewayClient, type OpenClawGatewayEventSubscription } from "@/lib/openclaw/client/gateway-client";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { getOpenClawCapabilityMatrix } from "@/lib/openclaw/application/capability-matrix-service";
+import type {
+  OpenClawGatewayEventFrame,
+  OpenClawGatewayEventSubscription
+} from "@/lib/openclaw/client/gateway-client";
 import type { RuntimeRecord } from "@/lib/openclaw/types";
 
-type GatewayEventFrame = {
-  type?: string;
-  event?: string;
-  payload?: unknown;
-};
+type GatewayEventFrame = OpenClawGatewayEventFrame;
 
 const eventBridgeRoot = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control", "gateway-events");
 const maxBridgeRecords = 500;
@@ -123,11 +123,13 @@ async function startEventBridge() {
     return;
   }
 
-  const client = new NativeWsOpenClawGatewayClient({ timeoutMs: 5_000 });
   try {
-    subscription = await client.subscribeNativeEvents(
+    subscription = await getOpenClawAdapter().subscribeRuntimeEvents(
       {
-        subscribeSessions: true
+        includeSessions: true,
+        includeTasks: true,
+        includeArtifacts: true,
+        includeApprovals: true
       },
       {
         onEvent: (frame) => {

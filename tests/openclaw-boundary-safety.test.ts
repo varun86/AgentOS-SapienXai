@@ -125,6 +125,9 @@ test("AgentOS contracts expose explicit runtime aliases instead of wildcard Open
   assert.match(source, /export type AgentRecord = OpenClawAgent;/);
   assert.match(source, /export type RuntimeActivityRecord = RuntimeRecord;/);
   assert.match(source, /export type WorkItemRecord = TaskRecord;/);
+  assert.match(source, /export type RuntimeEventFrame = \{/);
+  assert.match(source, /export type RuntimeEventSubscriptionRequest = \{/);
+  assert.match(source, /export type RuntimeSnapshotRecord = \{/);
 });
 
 test("app, components, and hooks use AgentOS aliases for core runtime records", () => {

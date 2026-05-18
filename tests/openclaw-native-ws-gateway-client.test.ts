@@ -60,6 +60,90 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
     return { sessions: [] };
   }
 
+  async describeSession() {
+    this.calls.push({ method: "describeSession" });
+    return {};
+  }
+
+  async getSessionHistory() {
+    this.calls.push({ method: "getSessionHistory" });
+    return {};
+  }
+
+  async exportSession() {
+    this.calls.push({ method: "exportSession" });
+    return {};
+  }
+
+  async listTasks() {
+    this.calls.push({ method: "listTasks" });
+    return { tasks: [] };
+  }
+
+  async getTask() {
+    this.calls.push({ method: "getTask" });
+    return {};
+  }
+
+  async assignTask() {
+    this.calls.push({ method: "assignTask" });
+    return {};
+  }
+
+  async cancelTask() {
+    this.calls.push({ method: "cancelTask" });
+    return {};
+  }
+
+  async listArtifacts() {
+    this.calls.push({ method: "listArtifacts" });
+    return { artifacts: [] };
+  }
+
+  async getArtifact() {
+    this.calls.push({ method: "getArtifact" });
+    return {};
+  }
+
+  async putArtifact() {
+    this.calls.push({ method: "putArtifact" });
+    return {};
+  }
+
+  async deleteArtifact() {
+    this.calls.push({ method: "deleteArtifact" });
+    return {};
+  }
+
+  async getRuntimeSnapshot() {
+    this.calls.push({ method: "getRuntimeSnapshot" });
+    return {};
+  }
+
+  async getToolsCatalog() {
+    this.calls.push({ method: "getToolsCatalog" });
+    return { tools: [] };
+  }
+
+  async getEffectiveTools() {
+    this.calls.push({ method: "getEffectiveTools" });
+    return { tools: [] };
+  }
+
+  async invokeTool() {
+    this.calls.push({ method: "invokeTool" });
+    return { ok: true };
+  }
+
+  async subscribeRuntimeEvents() {
+    this.calls.push({ method: "subscribeRuntimeEvents" });
+    return {
+      close() {
+        return undefined;
+      }
+    };
+  }
+
   async getChannelStatus() {
     this.calls.push({ method: "getChannelStatus" });
     return {
@@ -1563,6 +1647,176 @@ test("native WS gateway client exposes optional Gateway support methods", async 
     "cron.status",
     "cron.list"
   ]);
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client exposes Phase 2 runtime Gateway methods", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: [
+                  "sessions.describe",
+                  "sessions.history",
+                  "sessions.export",
+                  "tasks.list",
+                  "tasks.get",
+                  "tasks.assign",
+                  "tasks.cancel",
+                  "artifacts.list",
+                  "artifacts.get",
+                  "artifacts.put",
+                  "artifacts.delete",
+                  "runtime.snapshot",
+                  "tools.catalog",
+                  "tools.effective",
+                  "tools.invoke"
+                ]
+              }
+            }
+          : frame.method === "sessions.describe"
+            ? { session: { id: "session-1" } }
+            : frame.method === "sessions.history"
+              ? { messages: [{ text: "hello" }] }
+              : frame.method === "sessions.export"
+                ? { format: "json", content: "{}" }
+                : frame.method === "tasks.list"
+                  ? { tasks: [{ id: "task-1" }] }
+                  : frame.method === "tasks.get"
+                    ? { task: { id: "task-1" } }
+                    : frame.method === "artifacts.list"
+                      ? { artifacts: [{ id: "artifact-1" }] }
+                      : frame.method === "runtime.snapshot"
+                        ? { tasks: [], sessions: [] }
+                        : frame.method === "tools.catalog"
+                          ? { tools: [{ name: "shell" }] }
+                          : frame.method === "tools.effective"
+                            ? { tools: [{ name: "shell" }] }
+                            : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(await client.describeSession({ key: "agent:agent-1:main" }), { session: { id: "session-1" } });
+  assert.deepEqual(await client.getSessionHistory({ key: "agent:agent-1:main", limit: 5 }), {
+    messages: [{ text: "hello" }]
+  });
+  assert.deepEqual(await client.exportSession({ key: "agent:agent-1:main", format: "json" }), {
+    format: "json",
+    content: "{}"
+  });
+  assert.deepEqual(await client.listTasks({ agentId: "agent-1" }), { tasks: [{ id: "task-1" }] });
+  assert.deepEqual(await client.getTask({ taskId: "task-1" }), { task: { id: "task-1" } });
+  assert.deepEqual(await client.assignTask({ taskId: "task-1", agentId: "agent-1" }), { ok: true });
+  assert.deepEqual(await client.cancelTask({ taskId: "task-1", reason: "duplicate" }), { ok: true });
+  assert.deepEqual(await client.listArtifacts({ taskId: "task-1" }), { artifacts: [{ id: "artifact-1" }] });
+  assert.deepEqual(await client.getArtifact({ artifactId: "artifact-1", includeContent: true }), { ok: true });
+  assert.deepEqual(await client.putArtifact({ name: "result.txt", content: "ok" }), { ok: true });
+  assert.deepEqual(await client.deleteArtifact({ artifactId: "artifact-1" }), { ok: true });
+  assert.deepEqual(await client.getRuntimeSnapshot({ includeTasks: true }), { tasks: [], sessions: [] });
+  assert.deepEqual(await client.getToolsCatalog({ agentId: "agent-1" }), { tools: [{ name: "shell" }] });
+  assert.deepEqual(await client.getEffectiveTools({ agentId: "agent-1" }), { tools: [{ name: "shell" }] });
+  assert.deepEqual(await client.invokeTool({ toolName: "shell", input: { command: "pwd" } }), { ok: true });
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "sessions.describe",
+    "sessions.history",
+    "sessions.export",
+    "tasks.list",
+    "tasks.get",
+    "tasks.assign",
+    "tasks.cancel",
+    "artifacts.list",
+    "artifacts.get",
+    "artifacts.put",
+    "artifacts.delete",
+    "runtime.snapshot",
+    "tools.catalog",
+    "tools.effective",
+    "tools.invoke"
+  ]);
+  assert.deepEqual(sentFrames[1]?.params, {
+    key: "agent:agent-1:main"
+  });
+  assert.deepEqual(sentFrames[15]?.params, {
+    toolName: "shell",
+    input: { command: "pwd" }
+  });
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client subscribes to Phase 3 runtime event streams", async () => {
+  const fallback = new FallbackGatewayClient();
+  const events: unknown[] = [];
+  let subscriptionSocket: { emitMessage: (frame: Record<string, unknown>) => void } | null = null;
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["tasks.subscribe"],
+                events: ["task.updated"]
+              }
+            }
+          : { ok: true }
+      });
+
+      if (frame.method === "tasks.subscribe") {
+        subscriptionSocket = socket;
+        subscriptionSocket.emitMessage({
+          type: "event",
+          event: "task.updated",
+          payload: { taskId: "task-1", status: "running" }
+        });
+      }
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const subscription = await client.subscribeRuntimeEvents(
+    { includeSessions: false, includeTasks: true, taskIds: ["task-1"] },
+    {
+      onEvent: (event) => {
+        events.push(event);
+      }
+    },
+    { timeoutMs: 250 }
+  );
+
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+  subscription.close();
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "tasks.subscribe"]);
+  assert.deepEqual(sentFrames[1]?.params, { taskIds: ["task-1"] });
+  assert.deepEqual(events, [{
+    type: "event",
+    event: "task.updated",
+    payload: { taskId: "task-1", status: "running" }
+  }]);
   assert.deepEqual(fallback.calls, []);
 });
 

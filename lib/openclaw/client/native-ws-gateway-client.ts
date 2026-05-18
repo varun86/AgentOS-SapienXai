@@ -18,6 +18,12 @@ import type {
   ModelsStatusPayload,
   OpenClawAddAgentInput,
   OpenClawAbortTurnInput,
+  OpenClawArtifactDeleteInput,
+  OpenClawArtifactGetInput,
+  OpenClawArtifactListInput,
+  OpenClawArtifactListPayload,
+  OpenClawArtifactPayload,
+  OpenClawArtifactPutInput,
   OpenClawChannelStatusInput,
   OpenClawChannelStatusPayload,
   OpenClawAgentListPayload,
@@ -29,12 +35,16 @@ import type {
   OpenClawCronListInput,
   OpenClawCronListPayload,
   OpenClawCronStatusPayload,
+  OpenClawDescribeSessionInput,
   OpenClawExecApprovalListInput,
   OpenClawExecApprovalListPayload,
   OpenClawExecApprovalResolveInput,
   OpenClawExecApprovalResolvePayload,
   OpenClawGatewayClient,
   OpenClawGatewayClientDiagnostics,
+  OpenClawGatewayEventCallbacks,
+  OpenClawGatewayEventFrame,
+  OpenClawGatewayEventSubscription,
   OpenClawGatewayRequestPolicy,
   OpenClawHealthPayload,
   OpenClawListModelsInput,
@@ -42,9 +52,30 @@ import type {
   OpenClawLogsTailInput,
   OpenClawLogsTailPayload,
   OpenClawPluginListPayload,
+  OpenClawRuntimeEventSubscriptionInput,
+  OpenClawRuntimeSnapshotInput,
+  OpenClawRuntimeSnapshotPayload,
+  OpenClawSessionExportInput,
+  OpenClawSessionExportPayload,
+  OpenClawSessionHistoryInput,
+  OpenClawSessionHistoryPayload,
+  OpenClawSessionPayload,
+  OpenClawSessionReferenceInput,
   OpenClawSessionsPayload,
   OpenClawSkillListPayload,
   OpenClawStreamCallbacks,
+  OpenClawTaskAssignInput,
+  OpenClawTaskCancelInput,
+  OpenClawTaskGetInput,
+  OpenClawTaskListInput,
+  OpenClawTaskListPayload,
+  OpenClawTaskPayload,
+  OpenClawToolInvokeInput,
+  OpenClawToolInvokePayload,
+  OpenClawToolsCatalogInput,
+  OpenClawToolsCatalogPayload,
+  OpenClawToolsEffectiveInput,
+  OpenClawToolsEffectivePayload,
   OpenClawUpdateAgentInput,
   StatusPayload,
 } from "@/lib/openclaw/client/types";
@@ -104,10 +135,6 @@ export type NativeWsOpenClawGatewayClientOptions = {
   onNativeFailure?: (error: unknown, method: string) => void;
 };
 
-export type OpenClawGatewayEventSubscription = {
-  close: () => void;
-};
-
 type GatewayResponseFrame = {
   type?: string;
   id?: string | number;
@@ -118,11 +145,7 @@ type GatewayResponseFrame = {
   code?: string;
 };
 
-type GatewayEventFrame = {
-  type?: string;
-  event?: string;
-  payload?: unknown;
-};
+type GatewayEventFrame = OpenClawGatewayEventFrame;
 
 type NativeHandshakePayload = {
   type?: string;
@@ -477,6 +500,8 @@ const configSnapshotPayloadSchema = z
   })
   .passthrough();
 
+const genericObjectPayloadSchema = z.object({}).passthrough();
+
 function parseGatewayPayload<TPayload>(operation: string, schema: z.ZodTypeAny, payload: unknown) {
   const parsed = schema.safeParse(payload);
 
@@ -489,6 +514,10 @@ function parseGatewayPayload<TPayload>(operation: string, schema: z.ZodTypeAny, 
   }
 
   return parsed.data as TPayload;
+}
+
+function parseObjectGatewayPayload<TPayload>(operation: string, payload: unknown) {
+  return parseGatewayPayload<TPayload>(operation, genericObjectPayloadSchema, payload);
 }
 
 function hasNativeStatusUpdateRegistry(status: StatusPayload) {
@@ -964,6 +993,21 @@ function buildAgentSessionKey(agentId?: string | null, sessionId?: string | null
     : `agent:${trimmedAgentId}:main`;
 }
 
+function buildSessionReferenceParams(input: OpenClawSessionReferenceInput = {}) {
+  const key = input.key?.trim() || input.sessionKey?.trim();
+  if (key) {
+    return { key };
+  }
+
+  const sessionId = input.sessionId?.trim();
+  const agentId = input.agentId?.trim();
+  return {
+    agentId: agentId || undefined,
+    sessionId: sessionId || undefined,
+    key: agentId || sessionId ? buildAgentSessionKey(agentId, sessionId) : undefined
+  };
+}
+
 function buildMergePatchForConfigPath(path: string, value: unknown) {
   const segments = parseConfigPath(path);
 
@@ -1011,6 +1055,16 @@ function resolveEventSubscriptionRequests(params: Record<string, unknown>, hello
     if (supportsGatewayMethod(hello, "sessions.messages.subscribe")) {
       requests.push({ method: "sessions.messages.subscribe", params: { key: key.trim() } });
     }
+  }
+
+  const taskIds = Array.isArray(params.taskIds)
+    ? params.taskIds.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+  if ((params.subscribeTasks === true || taskIds.length > 0) && supportsGatewayMethod(hello, "tasks.subscribe")) {
+    requests.push({
+      method: "tasks.subscribe",
+      params: taskIds.length > 0 ? { taskIds: taskIds.map((entry) => entry.trim()) } : {}
+    });
   }
 
   return requests;
@@ -1085,7 +1139,7 @@ function resolveGatewayRequestPolicy(method: string, options: OpenClawCommandOpt
 }
 
 function isGatewayMutationMethod(method: string) {
-  return /(^|\.)(create|update|delete|set|unset|patch|apply|send|abort|resolve|restart|start|stop|logout)$/i.test(method);
+  return /(^|\.)(assign|cancel|create|delete|invoke|put|update|set|unset|patch|apply|send|abort|resolve|restart|start|stop|logout)$/i.test(method);
 }
 
 function shouldUseCliFallback(
@@ -1813,10 +1867,17 @@ class PersistentOpenClawGatewayConnection {
       !supportsGatewayEvent(hello, "agent") &&
       !supportsGatewayEvent(hello, "session.message") &&
       !supportsGatewayEvent(hello, "session.tool") &&
-      !supportsGatewayEvent(hello, "sessions.changed")
+      !supportsGatewayEvent(hello, "sessions.changed") &&
+      !supportsGatewayEvent(hello, "task") &&
+      !supportsGatewayEvent(hello, "task.updated") &&
+      !supportsGatewayEvent(hello, "task.completed") &&
+      !supportsGatewayEvent(hello, "artifact") &&
+      !supportsGatewayEvent(hello, "artifact.updated") &&
+      !supportsGatewayEvent(hello, "exec.approval.requested") &&
+      !supportsGatewayEvent(hello, "plugin.approval.requested")
     ) {
       throw new NativeGatewayError(
-        "OpenClaw Gateway does not advertise compatible chat/session event streaming.",
+        "OpenClaw Gateway does not advertise compatible runtime event streaming.",
         { kind: "unsupported" }
       );
     }
@@ -2183,6 +2244,176 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       options,
       (payload) => parseGatewayPayload<OpenClawSessionsPayload>("sessions.list", sessionsPayloadSchema, payload),
       () => this.fallback.listSessions(input, options)
+    );
+  }
+
+  describeSession(input: OpenClawDescribeSessionInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawSessionPayload>(
+      "sessions.describe",
+      {
+        ...buildSessionReferenceParams(input),
+        includeMessages: input.includeMessages,
+        limit: input.limit
+      },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawSessionPayload>("sessions.describe", payload),
+      () => this.fallback.describeSession(input, options)
+    );
+  }
+
+  getSessionHistory(input: OpenClawSessionHistoryInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawSessionHistoryPayload>(
+      "sessions.history",
+      {
+        ...buildSessionReferenceParams(input),
+        limit: input.limit,
+        cursor: input.cursor ?? undefined
+      },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawSessionHistoryPayload>("sessions.history", payload),
+      () => this.fallback.getSessionHistory(input, options)
+    );
+  }
+
+  exportSession(input: OpenClawSessionExportInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawSessionExportPayload>(
+      "sessions.export",
+      {
+        ...buildSessionReferenceParams(input),
+        format: input.format
+      },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawSessionExportPayload>("sessions.export", payload),
+      () => this.fallback.exportSession(input, options)
+    );
+  }
+
+  listTasks(input: OpenClawTaskListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawTaskListPayload>(
+      "tasks.list",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawTaskListPayload>("tasks.list", payload),
+      () => this.fallback.listTasks(input, options)
+    );
+  }
+
+  getTask(input: OpenClawTaskGetInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawTaskPayload>(
+      "tasks.get",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawTaskPayload>("tasks.get", payload),
+      () => this.fallback.getTask(input, options)
+    );
+  }
+
+  assignTask(input: OpenClawTaskAssignInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawTaskPayload>(
+      "tasks.assign",
+      {
+        ...input,
+        reason: input.reason ?? undefined
+      },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawTaskPayload>("tasks.assign", payload),
+      () => this.fallback.assignTask(input, options)
+    );
+  }
+
+  cancelTask(input: OpenClawTaskCancelInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawTaskPayload>(
+      "tasks.cancel",
+      {
+        taskId: input.taskId,
+        reason: input.reason ?? undefined
+      },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawTaskPayload>("tasks.cancel", payload),
+      () => this.fallback.cancelTask(input, options)
+    );
+  }
+
+  listArtifacts(input: OpenClawArtifactListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawArtifactListPayload>(
+      "artifacts.list",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawArtifactListPayload>("artifacts.list", payload),
+      () => this.fallback.listArtifacts(input, options)
+    );
+  }
+
+  getArtifact(input: OpenClawArtifactGetInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawArtifactPayload>(
+      "artifacts.get",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawArtifactPayload>("artifacts.get", payload),
+      () => this.fallback.getArtifact(input, options)
+    );
+  }
+
+  putArtifact(input: OpenClawArtifactPutInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawArtifactPayload>(
+      "artifacts.put",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawArtifactPayload>("artifacts.put", payload),
+      () => this.fallback.putArtifact(input, options)
+    );
+  }
+
+  deleteArtifact(input: OpenClawArtifactDeleteInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawArtifactPayload>(
+      "artifacts.delete",
+      {
+        artifactId: input.artifactId,
+        reason: input.reason ?? undefined
+      },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawArtifactPayload>("artifacts.delete", payload),
+      () => this.fallback.deleteArtifact(input, options)
+    );
+  }
+
+  getRuntimeSnapshot(input: OpenClawRuntimeSnapshotInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawRuntimeSnapshotPayload>(
+      "runtime.snapshot",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawRuntimeSnapshotPayload>("runtime.snapshot", payload),
+      () => this.fallback.getRuntimeSnapshot(input, options)
+    );
+  }
+
+  getToolsCatalog(input: OpenClawToolsCatalogInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawToolsCatalogPayload>(
+      "tools.catalog",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawToolsCatalogPayload>("tools.catalog", payload),
+      () => this.fallback.getToolsCatalog(input, options)
+    );
+  }
+
+  getEffectiveTools(input: OpenClawToolsEffectiveInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawToolsEffectivePayload>(
+      "tools.effective",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawToolsEffectivePayload>("tools.effective", payload),
+      () => this.fallback.getEffectiveTools(input, options)
+    );
+  }
+
+  invokeTool(input: OpenClawToolInvokeInput, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst<OpenClawToolInvokePayload>(
+      "tools.invoke",
+      { ...input },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawToolInvokePayload>("tools.invoke", payload),
+      () => this.fallback.invokeTool(input, options)
     );
   }
 
@@ -2637,6 +2868,49 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     );
   }
 
+  async subscribeRuntimeEvents(
+    input: OpenClawRuntimeEventSubscriptionInput,
+    callbacks: OpenClawGatewayEventCallbacks,
+    options: OpenClawCommandOptions = {}
+  ) {
+    if (options.forceCli || this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.subscribeRuntimeEvents(input, callbacks, options);
+    }
+
+    const hasExplicitIncludes = [
+      input.includeSessions,
+      input.includeTasks,
+      input.includeArtifacts,
+      input.includeApprovals
+    ].some((value) => value !== undefined);
+
+    try {
+      const subscription = await this.subscribeNativeEvents(
+        {
+          subscribeSessions: input.includeSessions ?? !hasExplicitIncludes,
+          subscribeTasks: input.includeTasks ?? (input.taskIds?.length ? true : undefined),
+          subscribeArtifacts: input.includeArtifacts,
+          subscribeApprovals: input.includeApprovals,
+          sessionKeys: input.sessionKeys,
+          taskIds: input.taskIds,
+          artifactIds: input.artifactIds
+        },
+        callbacks,
+        options
+      );
+      clearGatewayFallbackDiagnostic("runtime.subscribe");
+      return subscription;
+    } catch (error) {
+      this.options.onNativeFailure?.(error, "runtime.subscribe");
+      if (!shouldUseCliFallback(error, "runtime.subscribe", { safety: "read", timeoutMs: options.timeoutMs })) {
+        throw error;
+      }
+
+      this.recordGatewayFallback("runtime.subscribe", error);
+      return this.fallback.subscribeRuntimeEvents(input, callbacks, options);
+    }
+  }
+
   async callNative<TPayload>(
     method: string,
     params: Record<string, unknown> = {},
@@ -2654,11 +2928,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
 
   async subscribeNativeEvents(
     params: Record<string, unknown>,
-    callbacks: {
-      onEvent: (event: GatewayEventFrame) => void;
-      onError?: (error: unknown) => void;
-      onClose?: () => void;
-    },
+    callbacks: OpenClawGatewayEventCallbacks,
     options: OpenClawCommandOptions = {}
   ): Promise<OpenClawGatewayEventSubscription> {
     const timeoutMs = resolveNativeTimeoutMs(options.timeoutMs ?? this.options.timeoutMs, "sessions.subscribe");

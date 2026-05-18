@@ -22,6 +22,38 @@ export type SurfaceChannelRecord = WorkspaceChannelSummary;
 export type SurfaceBindingRecord = WorkspaceChannelWorkspaceBinding;
 export type SurfaceRegistryRecord = ChannelRegistry;
 
+export type RuntimeEventKind = "session" | "task" | "artifact" | "approval" | "tool" | "status" | "unknown";
+
+export type RuntimeEventFrame = {
+  kind: RuntimeEventKind;
+  source: "gateway" | "polling" | "local";
+  event: string;
+  payload?: unknown;
+  receivedAt?: string;
+  agentId?: string;
+  sessionId?: string;
+  taskId?: string;
+  runId?: string;
+};
+
+export type RuntimeEventSubscriptionRequest = {
+  includeSessions?: boolean;
+  includeTasks?: boolean;
+  includeArtifacts?: boolean;
+  includeApprovals?: boolean;
+  sessionKeys?: string[];
+  taskIds?: string[];
+  artifactIds?: string[];
+};
+
+export type RuntimeSnapshotRecord = {
+  agents?: unknown[];
+  sessions?: unknown[];
+  tasks?: unknown[];
+  artifacts?: unknown[];
+  capturedAt?: string;
+};
+
 export type {
   AddModelsCatalogModel,
   AddModelsEmptyState,

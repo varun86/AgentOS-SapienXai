@@ -51,6 +51,74 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "listSessions", options });
       return { sessions: [] };
     },
+    async describeSession(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "describeSession", options });
+      return { session: { id: "session-1" } };
+    },
+    async getSessionHistory(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getSessionHistory", options });
+      return { messages: [] };
+    },
+    async exportSession(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "exportSession", options });
+      return { format: "json", content: "{}" };
+    },
+    async listTasks(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "listTasks", options });
+      return { tasks: [] };
+    },
+    async getTask(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getTask", action: input.taskId, options });
+      return { taskId: input.taskId };
+    },
+    async assignTask(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "assignTask", action: input.taskId, options });
+      return { taskId: input.taskId, status: "assigned" };
+    },
+    async cancelTask(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "cancelTask", action: input.taskId, options });
+      return { taskId: input.taskId, status: "cancelled" };
+    },
+    async listArtifacts(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "listArtifacts", options });
+      return { artifacts: [] };
+    },
+    async getArtifact(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getArtifact", action: input.artifactId, options });
+      return { artifactId: input.artifactId };
+    },
+    async putArtifact(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "putArtifact", action: input.artifactId ?? input.name, options });
+      return { artifactId: input.artifactId ?? "artifact-1" };
+    },
+    async deleteArtifact(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "deleteArtifact", action: input.artifactId, options });
+      return { artifactId: input.artifactId };
+    },
+    async getRuntimeSnapshot(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getRuntimeSnapshot", options });
+      return { tasks: [], sessions: [] };
+    },
+    async getToolsCatalog(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getToolsCatalog", options });
+      return { tools: [] };
+    },
+    async getEffectiveTools(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getEffectiveTools", options });
+      return { tools: [] };
+    },
+    async invokeTool(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "invokeTool", action: input.toolName, options });
+      return { ok: true };
+    },
+    async subscribeRuntimeEvents(_input, _callbacks, options?: OpenClawCommandOptions) {
+      calls.push({ method: "subscribeRuntimeEvents", options });
+      return {
+        close() {
+          return undefined;
+        }
+      };
+    },
     async getChannelStatus(_input, options?: OpenClawCommandOptions) {
       calls.push({ method: "getChannelStatus", options });
       return {
@@ -236,6 +304,27 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   await adapter.scanModels({ yes: true, noInput: true, timeoutMs: 4 });
   await adapter.listAgents({ timeoutMs: 4 });
   await adapter.listSessions({ limit: 1 }, { timeoutMs: 4 });
+  await adapter.describeSession({ key: "agent:agent-1:main" }, { timeoutMs: 4 });
+  await adapter.getSessionHistory({ key: "agent:agent-1:main", limit: 5 }, { timeoutMs: 4 });
+  await adapter.exportSession({ key: "agent:agent-1:main", format: "json" }, { timeoutMs: 4 });
+  await adapter.listTasks({ agentId: "agent-1" }, { timeoutMs: 4 });
+  await adapter.getTask({ taskId: "task-1" }, { timeoutMs: 4 });
+  await adapter.assignTask({ taskId: "task-1", agentId: "agent-1" }, { timeoutMs: 4 });
+  await adapter.cancelTask({ taskId: "task-1" }, { timeoutMs: 4 });
+  await adapter.listArtifacts({ taskId: "task-1" }, { timeoutMs: 4 });
+  await adapter.getArtifact({ artifactId: "artifact-1" }, { timeoutMs: 4 });
+  await adapter.putArtifact({ name: "result.txt", content: "ok" }, { timeoutMs: 4 });
+  await adapter.deleteArtifact({ artifactId: "artifact-1" }, { timeoutMs: 4 });
+  await adapter.getRuntimeSnapshot({ includeTasks: true }, { timeoutMs: 4 });
+  await adapter.getToolsCatalog({ agentId: "agent-1" }, { timeoutMs: 4 });
+  await adapter.getEffectiveTools({ agentId: "agent-1" }, { timeoutMs: 4 });
+  await adapter.invokeTool({ toolName: "shell", input: { command: "pwd" } }, { timeoutMs: 4 });
+  const subscription = await adapter.subscribeRuntimeEvents(
+    { includeSessions: false, includeTasks: true },
+    { onEvent: () => {} },
+    { timeoutMs: 4 }
+  );
+  subscription.close();
   await adapter.getChannelStatus({ probe: true }, { timeoutMs: 4 });
   assert.deepEqual(await adapter.getConfig("gateway", { timeoutMs: 5 }), { path: "gateway" });
   assert.equal(await adapter.getConfigSchema({ timeoutMs: 5 }), null);
@@ -274,6 +363,22 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "scanModels", options: { yes: true, noInput: true, timeoutMs: 4 } },
     { method: "listAgents", options: { timeoutMs: 4 } },
     { method: "listSessions", options: { timeoutMs: 4 } },
+    { method: "describeSession", options: { timeoutMs: 4 } },
+    { method: "getSessionHistory", options: { timeoutMs: 4 } },
+    { method: "exportSession", options: { timeoutMs: 4 } },
+    { method: "listTasks", options: { timeoutMs: 4 } },
+    { method: "getTask", action: "task-1", options: { timeoutMs: 4 } },
+    { method: "assignTask", action: "task-1", options: { timeoutMs: 4 } },
+    { method: "cancelTask", action: "task-1", options: { timeoutMs: 4 } },
+    { method: "listArtifacts", options: { timeoutMs: 4 } },
+    { method: "getArtifact", action: "artifact-1", options: { timeoutMs: 4 } },
+    { method: "putArtifact", action: "result.txt", options: { timeoutMs: 4 } },
+    { method: "deleteArtifact", action: "artifact-1", options: { timeoutMs: 4 } },
+    { method: "getRuntimeSnapshot", options: { timeoutMs: 4 } },
+    { method: "getToolsCatalog", options: { timeoutMs: 4 } },
+    { method: "getEffectiveTools", options: { timeoutMs: 4 } },
+    { method: "invokeTool", action: "shell", options: { timeoutMs: 4 } },
+    { method: "subscribeRuntimeEvents", options: { timeoutMs: 4 } },
     { method: "getChannelStatus", options: { timeoutMs: 4 } },
     { method: "getConfig", action: "gateway", options: { timeoutMs: 5 } },
     { method: "getConfigSchema", options: { timeoutMs: 5 } },

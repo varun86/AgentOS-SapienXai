@@ -94,6 +94,7 @@ test("capability matrix tracks Phase 2 Gateway-native runtime surfaces", async (
   assert.equal(matrix.operations?.artifacts.mode, "gateway-native");
   assert.equal(matrix.operations?.runtimeSnapshot.mode, "gateway-native");
   assert.equal(matrix.operations?.tools.mode, "gateway-native");
+  assert.equal(matrix.eventBridge, "supported");
   assert.ok(!matrix.unsupportedGatewayMethods.includes("tasks.subscribe"));
   assert.ok(!matrix.unsupportedGatewayMethods.includes("runtime.snapshot"));
 });
@@ -198,6 +199,58 @@ function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenCl
     },
     async listSessions() {
       return { sessions: [] };
+    },
+    async describeSession() {
+      return {};
+    },
+    async getSessionHistory() {
+      return {};
+    },
+    async exportSession() {
+      return {};
+    },
+    async listTasks() {
+      return { tasks: [] };
+    },
+    async getTask() {
+      return {};
+    },
+    async assignTask() {
+      return {};
+    },
+    async cancelTask() {
+      return {};
+    },
+    async listArtifacts() {
+      return { artifacts: [] };
+    },
+    async getArtifact() {
+      return {};
+    },
+    async putArtifact() {
+      return {};
+    },
+    async deleteArtifact() {
+      return {};
+    },
+    async getRuntimeSnapshot() {
+      return {};
+    },
+    async getToolsCatalog() {
+      return { tools: [] };
+    },
+    async getEffectiveTools() {
+      return { tools: [] };
+    },
+    async invokeTool() {
+      return {};
+    },
+    async subscribeRuntimeEvents() {
+      return {
+        close() {
+          return undefined;
+        }
+      };
     },
     async getChannelStatus() {
       return {

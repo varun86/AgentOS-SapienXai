@@ -14,6 +14,12 @@ import type {
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawArtifactDeleteInput,
+  OpenClawArtifactGetInput,
+  OpenClawArtifactListInput,
+  OpenClawArtifactListPayload,
+  OpenClawArtifactPayload,
+  OpenClawArtifactPutInput,
   OpenClawChannelStatusInput,
   OpenClawChannelStatusPayload,
   OpenClawAgentListPayload,
@@ -24,11 +30,14 @@ import type {
   OpenClawCronListInput,
   OpenClawCronListPayload,
   OpenClawCronStatusPayload,
+  OpenClawDescribeSessionInput,
   OpenClawExecApprovalListInput,
   OpenClawExecApprovalListPayload,
   OpenClawExecApprovalResolveInput,
   OpenClawExecApprovalResolvePayload,
   OpenClawGatewayClient,
+  OpenClawGatewayEventCallbacks,
+  OpenClawGatewayEventSubscription,
   OpenClawHealthPayload,
   OpenClawListModelsInput,
   OpenClawListSessionsInput,
@@ -36,9 +45,29 @@ import type {
   OpenClawLogsTailPayload,
   OpenClawModelScanPayload,
   OpenClawPluginListPayload,
+  OpenClawRuntimeEventSubscriptionInput,
+  OpenClawRuntimeSnapshotInput,
+  OpenClawRuntimeSnapshotPayload,
+  OpenClawSessionExportInput,
+  OpenClawSessionExportPayload,
+  OpenClawSessionHistoryInput,
+  OpenClawSessionHistoryPayload,
+  OpenClawSessionPayload,
   OpenClawSessionsPayload,
   OpenClawSkillListPayload,
   OpenClawStreamCallbacks,
+  OpenClawTaskAssignInput,
+  OpenClawTaskCancelInput,
+  OpenClawTaskGetInput,
+  OpenClawTaskListInput,
+  OpenClawTaskListPayload,
+  OpenClawTaskPayload,
+  OpenClawToolInvokeInput,
+  OpenClawToolInvokePayload,
+  OpenClawToolsCatalogInput,
+  OpenClawToolsCatalogPayload,
+  OpenClawToolsEffectiveInput,
+  OpenClawToolsEffectivePayload,
   OpenClawUpdateAgentInput,
   StatusPayload
 } from "@/lib/openclaw/client/types";
@@ -103,6 +132,81 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
 
   listSessions(input: OpenClawListSessionsInput = {}, options: OpenClawCommandOptions = {}) {
     return this.call<OpenClawSessionsPayload>("sessions.list", { ...input }, options);
+  }
+
+  describeSession(input: OpenClawDescribeSessionInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawSessionPayload>("sessions.describe", { ...input }, options);
+  }
+
+  getSessionHistory(input: OpenClawSessionHistoryInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawSessionHistoryPayload>("sessions.history", { ...input }, options);
+  }
+
+  exportSession(input: OpenClawSessionExportInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawSessionExportPayload>("sessions.export", { ...input }, options);
+  }
+
+  listTasks(input: OpenClawTaskListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawTaskListPayload>("tasks.list", { ...input }, options);
+  }
+
+  getTask(input: OpenClawTaskGetInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawTaskPayload>("tasks.get", { ...input }, options);
+  }
+
+  assignTask(input: OpenClawTaskAssignInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawTaskPayload>("tasks.assign", { ...input, reason: input.reason ?? undefined }, options);
+  }
+
+  cancelTask(input: OpenClawTaskCancelInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawTaskPayload>("tasks.cancel", { taskId: input.taskId, reason: input.reason ?? undefined }, options);
+  }
+
+  listArtifacts(input: OpenClawArtifactListInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawArtifactListPayload>("artifacts.list", { ...input }, options);
+  }
+
+  getArtifact(input: OpenClawArtifactGetInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawArtifactPayload>("artifacts.get", { ...input }, options);
+  }
+
+  putArtifact(input: OpenClawArtifactPutInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawArtifactPayload>("artifacts.put", { ...input }, options);
+  }
+
+  deleteArtifact(input: OpenClawArtifactDeleteInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawArtifactPayload>(
+      "artifacts.delete",
+      { artifactId: input.artifactId, reason: input.reason ?? undefined },
+      options
+    );
+  }
+
+  getRuntimeSnapshot(input: OpenClawRuntimeSnapshotInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawRuntimeSnapshotPayload>("runtime.snapshot", { ...input }, options);
+  }
+
+  getToolsCatalog(input: OpenClawToolsCatalogInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawToolsCatalogPayload>("tools.catalog", { ...input }, options);
+  }
+
+  getEffectiveTools(input: OpenClawToolsEffectiveInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawToolsEffectivePayload>("tools.effective", { ...input }, options);
+  }
+
+  invokeTool(input: OpenClawToolInvokeInput, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawToolInvokePayload>("tools.invoke", { ...input }, options);
+  }
+
+  async subscribeRuntimeEvents(
+    input: OpenClawRuntimeEventSubscriptionInput,
+    callbacks: OpenClawGatewayEventCallbacks,
+    options: OpenClawCommandOptions = {}
+  ): Promise<OpenClawGatewayEventSubscription> {
+    void input;
+    void callbacks;
+    void options;
+    throw new Error("OpenClaw runtime event subscriptions require the native Gateway transport.");
   }
 
   getChannelStatus(input: OpenClawChannelStatusInput = {}, options: OpenClawCommandOptions = {}) {

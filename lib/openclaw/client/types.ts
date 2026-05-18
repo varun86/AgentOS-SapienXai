@@ -56,6 +56,22 @@ export type OpenClawHealthPayload = Record<string, unknown> & {
   ok?: boolean;
 };
 
+export type OpenClawGatewayEventFrame = {
+  type?: string;
+  event?: string;
+  payload?: unknown;
+};
+
+export interface OpenClawGatewayEventCallbacks {
+  onEvent: (event: OpenClawGatewayEventFrame) => void;
+  onError?: (error: unknown) => void;
+  onClose?: () => void;
+}
+
+export type OpenClawGatewayEventSubscription = {
+  close: () => void;
+};
+
 export interface OpenClawLogsTailInput {
   cursor?: number;
   limit?: number;
@@ -258,6 +274,188 @@ export type OpenClawSessionsPayload = {
   }>;
 };
 
+export interface OpenClawSessionReferenceInput {
+  key?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  agentId?: string;
+}
+
+export interface OpenClawDescribeSessionInput extends OpenClawSessionReferenceInput {
+  includeMessages?: boolean;
+  limit?: number;
+}
+
+export interface OpenClawSessionHistoryInput extends OpenClawSessionReferenceInput {
+  limit?: number;
+  cursor?: string | number | null;
+}
+
+export interface OpenClawSessionExportInput extends OpenClawSessionReferenceInput {
+  format?: string;
+}
+
+export type OpenClawSessionPayload = Record<string, unknown> & {
+  session?: Record<string, unknown>;
+  key?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  messages?: unknown[];
+};
+
+export type OpenClawSessionHistoryPayload = Record<string, unknown> & {
+  messages?: unknown[];
+  turns?: unknown[];
+  items?: unknown[];
+  cursor?: string | number | null;
+};
+
+export type OpenClawSessionExportPayload = Record<string, unknown> & {
+  content?: string;
+  format?: string;
+  session?: unknown;
+};
+
+export interface OpenClawTaskListInput {
+  status?: string;
+  agentId?: string;
+  workspace?: string;
+  sessionId?: string;
+  limit?: number;
+  cursor?: string | number | null;
+}
+
+export interface OpenClawTaskGetInput {
+  taskId: string;
+  includeRuns?: boolean;
+  includeArtifacts?: boolean;
+}
+
+export interface OpenClawTaskAssignInput {
+  taskId: string;
+  agentId?: string;
+  workspace?: string;
+  reason?: string | null;
+}
+
+export interface OpenClawTaskCancelInput {
+  taskId: string;
+  reason?: string | null;
+}
+
+export type OpenClawTaskListPayload = Record<string, unknown> & {
+  tasks?: unknown[];
+  cursor?: string | number | null;
+};
+
+export type OpenClawTaskPayload = Record<string, unknown> & {
+  task?: unknown;
+  id?: string;
+  taskId?: string;
+  status?: string;
+};
+
+export interface OpenClawArtifactListInput {
+  taskId?: string;
+  sessionId?: string;
+  agentId?: string;
+  workspace?: string;
+  limit?: number;
+  cursor?: string | number | null;
+}
+
+export interface OpenClawArtifactGetInput {
+  artifactId: string;
+  includeContent?: boolean;
+}
+
+export interface OpenClawArtifactPutInput {
+  artifactId?: string;
+  taskId?: string;
+  sessionId?: string;
+  name?: string;
+  path?: string;
+  mimeType?: string;
+  content?: unknown;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OpenClawArtifactDeleteInput {
+  artifactId: string;
+  reason?: string | null;
+}
+
+export type OpenClawArtifactListPayload = Record<string, unknown> & {
+  artifacts?: unknown[];
+  cursor?: string | number | null;
+};
+
+export type OpenClawArtifactPayload = Record<string, unknown> & {
+  artifact?: unknown;
+  artifactId?: string;
+  content?: unknown;
+};
+
+export interface OpenClawRuntimeSnapshotInput {
+  includeSessions?: boolean;
+  includeTasks?: boolean;
+  includeArtifacts?: boolean;
+  agentId?: string;
+  workspace?: string;
+  limit?: number;
+}
+
+export type OpenClawRuntimeSnapshotPayload = Record<string, unknown> & {
+  sessions?: unknown[];
+  tasks?: unknown[];
+  artifacts?: unknown[];
+  agents?: unknown[];
+};
+
+export interface OpenClawToolsCatalogInput {
+  agentId?: string;
+  workspace?: string;
+  includeDisabled?: boolean;
+}
+
+export interface OpenClawToolsEffectiveInput {
+  agentId?: string;
+  sessionId?: string;
+  workspace?: string;
+}
+
+export interface OpenClawToolInvokeInput {
+  toolName: string;
+  agentId?: string;
+  sessionId?: string;
+  input?: unknown;
+  args?: Record<string, unknown>;
+}
+
+export type OpenClawToolsCatalogPayload = Record<string, unknown> & {
+  tools?: unknown[];
+};
+
+export type OpenClawToolsEffectivePayload = Record<string, unknown> & {
+  tools?: unknown[];
+};
+
+export type OpenClawToolInvokePayload = Record<string, unknown> & {
+  ok?: boolean;
+  result?: unknown;
+  output?: unknown;
+};
+
+export interface OpenClawRuntimeEventSubscriptionInput {
+  includeSessions?: boolean;
+  includeTasks?: boolean;
+  includeArtifacts?: boolean;
+  includeApprovals?: boolean;
+  sessionKeys?: string[];
+  taskIds?: string[];
+  artifactIds?: string[];
+}
+
 export type OpenClawChannelStatusPayload = {
   ts: number;
   channelOrder: string[];
@@ -448,6 +646,32 @@ export interface OpenClawGatewayClient {
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
   listAgents(options?: OpenClawCommandOptions): Promise<OpenClawAgentListPayload>;
   listSessions(input?: OpenClawListSessionsInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionsPayload>;
+  describeSession(input?: OpenClawDescribeSessionInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionPayload>;
+  getSessionHistory(
+    input?: OpenClawSessionHistoryInput,
+    options?: OpenClawCommandOptions
+  ): Promise<OpenClawSessionHistoryPayload>;
+  exportSession(input?: OpenClawSessionExportInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionExportPayload>;
+  listTasks(input?: OpenClawTaskListInput, options?: OpenClawCommandOptions): Promise<OpenClawTaskListPayload>;
+  getTask(input: OpenClawTaskGetInput, options?: OpenClawCommandOptions): Promise<OpenClawTaskPayload>;
+  assignTask(input: OpenClawTaskAssignInput, options?: OpenClawCommandOptions): Promise<OpenClawTaskPayload>;
+  cancelTask(input: OpenClawTaskCancelInput, options?: OpenClawCommandOptions): Promise<OpenClawTaskPayload>;
+  listArtifacts(input?: OpenClawArtifactListInput, options?: OpenClawCommandOptions): Promise<OpenClawArtifactListPayload>;
+  getArtifact(input: OpenClawArtifactGetInput, options?: OpenClawCommandOptions): Promise<OpenClawArtifactPayload>;
+  putArtifact(input: OpenClawArtifactPutInput, options?: OpenClawCommandOptions): Promise<OpenClawArtifactPayload>;
+  deleteArtifact(input: OpenClawArtifactDeleteInput, options?: OpenClawCommandOptions): Promise<OpenClawArtifactPayload>;
+  getRuntimeSnapshot(
+    input?: OpenClawRuntimeSnapshotInput,
+    options?: OpenClawCommandOptions
+  ): Promise<OpenClawRuntimeSnapshotPayload>;
+  getToolsCatalog(input?: OpenClawToolsCatalogInput, options?: OpenClawCommandOptions): Promise<OpenClawToolsCatalogPayload>;
+  getEffectiveTools(input?: OpenClawToolsEffectiveInput, options?: OpenClawCommandOptions): Promise<OpenClawToolsEffectivePayload>;
+  invokeTool(input: OpenClawToolInvokeInput, options?: OpenClawCommandOptions): Promise<OpenClawToolInvokePayload>;
+  subscribeRuntimeEvents(
+    input: OpenClawRuntimeEventSubscriptionInput,
+    callbacks: OpenClawGatewayEventCallbacks,
+    options?: OpenClawCommandOptions
+  ): Promise<OpenClawGatewayEventSubscription>;
   getChannelStatus(
     input?: OpenClawChannelStatusInput,
     options?: OpenClawCommandOptions

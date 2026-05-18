@@ -307,8 +307,20 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
     updates: support("update.status", "update.run", "status"),
     nativeMissionDispatch: support("chat.send", "sessions.send"),
     nativeAgentLifecycle: support("agents.create", "agents.update", "agents.delete"),
-    eventBridge: support("sessions.subscribe") === "supported" ||
-      ["chat", "agent", "session.message", "session.tool", "exec.approval.requested", "plugin.approval.requested"].some((event) => eventSet.has(event))
+    eventBridge: support("sessions.subscribe", "tasks.subscribe") === "supported" ||
+      [
+        "chat",
+        "agent",
+        "session.message",
+        "session.tool",
+        "task",
+        "task.updated",
+        "task.completed",
+        "artifact",
+        "artifact.updated",
+        "exec.approval.requested",
+        "plugin.approval.requested"
+      ].some((event) => eventSet.has(event))
       ? "supported"
       : methodSet.size === 0
         ? "unknown"
