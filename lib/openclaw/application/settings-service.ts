@@ -22,8 +22,8 @@ import {
   isCliGatewayClientForcedByEnv,
   NativeWsOpenClawGatewayClient
 } from "@/lib/openclaw/client/native-ws-gateway-client";
-import { runOpenClawJson } from "@/lib/openclaw/cli";
 import { isOpenClawInvalidConfigError } from "@/lib/openclaw/command-failure";
+import type { OpenClawDeviceApprovePayload } from "@/lib/openclaw/client/gateway-client";
 import type {
   GatewayAuthSecretState,
   GatewayNativeAuthCredentialKind,
@@ -42,15 +42,6 @@ const GATEWAY_AUTH_MODE_CONFIG_KEY = "gateway.auth.mode";
 const GATEWAY_AUTH_TOKEN_CONFIG_KEY = "gateway.auth.token";
 const GATEWAY_AUTH_RESTART_SETTLE_MS = 1_250;
 const GATEWAY_DEVICE_ACCESS_REPAIR_TIMEOUT_MS = 10_000;
-
-type GatewayDeviceApprovePayload = {
-  requestId?: unknown;
-  device?: {
-    deviceId?: unknown;
-    scopes?: unknown;
-    approvedScopes?: unknown;
-  };
-};
 
 type GatewayNativeAuthStatusOptions = {
   env?: Record<string, string | undefined>;
@@ -390,8 +381,8 @@ export async function repairGatewayNativeDeviceAccess(
 }
 
 async function approveLatestOpenClawDeviceAccess() {
-  return runOpenClawJson<GatewayDeviceApprovePayload>(
-    ["devices", "approve", "--latest", "--json"],
+  return getOpenClawAdapter().approveDeviceAccess(
+    { latest: true },
     { timeoutMs: GATEWAY_DEVICE_ACCESS_REPAIR_TIMEOUT_MS }
   );
 }
@@ -624,7 +615,7 @@ function buildGatewayNativeAuthRecommendation(input: {
 }
 
 function normalizeGatewayDeviceApprovePayload(input: unknown): GatewayNativeDeviceAccessRepairResult {
-  const payload = input as GatewayDeviceApprovePayload | null;
+  const payload = input as OpenClawDeviceApprovePayload | null;
   const device = payload && typeof payload === "object" ? payload.device : null;
   const scopes = readStringArray(device?.approvedScopes).length
     ? readStringArray(device?.approvedScopes)

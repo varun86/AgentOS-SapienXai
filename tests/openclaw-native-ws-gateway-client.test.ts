@@ -213,6 +213,11 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
     return {};
   }
 
+  async approveDeviceAccess() {
+    this.calls.push({ method: "approveDeviceAccess" });
+    return { requestId: "latest", device: { deviceId: "device-1" } };
+  }
+
   async call<TPayload>(
     method: string,
     params: Record<string, unknown> = {},
@@ -1456,6 +1461,36 @@ test("native WS gateway client sets up Gmail webhooks through Gateway before CLI
     account: "user@example.com",
     config: { project: "agentos" }
   });
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client approves device access through Gateway before CLI fallback", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? { protocol: 4 }
+          : { requestId: "latest", device: { deviceId: "device-1", approvedScopes: ["operator.read"] } }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(await client.approveDeviceAccess({ latest: true }), {
+    requestId: "latest",
+    device: { deviceId: "device-1", approvedScopes: ["operator.read"] }
+  });
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "devices.approve"]);
+  assert.deepEqual(sentFrames[1]?.params, { latest: true });
   assert.deepEqual(fallback.calls, []);
 });
 

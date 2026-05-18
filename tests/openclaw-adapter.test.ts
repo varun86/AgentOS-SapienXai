@@ -158,6 +158,10 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "controlGateway", action, options });
       return { ok: true, action };
     },
+    async approveDeviceAccess(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "approveDeviceAccess", action: input?.requestId ?? "latest", options });
+      return { requestId: input?.requestId ?? "latest", device: { deviceId: "device-1" } };
+    },
     async probeGateway(options?: OpenClawCommandOptions) {
       calls.push({ method: "probeGateway", options });
       return {};
@@ -401,6 +405,7 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { runId: "run-2" }
   );
   await adapter.probeGateway({ timeoutMs: 13 });
+  await adapter.approveDeviceAccess({ latest: true }, { timeoutMs: 13 });
   assert.deepEqual(await adapter.call("health", { probe: true }, { timeoutMs: 14 }), { params: { probe: true } });
   await adapter.tailLogs({ limit: 10 }, { timeoutMs: 15 });
   await adapter.listExecApprovals({ status: "pending" }, { timeoutMs: 16 });
@@ -454,6 +459,7 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "abortAgentTurn", action: "run-1", options: { timeoutMs: 11 } },
     { method: "streamAgentTurn", action: "agent-1", options: { timeoutMs: 12 } },
     { method: "probeGateway", options: { timeoutMs: 13 } },
+    { method: "approveDeviceAccess", action: "latest", options: { timeoutMs: 13 } },
     { method: "call", action: "health", options: { timeoutMs: 14 } },
     { method: "tailLogs", options: { timeoutMs: 15 } },
     { method: "listExecApprovals", options: { timeoutMs: 16 } },

@@ -152,6 +152,21 @@ export interface OpenClawAutomationProvisionInput {
   } | null;
 }
 
+export interface OpenClawDeviceApproveInput {
+  latest?: boolean;
+  requestId?: string | null;
+  scopes?: string[];
+}
+
+export type OpenClawDeviceApprovePayload = Record<string, unknown> & {
+  requestId?: unknown;
+  device?: {
+    deviceId?: unknown;
+    scopes?: unknown;
+    approvedScopes?: unknown;
+  };
+};
+
 export type StatusPayload = {
   runtimeVersion?: string;
   version?: string;
@@ -768,6 +783,7 @@ export interface OpenClawGatewayClient {
     action: "start" | "stop" | "restart",
     options?: OpenClawCommandOptions
   ): Promise<Record<string, unknown>>;
+  approveDeviceAccess(input?: OpenClawDeviceApproveInput, options?: OpenClawCommandOptions): Promise<OpenClawDeviceApprovePayload>;
   call<TPayload>(
     method: string,
     params?: Record<string, unknown>,

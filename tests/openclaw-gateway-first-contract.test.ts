@@ -361,6 +361,9 @@ function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenCl
     async controlGateway() {
       return {};
     },
+    async approveDeviceAccess() {
+      return { requestId: "latest", device: { deviceId: "device-1" } };
+    },
     async call<TPayload>() {
       return {} as TPayload;
     },

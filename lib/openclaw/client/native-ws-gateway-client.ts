@@ -47,6 +47,8 @@ import type {
   OpenClawCronListPayload,
   OpenClawCronStatusPayload,
   OpenClawDescribeSessionInput,
+  OpenClawDeviceApproveInput,
+  OpenClawDeviceApprovePayload,
   OpenClawExecApprovalListInput,
   OpenClawExecApprovalListPayload,
   OpenClawExecApprovalResolveInput,
@@ -2637,6 +2639,20 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     return this.fallback.controlGateway(action, options).finally(() => {
       this.close(`gateway.${action}.completed`);
     });
+  }
+
+  approveDeviceAccess(input: OpenClawDeviceApproveInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirstCompatible(
+      "deviceApproval",
+      {
+        latest: input.latest ?? true,
+        requestId: input.requestId ?? undefined,
+        scopes: input.scopes
+      },
+      options,
+      (payload) => parseObjectGatewayPayload<OpenClawDeviceApprovePayload>("devices.approve", payload),
+      () => this.fallback.approveDeviceAccess(input, options)
+    );
   }
 
   async call<TPayload>(

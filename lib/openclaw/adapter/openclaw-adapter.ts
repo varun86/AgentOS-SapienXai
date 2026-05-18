@@ -32,6 +32,8 @@ import type {
   OpenClawCronListPayload,
   OpenClawCronStatusPayload,
   OpenClawDescribeSessionInput,
+  OpenClawDeviceApproveInput,
+  OpenClawDeviceApprovePayload,
   OpenClawExecApprovalListInput,
   OpenClawExecApprovalListPayload,
   OpenClawExecApprovalResolveInput,
@@ -162,6 +164,7 @@ export interface OpenClawAdapter {
     action: "start" | "stop" | "restart",
     options?: OpenClawCommandOptions
   ): Promise<Record<string, unknown>>;
+  approveDeviceAccess(input?: OpenClawDeviceApproveInput, options?: OpenClawCommandOptions): Promise<OpenClawDeviceApprovePayload>;
   call<TPayload>(
     method: string,
     params?: Record<string, unknown>,
@@ -389,6 +392,10 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
 
   controlGateway(action: "start" | "stop" | "restart", options: OpenClawCommandOptions = {}) {
     return this.getClient().controlGateway(action, options);
+  }
+
+  approveDeviceAccess(input: OpenClawDeviceApproveInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.getClient().approveDeviceAccess(input, options);
   }
 
   call<TPayload>(method: string, params: Record<string, unknown> = {}, options: OpenClawCommandOptions = {}) {

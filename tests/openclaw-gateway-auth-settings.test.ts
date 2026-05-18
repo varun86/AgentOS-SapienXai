@@ -177,6 +177,9 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
     async controlGateway() {
       return {};
     },
+    async approveDeviceAccess() {
+      return { requestId: "latest", device: { deviceId: "device-1" } };
+    },
     async call<TPayload>() {
       return {} as TPayload;
     },

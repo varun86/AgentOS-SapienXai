@@ -38,6 +38,8 @@ import type {
   OpenClawCronListPayload,
   OpenClawCronStatusPayload,
   OpenClawDescribeSessionInput,
+  OpenClawDeviceApproveInput,
+  OpenClawDeviceApprovePayload,
   OpenClawExecApprovalListInput,
   OpenClawExecApprovalListPayload,
   OpenClawExecApprovalResolveInput,
@@ -460,6 +462,21 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     options: OpenClawCommandOptions = {}
   ) {
     return runOpenClawJson<Record<string, unknown>>(["gateway", action, "--json"], options);
+  }
+
+  approveDeviceAccess(input: OpenClawDeviceApproveInput = {}, options: OpenClawCommandOptions = {}) {
+    const args = ["devices", "approve"];
+
+    if (input.latest !== false && !input.requestId) {
+      args.push("--latest");
+    }
+    appendOptionalCliFlag(args, "--request-id", input.requestId);
+    for (const scope of input.scopes ?? []) {
+      appendOptionalCliFlag(args, "--scope", scope);
+    }
+    args.push("--json");
+
+    return runOpenClawJson<OpenClawDeviceApprovePayload>(args, options);
   }
 
   call<TPayload>(

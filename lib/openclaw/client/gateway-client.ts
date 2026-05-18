@@ -39,6 +39,8 @@ export type {
   OpenClawCronListPayload,
   OpenClawCronStatusPayload,
   OpenClawDescribeSessionInput,
+  OpenClawDeviceApproveInput,
+  OpenClawDeviceApprovePayload,
   OpenClawExecApprovalListInput,
   OpenClawExecApprovalListPayload,
   OpenClawExecApprovalResolveInput,
