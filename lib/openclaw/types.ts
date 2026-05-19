@@ -902,6 +902,7 @@ export interface WorkspaceAgentBlueprintInput {
   emoji?: string;
   theme?: string;
   skillId?: string;
+  skillIds?: string[];
   modelId?: string;
   isPrimary?: boolean;
   policy?: AgentPolicy;
@@ -1123,6 +1124,7 @@ export interface PlannerPersistentAgentSpec {
   emoji?: string;
   theme?: string;
   skillId?: string;
+  skillIds?: string[];
   modelId?: string;
   policy: AgentPolicy;
   heartbeat: AgentHeartbeatInput;
@@ -1306,6 +1308,8 @@ export interface AgentCreateInput {
   policy?: AgentPolicy;
   heartbeat?: AgentHeartbeatInput;
   channelIds?: string[];
+  skills?: string[];
+  tools?: string[];
 }
 
 export interface AgentUpdateInput {

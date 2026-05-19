@@ -1106,6 +1106,7 @@ function resolveManifestWorkspaceAgentProvisioningRef(
       emoji: manifestAgent.emoji ?? undefined,
       theme: manifestAgent.theme ?? undefined,
       skillId: manifestAgent.skillId ?? undefined,
+      skillIds: manifestAgent.skillIds,
       modelId: manifestAgent.modelId ?? undefined,
       isPrimary: manifestAgent.isPrimary,
       policy: manifestAgent.policy ?? undefined,

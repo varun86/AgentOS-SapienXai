@@ -34,7 +34,8 @@ import {
 } from "@/lib/openclaw/domains/agent-config";
 import {
   ensureAgentPolicySkill as ensureAgentPolicySkillFromProvisioning,
-  ensureWorkspaceSkillMarkdown as ensureWorkspaceSkillMarkdownFromProvisioning
+  ensureWorkspaceSkillMarkdown as ensureWorkspaceSkillMarkdownFromProvisioning,
+  pruneUnreferencedGeneratedWorkspaceSkills
 } from "@/lib/openclaw/domains/agent-provisioning";
 import {
   parseWorkspaceProjectManifestAgent,
@@ -52,6 +53,8 @@ import type {
   MissionControlSnapshot,
   OpenClawAgent
 } from "@/lib/openclaw/types";
+
+const LEGACY_CUSTOM_PRESET_SKILL_IDS = ["project-researcher", "project-builder", "project-analyst"];
 
 export async function createAgent(input: AgentCreateInput) {
   const agentId = slugify(input.id.trim());
@@ -86,6 +89,14 @@ export async function createAgent(input: AgentCreateInput) {
   const presetMeta = getAgentPresetMeta(policy.preset);
   const presetSkillIds = filterKnownOpenClawSkillIds(presetMeta.skillIds);
   const presetToolIds = filterKnownOpenClawToolIds(presetMeta.tools);
+  const declaredSkillIds =
+    input.skills === undefined
+      ? presetSkillIds
+      : filterKnownOpenClawSkillIds(filterAgentPolicySkills(input.skills));
+  const declaredToolIds =
+    input.tools === undefined
+      ? presetToolIds
+      : normalizeDeclaredAgentTools(input.tools);
   const displayName =
     normalizeOptionalValue(input.name) ??
     presetMeta.defaultName;
@@ -121,7 +132,7 @@ export async function createAgent(input: AgentCreateInput) {
     setupAgentId,
     snapshot
   });
-  for (const skillId of presetSkillIds) {
+  for (const skillId of declaredSkillIds) {
     await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
@@ -133,7 +144,7 @@ export async function createAgent(input: AgentCreateInput) {
       name: displayName,
       model: agentModelId,
       heartbeat,
-      skills: uniqueStrings([...presetSkillIds, policySkillId]),
+      skills: uniqueStrings([...declaredSkillIds, policySkillId]),
       tools:
         policy.fileAccess === "workspace-only"
           ? {
@@ -159,14 +170,19 @@ export async function createAgent(input: AgentCreateInput) {
     emoji,
     theme,
     enabled: true,
-    skillId: presetSkillIds[0] ?? policySkillId,
-    toolIds: presetToolIds,
+    skillId: declaredSkillIds[0] ?? null,
+    skillIds: declaredSkillIds,
+    toolIds: declaredToolIds,
     modelId: agentModelId,
     isPrimary: false,
     policy,
     channelIds: input.channelIds ?? []
   });
   await syncWorkspaceAgentsMarkdown(resolvedWorkspacePath);
+  await pruneUnreferencedGeneratedWorkspaceSkills(
+    resolvedWorkspacePath,
+    collectWorkspaceSkillReferences(snapshot, resolvedWorkspacePath, new Map([[agentId, declaredSkillIds]]))
+  );
   await removeLegacyAgentContextFiles(agentId, resolvedWorkspacePath, agentDir);
 
   invalidateMissionControlSnapshotCache();
@@ -297,9 +313,15 @@ export async function updateAgent(input: AgentUpdateInput) {
   const currentDeclaredTools = normalizeDeclaredAgentTools(agent.tools);
   const shouldResetSkills = policy.preset !== agent.policy.preset || currentDeclaredSkills.length === 0;
   const shouldResetTools = policy.preset !== agent.policy.preset || currentDeclaredTools.length === 0;
+  const shouldClearLegacyCustomSkills =
+    input.skills === undefined &&
+    policy.preset === "custom" &&
+    areSameStringSet(currentDeclaredSkills, LEGACY_CUSTOM_PRESET_SKILL_IDS);
   const nextDeclaredSkills =
     input.skills === undefined
-      ? shouldResetSkills
+      ? shouldClearLegacyCustomSkills
+        ? []
+        : shouldResetSkills
         ? presetSkillIds
         : currentDeclaredSkills
       : filterKnownOpenClawSkillIds(filterAgentPolicySkills(input.skills));
@@ -356,10 +378,15 @@ export async function updateAgent(input: AgentUpdateInput) {
     isPrimary: agent.isDefault,
     policy,
     channelIds: input.channelIds,
-    skillId: nextDeclaredSkills[0] ?? policySkillId,
+    skillId: nextDeclaredSkills[0] ?? null,
+    skillIds: nextDeclaredSkills,
     toolIds: nextDeclaredTools
   });
   await syncWorkspaceAgentsMarkdown(resolvedWorkspacePath);
+  await pruneUnreferencedGeneratedWorkspaceSkills(
+    resolvedWorkspacePath,
+    collectWorkspaceSkillReferences(snapshot, resolvedWorkspacePath, new Map([[agentId, nextDeclaredSkills]]))
+  );
   await removeLegacyAgentContextFiles(
     agentId,
     resolvedWorkspacePath,
@@ -413,6 +440,10 @@ export async function deleteAgent(input: AgentDeleteInput) {
   if (workspace) {
     await removeWorkspaceProjectAgentMetadata(workspace.path, agent.id);
     await syncWorkspaceAgentsMarkdown(workspace.path);
+    await pruneUnreferencedGeneratedWorkspaceSkills(
+      workspace.path,
+      collectWorkspaceSkillReferences(snapshot, workspace.path, new Map([[agent.id, []]]))
+    );
     await removeLegacyAgentContextFiles(agent.id, workspace.path, agent.agentDir);
 
     try {
@@ -560,6 +591,7 @@ async function upsertWorkspaceProjectAgentMetadata(
     emoji?: string | null;
     theme?: string | null;
     skillId?: string | null;
+    skillIds?: string[];
     toolIds?: string[];
     modelId?: string | null;
     policy: AgentPolicy;
@@ -585,6 +617,12 @@ async function upsertWorkspaceProjectAgentMetadata(
     parsed = {};
   }
 
+  const nextSkillIds = Array.isArray(agent.skillIds)
+    ? uniqueStrings(agent.skillIds.map((skillId) => skillId.trim()).filter(Boolean))
+    : agent.skillId !== undefined
+      ? [normalizeOptionalValue(agent.skillId)].filter((skillId): skillId is string => Boolean(skillId))
+      : existingAgent?.skillIds ?? (existingAgent?.skillId ? [existingAgent.skillId] : []);
+
   const nextAgent = {
     id: agent.id,
     name: agent.name ?? existingAgent?.name ?? null,
@@ -593,7 +631,8 @@ async function upsertWorkspaceProjectAgentMetadata(
     enabled: agent.enabled ?? existingAgent?.enabled ?? true,
     emoji: agent.emoji ?? existingAgent?.emoji ?? null,
     theme: agent.theme ?? existingAgent?.theme ?? null,
-    skillId: agent.skillId ?? existingAgent?.skillId ?? null,
+    skillId: nextSkillIds[0] ?? null,
+    skillIds: nextSkillIds,
     toolIds: Array.isArray(agent.toolIds)
       ? uniqueStrings(
           agent.toolIds
@@ -661,6 +700,34 @@ async function removeWorkspaceProjectAgentMetadata(workspacePath: string, agentI
 
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function areSameStringSet(left: string[], right: string[]) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+
+  if (leftSet.size !== rightSet.size) {
+    return false;
+  }
+
+  return Array.from(leftSet).every((value) => rightSet.has(value));
+}
+
+function collectWorkspaceSkillReferences(
+  snapshot: MissionControlSnapshot,
+  workspacePath: string,
+  overrides: Map<string, string[]>
+) {
+  return uniqueStrings([
+    ...snapshot.agents.flatMap((agent) => {
+      if (agent.workspacePath !== workspacePath) {
+        return [];
+      }
+
+      return overrides.has(agent.id) ? overrides.get(agent.id) ?? [] : agent.skills;
+    }),
+    ...Array.from(overrides.values()).flat()
+  ]);
 }
 
 function findWorkspaceById(snapshot: MissionControlSnapshot, workspaceId: string | undefined) {

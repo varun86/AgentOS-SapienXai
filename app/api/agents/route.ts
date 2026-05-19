@@ -29,7 +29,9 @@ const createAgentSchema = z.object({
   avatar: z.string().optional(),
   policy: agentPolicySchema.optional(),
   heartbeat: heartbeatSchema.optional(),
-  channelIds: z.array(z.string()).optional()
+  channelIds: z.array(z.string()).optional(),
+  skills: z.array(z.string()).optional(),
+  tools: z.array(z.string()).optional()
 });
 
 const updateAgentSchema = z.object({

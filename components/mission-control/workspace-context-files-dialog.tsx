@@ -6,6 +6,7 @@ import {
   Braces,
   ChevronDown,
   FileText,
+  Info,
   Loader2,
   PlusCircle,
   RefreshCw,
@@ -79,6 +80,7 @@ export function WorkspaceContextFilesDialog({
   const [maxFileBytes, setMaxFileBytes] = useState<number | null>(null);
   const [workspaceFilesExpanded, setWorkspaceFilesExpanded] = useState(true);
   const [expandedAgentIds, setExpandedAgentIds] = useState<string[]>([]);
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
   const hasUnsavedChanges = content !== savedContent;
   const activeFile = selectedFile ?? files.find((file) => file.path === selectedPath) ?? null;
   const canEditActiveFile = Boolean(activeFile?.editable && !isLoadingFile);
@@ -158,11 +160,16 @@ export function WorkspaceContextFilesDialog({
       setError(null);
       setWorkspaceFilesExpanded(true);
       setExpandedAgentIds([]);
+      setIsInfoOpen(false);
       return;
     }
 
     void refreshFiles();
   }, [open, refreshFiles, workspaceId]);
+
+  useEffect(() => {
+    setIsInfoOpen(false);
+  }, [selectedPath]);
 
   useEffect(() => {
     if (!activeFileAgentId) {
@@ -444,10 +451,26 @@ export function WorkspaceContextFilesDialog({
                     (activeFile?.size ? `${formatFileSize(activeFile.size)}` : "Markdown and JSON only.")}
                 </p>
               </div>
-              {activeFile?.source ? (
-                <Badge variant="muted" className="shrink-0 rounded-full px-2.5 py-1 text-[10px] uppercase">
-                  {activeFile.source}
-                </Badge>
+              {activeFile ? (
+                <div className="relative flex shrink-0 items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Show information for ${activeFile.path}`}
+                    aria-expanded={isInfoOpen}
+                    onClick={() => setIsInfoOpen((current) => !current)}
+                    className="h-8 w-8 rounded-full border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.08] hover:text-white"
+                  >
+                    <Info className="h-4 w-4" />
+                  </Button>
+                  {activeFile.source ? (
+                    <Badge variant="muted" className="rounded-full px-2.5 py-1 text-[10px] uppercase">
+                      {activeFile.source}
+                    </Badge>
+                  ) : null}
+                  {isInfoOpen ? <WorkspaceFileInfoPopover file={activeFile} /> : null}
+                </div>
               ) : null}
             </div>
 
@@ -511,6 +534,36 @@ export function WorkspaceContextFilesDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function WorkspaceFileInfoPopover({ file }: { file: WorkspaceManagedFile }) {
+  return (
+    <div className="absolute right-0 top-10 z-20 w-[min(360px,calc(100vw-48px))] rounded-2xl border border-white/10 bg-[#0b1220] p-3 text-left shadow-[0_18px_70px_rgba(0,0,0,0.42)]">
+      <div className="flex items-start gap-2">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-white">{file.path}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-300">
+            {file.description ?? "Workspace-managed OpenClaw Markdown or JSON file."}
+          </p>
+        </div>
+      </div>
+
+      {file.usage ? (
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+          <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">How to use it</p>
+          <p className="mt-1 text-xs leading-5 text-slate-300">{file.usage}</p>
+        </div>
+      ) : null}
+
+      {file.runtimeBehavior ? (
+        <div className="mt-2 rounded-xl border border-cyan-300/10 bg-cyan-300/[0.04] p-2.5">
+          <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-cyan-200/80">Runtime behavior</p>
+          <p className="mt-1 text-xs leading-5 text-slate-300">{file.runtimeBehavior}</p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -743,8 +796,15 @@ function buildFileNavigation(files: WorkspaceManagedFile[], agents: WorkspaceDia
 
 function sortAgentManagedFiles(files: WorkspaceManagedFile[]) {
   return files.toSorted(
-    (left, right) => Number(isAgentHeartbeatFile(left)) - Number(isAgentHeartbeatFile(right))
+    (left, right) =>
+      Number(isAgentProfileFile(right)) - Number(isAgentProfileFile(left)) ||
+      Number(isAgentHeartbeatFile(left)) - Number(isAgentHeartbeatFile(right)) ||
+      left.path.localeCompare(right.path)
   );
+}
+
+function isAgentProfileFile(file: WorkspaceManagedFile) {
+  return /^agents\/[^/]+\/PROFILE\.md$/.test(file.path);
 }
 
 function isAgentHeartbeatFile(file: WorkspaceManagedFile) {
@@ -752,6 +812,11 @@ function isAgentHeartbeatFile(file: WorkspaceManagedFile) {
 }
 
 function getWorkspaceManagedFileAgentId(file: WorkspaceManagedFile, agents: WorkspaceDialogAgent[]) {
+  const profileMatch = /^agents\/([^/]+)\/PROFILE\.md$/.exec(file.path);
+  if (profileMatch?.[1] && agents.some((agent) => agent.id === profileMatch[1])) {
+    return profileMatch[1];
+  }
+
   const agentDirMatch = /^\.openclaw\/agents\/([^/]+)\/agent\//.exec(file.path);
   if (agentDirMatch?.[1] && agents.some((agent) => agent.id === agentDirMatch[1])) {
     return agentDirMatch[1];

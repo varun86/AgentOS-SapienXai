@@ -5,7 +5,7 @@ import path from "node:path";
 
 import {
   ensureTrailingNewline,
-  renderWorkspaceAgentRolesSection,
+  mergeWorkspaceAgentRolesSection,
   renderWorkspaceAgentsMarkdown,
   renderWorkspaceAgentsTeamSection,
   replaceOrInsertMarkdownSection
@@ -22,7 +22,6 @@ export async function syncWorkspaceAgentsMarkdown(workspacePath: string) {
   const sourceMode = manifest.sourceMode ?? "empty";
   const rules = manifest.rules ?? { workspaceOnly: true };
   const nextTeamSection = renderWorkspaceAgentsTeamSection(manifest.agents);
-  const nextRolesSection = renderWorkspaceAgentRolesSection(manifest.agents);
   const agentsPath = path.join(workspacePath, "AGENTS.md");
   let current = "";
 
@@ -39,6 +38,7 @@ export async function syncWorkspaceAgentsMarkdown(workspacePath: string) {
   }
 
   const withTeam = replaceOrInsertMarkdownSection(current, "Team", nextTeamSection, "Workspace");
+  const nextRolesSection = mergeWorkspaceAgentRolesSection(withTeam, manifest.agents);
   const withRoles = replaceOrInsertMarkdownSection(withTeam, "Agent Roles", nextRolesSection, "Team");
   const nextContent = ensureTrailingNewline(withRoles);
 

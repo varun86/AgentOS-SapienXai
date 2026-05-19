@@ -58,7 +58,7 @@ export interface WorkspaceScaffoldDocumentContext {
   template: WorkspaceTemplate;
   sourceMode: WorkspaceSourceMode;
   rules: WorkspaceCreateRules;
-  agents?: Array<Pick<PlannerPersistentAgentSpec, "role" | "name" | "skillId"> & { policy?: AgentPolicy }>;
+  agents?: Array<Pick<PlannerPersistentAgentSpec, "role" | "name" | "skillId" | "skillIds"> & { policy?: AgentPolicy }>;
   toolExamples?: string[];
   docOverrides?: WorkspaceDocOverride[];
   contextSources?: Array<

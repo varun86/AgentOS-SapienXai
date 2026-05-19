@@ -29,6 +29,7 @@ export type WorkspaceProjectManifestAgent = {
   role: string | null;
   isPrimary: boolean;
   skillId: string | null;
+  skillIds: string[];
   toolIds: string[];
   modelId: string | null;
   enabled: boolean;
@@ -205,13 +206,23 @@ export function parseWorkspaceProjectManifestAgent(
     return null;
   }
 
+  const skillIds = uniqueStrings([
+    ...(Array.isArray(value.skillIds)
+      ? value.skillIds
+          .filter((entry): entry is string => typeof entry === "string")
+          .map((entry) => entry.trim())
+      : []),
+    typeof value.skillId === "string" ? value.skillId.trim() : ""
+  ]);
+
   return {
     id: value.id,
     name: typeof value.name === "string" ? value.name : null,
     role: typeof value.role === "string" ? value.role : null,
     isPrimary: Boolean(value.isPrimary),
     enabled: value.enabled !== false,
-    skillId: typeof value.skillId === "string" ? value.skillId : null,
+    skillId: skillIds[0] ?? null,
+    skillIds,
     toolIds: Array.isArray(value.toolIds)
       ? uniqueStrings(
           value.toolIds

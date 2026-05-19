@@ -90,7 +90,7 @@ const PRESET_META: Record<AgentPreset, PresetMeta> = {
     defaultTheme: "violet",
     badgeVariant: "muted",
     tools: ["exec", "read", "edit", "message"],
-    skillIds: ["project-researcher", "project-builder", "project-analyst"]
+    skillIds: []
   }
 };
 

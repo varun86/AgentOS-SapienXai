@@ -60,6 +60,7 @@ const workspaceSchema = z.object({
         emoji: z.string().optional(),
         theme: z.string().optional(),
         skillId: z.string().optional(),
+        skillIds: z.array(z.string()).optional(),
         modelId: z.string().optional(),
         isPrimary: z.boolean().optional(),
         policy: agentPolicySchema.optional(),

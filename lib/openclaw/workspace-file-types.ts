@@ -10,7 +10,7 @@ export type WorkspaceManagedFileCategory =
 
 export type WorkspaceManagedFileLanguage = "markdown" | "json";
 
-export type WorkspaceManagedFileSource = "official" | "discovered";
+export type WorkspaceManagedFileSource = "official" | "discovered" | "virtual";
 
 export type WorkspaceManagedFile = {
   path: string;
@@ -23,6 +23,8 @@ export type WorkspaceManagedFile = {
   size: number | null;
   source: WorkspaceManagedFileSource;
   description?: string;
+  usage?: string;
+  runtimeBehavior?: string;
   reason?: string;
 };
 

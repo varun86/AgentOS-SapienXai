@@ -8,10 +8,25 @@ export type WorkspaceAgentsMarkdownAgentInput = {
   enabled?: boolean | null;
   isPrimary?: boolean | null;
   skillId?: string | null;
+  skillIds?: string[] | null;
   toolIds?: string[] | null;
   modelId?: string | null;
   policy?: AgentPolicy | null;
   channelIds?: string[] | null;
+};
+
+type NormalizedWorkspaceAgentInput = {
+  id: string;
+  name: string;
+  role: string | null;
+  enabled: boolean;
+  isPrimary: boolean;
+  skillId: string | null;
+  skillIds: string[];
+  toolIds: string[];
+  modelId: string | null;
+  policy: AgentPolicy | null;
+  channelIds: string[];
 };
 
 export function renderWorkspaceAgentsMarkdown(params: {
@@ -83,47 +98,228 @@ export function renderWorkspaceAgentRolesSection(
   workspaceSlug?: string | null
 ) {
   const activeAgents = normalizeAgentInputs(agents, workspaceSlug).filter((agent) => agent.enabled);
-  const sections = activeAgents.map((agent) => {
-    const policy = agent.policy;
-    const skills = [agent.skillId].filter((value): value is string => Boolean(value));
-    const tools = uniqueStrings([
-      ...(agent.toolIds ?? []),
-      ...(policy?.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
-    ]);
-    const channels = uniqueStrings(agent.channelIds ?? []);
+  const sections = activeAgents.map(renderWorkspaceAgentRoleSubsection);
 
-    return [
-      `### ${agent.name} (\`${agent.id}\`)`,
-      `- Agent id: \`${agent.id}\``,
-      `- Runtime rule: when the current OpenClaw agent id is \`${agent.id}\`, use this section as the agent-specific role and persona.`,
-      `- Role: ${agent.role || "Agent"}`,
-      `- Primary: ${agent.isPrimary ? "yes" : "no"}`,
-      ...(policy ? [`- Preset: ${formatAgentPresetLabel(policy.preset)}`] : []),
-      ...(agent.modelId ? [`- Model: \`${agent.modelId}\``] : []),
-      ...(skills.length > 0 ? [`- Skills: ${skills.map((skill) => `\`${skill}\``).join(", ")}`] : []),
-      ...(tools.length > 0 ? [`- Tools: ${tools.map((tool) => `\`${tool}\``).join(", ")}`] : []),
-      ...(policy
-        ? [
-            `- File access: ${policy.fileAccess}`,
-            `- Network access: ${policy.networkAccess}`,
-            `- Install scope: ${policy.installScope}`,
-            `- Missing tools: ${policy.missingToolBehavior}`
-          ]
-        : []),
-      ...(channels.length > 0 ? [`- Channels: ${channels.map((channel) => `\`${channel}\``).join(", ")}`] : [])
-    ].join("\n");
+  return buildWorkspaceAgentRolesSection(sections);
+}
+
+export function mergeWorkspaceAgentRolesSection(
+  content: string,
+  agents: WorkspaceAgentsMarkdownAgentInput[],
+  workspaceSlug?: string | null
+) {
+  const activeAgents = normalizeAgentInputs(agents, workspaceSlug).filter((agent) => agent.enabled);
+  const sectionMatch = findMarkdownSection(content, "Agent Roles");
+
+  if (!sectionMatch) {
+    return renderWorkspaceAgentRolesSection(agents, workspaceSlug);
+  }
+
+  const existingSections = parseExistingAgentRoleSubsections(
+    content.slice(sectionMatch.start, sectionMatch.end)
+  );
+  const sections = activeAgents.map((agent) => {
+    const generated = renderWorkspaceAgentRoleSubsection(agent);
+    const existing = existingSections.get(agent.id);
+
+    return existing ? mergeWorkspaceAgentRoleSubsection(generated, existing) : generated;
   });
 
+  return buildWorkspaceAgentRolesSection(sections);
+}
+
+export function renderDefaultWorkspaceAgentProfileContent() {
+  return `#### Persona
+
+#### Responsibilities
+
+#### Operating Notes
+
+#### Boundaries`;
+}
+
+export function extractWorkspaceAgentProfileContent(content: string, agentId: string) {
+  const subsection = findWorkspaceAgentRoleSubsection(content, agentId)?.content;
+
+  if (!subsection) {
+    return renderDefaultWorkspaceAgentProfileContent();
+  }
+
+  const lines = subsection.trim().split(/\r?\n/);
+  const customLines = trimBlankLines(
+    lines.slice(1).filter((line) => !isManagedAgentRoleLine(line))
+  );
+
+  return customLines.length > 0
+    ? customLines.join("\n")
+    : renderDefaultWorkspaceAgentProfileContent();
+}
+
+export function replaceWorkspaceAgentProfileContent(
+  content: string,
+  agentId: string,
+  profileContent: string
+) {
+  const subsection = findWorkspaceAgentRoleSubsection(content, agentId);
+
+  if (!subsection) {
+    throw new Error("Agent profile section was not found in AGENTS.md.");
+  }
+
+  const lines = subsection.content.trim().split(/\r?\n/);
+  const managedLines = lines.slice(1).filter((line) => isManagedAgentRoleLine(line));
+  const normalizedProfileContent = profileContent.trim();
+  const nextSubsection = [
+    lines[0],
+    ...managedLines,
+    ...(normalizedProfileContent ? ["", normalizedProfileContent] : [])
+  ].join("\n");
+
+  return [
+    content.slice(0, subsection.start),
+    nextSubsection,
+    content.slice(subsection.end)
+  ].join("");
+}
+
+function buildWorkspaceAgentRolesSection(sections: string[]) {
   return `## Agent Roles
 Each agent should use only the subsection matching its current OpenClaw agent id as its personal role/persona. Other subsections describe teammates in the same workspace.
 
 ${sections.length > 0 ? sections.join("\n\n") : "- No active agent role sections are configured yet."}`;
 }
 
+function renderWorkspaceAgentRoleSubsection(agent: NormalizedWorkspaceAgentInput) {
+  const policy = agent.policy;
+  const skills = agent.skillIds;
+  const tools = uniqueStrings([
+    ...(agent.toolIds ?? []),
+    ...(policy?.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
+  ]);
+  const channels = uniqueStrings(agent.channelIds ?? []);
+
+  return [
+    `### ${agent.name} (\`${agent.id}\`)`,
+    `- Agent id: \`${agent.id}\``,
+    `- Runtime rule: when the current OpenClaw agent id is \`${agent.id}\`, use this section as the agent-specific role and persona.`,
+    `- Role: ${agent.role || "Agent"}`,
+    `- Primary: ${agent.isPrimary ? "yes" : "no"}`,
+    ...(policy ? [`- Preset: ${formatAgentPresetLabel(policy.preset)}`] : []),
+    ...(agent.modelId ? [`- Model: \`${agent.modelId}\``] : []),
+    ...(skills.length > 0 ? [`- Skills: ${skills.map((skill) => `\`${skill}\``).join(", ")}`] : []),
+    ...(tools.length > 0 ? [`- Tools: ${tools.map((tool) => `\`${tool}\``).join(", ")}`] : []),
+    ...(policy
+      ? [
+          `- File access: ${policy.fileAccess}`,
+          `- Network access: ${policy.networkAccess}`,
+          `- Install scope: ${policy.installScope}`,
+          `- Missing tools: ${policy.missingToolBehavior}`
+        ]
+      : []),
+    ...(channels.length > 0 ? [`- Channels: ${channels.map((channel) => `\`${channel}\``).join(", ")}`] : [])
+  ].join("\n");
+}
+
+function parseExistingAgentRoleSubsections(section: string) {
+  const sections = new Map<string, string>();
+  const matches = Array.from(section.matchAll(/^###\s+.+$/gm));
+
+  for (const [index, match] of matches.entries()) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    const start = match.index;
+    const end = matches[index + 1]?.index ?? section.length;
+    const subsection = section.slice(start, end).trim();
+    const agentId = extractAgentIdFromRoleSubsection(subsection);
+
+    if (agentId) {
+      sections.set(agentId, subsection);
+    }
+  }
+
+  return sections;
+}
+
+function findWorkspaceAgentRoleSubsection(content: string, agentId: string) {
+  const sectionMatch = findMarkdownSection(content, "Agent Roles");
+
+  if (!sectionMatch) {
+    return null;
+  }
+
+  const section = content.slice(sectionMatch.start, sectionMatch.end);
+  const matches = Array.from(section.matchAll(/^###\s+.+$/gm));
+
+  for (const [index, match] of matches.entries()) {
+    if (match.index === undefined) {
+      continue;
+    }
+
+    const localStart = match.index;
+    const localEnd = matches[index + 1]?.index ?? section.length;
+    const subsection = section.slice(localStart, localEnd).trim();
+
+    if (extractAgentIdFromRoleSubsection(subsection) !== agentId) {
+      continue;
+    }
+
+    return {
+      start: sectionMatch.start + localStart,
+      end: sectionMatch.start + localEnd,
+      content: subsection
+    };
+  }
+
+  return null;
+}
+
+function extractAgentIdFromRoleSubsection(subsection: string) {
+  return (
+    /^###\s+.*?\(`([^`]+)`\)/m.exec(subsection)?.[1] ??
+    /^-\s+Agent id:\s+`([^`]+)`/m.exec(subsection)?.[1] ??
+    null
+  );
+}
+
+function mergeWorkspaceAgentRoleSubsection(generated: string, existing: string) {
+  const generatedLines = generated.trim().split(/\r?\n/);
+  const existingLines = existing.trim().split(/\r?\n/);
+  const customLines = trimBlankLines(
+    existingLines.slice(1).filter((line) => !isManagedAgentRoleLine(line))
+  );
+
+  return [
+    generatedLines[0],
+    ...generatedLines.slice(1),
+    ...(customLines.length > 0 ? ["", ...customLines] : [])
+  ].join("\n");
+}
+
+function isManagedAgentRoleLine(line: string) {
+  return /^-\s+(Agent id|Runtime rule|Role|Primary|Preset|Model|Skills|Tools|File access|Network access|Install scope|Missing tools|Channels):/.test(line.trim());
+}
+
+function trimBlankLines(lines: string[]) {
+  let start = 0;
+  let end = lines.length;
+
+  while (start < end && lines[start]?.trim() === "") {
+    start += 1;
+  }
+
+  while (end > start && lines[end - 1]?.trim() === "") {
+    end -= 1;
+  }
+
+  return lines.slice(start, end);
+}
+
 function normalizeAgentInputs(
   agents: WorkspaceAgentsMarkdownAgentInput[],
   workspaceSlug?: string | null
-) {
+): NormalizedWorkspaceAgentInput[] {
   return [...agents]
     .map((agent, index) => {
       const baseId = normalizeOptionalValue(agent.id) ?? slugify(normalizeOptionalValue(agent.name) ?? `agent-${index + 1}`);
@@ -131,6 +327,10 @@ function normalizeAgentInputs(
         ? `${workspaceSlug}-${slugify(baseId) || "agent"}`
         : baseId;
       const role = normalizeOptionalValue(agent.role);
+      const skillIds = uniqueStrings([
+        ...(agent.skillIds ?? []),
+        normalizeOptionalValue(agent.skillId) ?? ""
+      ]);
 
       return {
         id,
@@ -138,7 +338,8 @@ function normalizeAgentInputs(
         role,
         enabled: agent.enabled !== false,
         isPrimary: Boolean(agent.isPrimary),
-        skillId: normalizeOptionalValue(agent.skillId),
+        skillId: skillIds[0] ?? null,
+        skillIds,
         toolIds: uniqueStrings(agent.toolIds ?? []),
         modelId: normalizeOptionalValue(agent.modelId),
         policy: agent.policy ?? null,

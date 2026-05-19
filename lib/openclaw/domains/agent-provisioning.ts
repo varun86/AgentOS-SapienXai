@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -68,6 +68,18 @@ type WorkspaceTeamMemberSummary = {
 type WorkspaceTeamContext = {
   members: WorkspaceTeamMemberSummary[];
 };
+
+const AGENTOS_GENERATED_WORKSPACE_SKILL_IDS = [
+  "project-builder",
+  "project-reviewer",
+  "project-tester",
+  "project-learner",
+  "project-browser",
+  "project-researcher",
+  "project-strategist",
+  "project-writer",
+  "project-analyst"
+];
 
 function normalizeOptionalValue(value: string | null | undefined) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -155,10 +167,14 @@ export async function createBootstrappedWorkspaceAgent(params: {
   const agentDir = buildWorkspaceAgentStatePath(params.workspacePath, agentId);
   const modelId =
     normalizeOptionalValue(params.agent.modelId) ?? normalizeOptionalValue(params.workspaceModelId);
+  const skillIds = uniqueStrings([
+    ...(params.agent.skillIds ?? []).map((skillId) => normalizeOptionalValue(skillId) ?? ""),
+    normalizeOptionalValue(params.agent.skillId) ?? ""
+  ]);
   const policy = resolveAgentPolicy(
     params.agent.policy?.preset ??
       inferAgentPresetFromContext({
-        skills: params.agent.skillId ? [params.agent.skillId] : [],
+        skills: skillIds,
         id: agentId,
         name: params.agent.name
       }),
@@ -184,9 +200,7 @@ export async function createBootstrappedWorkspaceAgent(params: {
     name: normalizeOptionalValue(params.agent.name) ?? undefined,
     model: modelId ?? undefined,
     heartbeat: serializeHeartbeatConfig(params.agent.heartbeat),
-    skills: [normalizeOptionalValue(params.agent.skillId), policySkillId].filter(
-      (value): value is string => Boolean(value)
-    ),
+    skills: [...skillIds, policySkillId],
     tools:
       policy.fileAccess === "workspace-only"
         ? {
@@ -251,6 +265,41 @@ export async function ensureWorkspaceSkillMarkdown(workspacePath: string, skillI
   const skillPath = path.join(workspacePath, "skills", skillId);
   await mkdir(skillPath, { recursive: true });
   await writeTextFileIfMissing(path.join(skillPath, "SKILL.md"), `${renderSkillMarkdown(knownSkillId, formatCapabilityLabel(knownSkillId))}\n`);
+}
+
+export async function pruneUnreferencedGeneratedWorkspaceSkills(
+  workspacePath: string,
+  extraReferencedSkillIds: string[] = []
+) {
+  const manifest = await readWorkspaceProjectManifest(workspacePath);
+  const referencedSkillIds = new Set([
+    ...manifest.agents.flatMap((agent) => agent.skillIds),
+    ...extraReferencedSkillIds
+  ]);
+
+  await Promise.all(
+    AGENTOS_GENERATED_WORKSPACE_SKILL_IDS
+      .filter((skillId) => !referencedSkillIds.has(skillId))
+      .map((skillId) => pruneGeneratedWorkspaceSkill(workspacePath, skillId))
+  );
+}
+
+async function pruneGeneratedWorkspaceSkill(workspacePath: string, skillId: string) {
+  const skillDir = path.join(workspacePath, "skills", skillId);
+  const skillFile = path.join(skillDir, "SKILL.md");
+
+  try {
+    const current = await readFile(skillFile, "utf8");
+    const generated = `${renderSkillMarkdown(skillId, formatCapabilityLabel(skillId))}\n`;
+
+    if (current.trimEnd() !== generated.trimEnd()) {
+      return;
+    }
+
+    await rm(skillDir, { recursive: true, force: true });
+  } catch {
+    // Missing or unreadable generated skills do not block agent updates.
+  }
 }
 
 async function ensureTelegramDelegationHelper(workspacePath: string) {

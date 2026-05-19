@@ -90,6 +90,75 @@ test("reads and writes safe workspace files while blocking traversal and invalid
   assert.equal(await readFile(path.join(workspacePath, "USER.md"), "utf8"), "User profile\n");
 });
 
+test("reads and writes virtual agent profiles through AGENTS.md", async () => {
+  const workspacePath = await createWorkspaceRoot();
+  await mkdir(path.join(workspacePath, ".openclaw"), { recursive: true });
+  await writeFile(
+    path.join(workspacePath, ".openclaw", "project.json"),
+    JSON.stringify(
+      {
+        name: "Lab",
+        agents: [
+          {
+            id: "lab-builder",
+            name: "Lab Builder",
+            role: "Builder",
+            enabled: true,
+            skillIds: ["project-builder"]
+          }
+        ]
+      },
+      null,
+      2
+    )
+  );
+  await writeFile(
+    path.join(workspacePath, "AGENTS.md"),
+    `# Lab
+
+## Agent Roles
+Each agent should use only the subsection matching its current OpenClaw agent id as its personal role/persona. Other subsections describe teammates in the same workspace.
+
+### Lab Builder (\`lab-builder\`)
+- Agent id: \`lab-builder\`
+- Runtime rule: stale
+- Role: Builder
+
+#### Persona
+Calm operator.
+`
+  );
+
+  const files = await listWorkspaceManagedFilesForPath(workspacePath);
+  const profileFile = files.find((file) => file.path === "agents/lab-builder/PROFILE.md");
+  assert.ok(profileFile);
+  assert.equal(profileFile.label, "Agent Profile");
+  assert.equal(profileFile.source, "virtual");
+  assert.equal(profileFile.category, "identity");
+
+  const profile = await readWorkspaceManagedFileForPath(workspacePath, "agents/lab-builder/PROFILE.md");
+  assert.match(profile.content, /#### Persona/);
+  assert.match(profile.content, /Calm operator\./);
+
+  await assert.rejects(
+    () => writeWorkspaceManagedFileForPath(workspacePath, "agents/lab-builder/PROFILE.md", "## Persona\nNope\n"),
+    /level-4 headings/
+  );
+
+  await writeWorkspaceManagedFileForPath(
+    workspacePath,
+    "agents/lab-builder/PROFILE.md",
+    "#### Persona\nPrecise builder.\n\n#### Boundaries\nStay inside the workspace.\n"
+  );
+
+  const agentsMarkdown = await readFile(path.join(workspacePath, "AGENTS.md"), "utf8");
+  assert.match(agentsMarkdown, /### Lab Builder \(`lab-builder`\)/);
+  assert.match(agentsMarkdown, /- Agent id: `lab-builder`/);
+  assert.match(agentsMarkdown, /- Skills: `project-builder`/);
+  assert.match(agentsMarkdown, /#### Persona\nPrecise builder\./);
+  assert.match(agentsMarkdown, /#### Boundaries\nStay inside the workspace\./);
+});
+
 test("does not expose symlinked files that resolve outside the workspace", async () => {
   const workspacePath = await createWorkspaceRoot();
   const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "agentos-workspace-files-outside-"));

@@ -62,6 +62,15 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function normalizeWorkspaceAgentSkillIds(
+  agent: Pick<WorkspaceAgentBlueprintInput, "skillId" | "skillIds">
+) {
+  return uniqueStrings([
+    ...(agent.skillIds ?? []).map((skillId) => normalizeOptionalValue(skillId) ?? ""),
+    normalizeOptionalValue(agent.skillId) ?? ""
+  ]);
+}
+
 function findDuplicateStrings(values: string[]) {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -625,18 +634,23 @@ export async function scaffoldWorkspaceContents(
           kickoffMission: options.rules.kickoffMission
         },
         contextSources: options.contextSources,
-        agents: options.agents.map((agent) => ({
-          id: createWorkspaceScopedAgentId(workspaceSlug, agent.id),
-          name: agent.name,
-          role: agent.role,
-          enabled: agent.enabled,
-          emoji: normalizeOptionalValue(agent.emoji) ?? null,
-          theme: normalizeOptionalValue(agent.theme) ?? null,
-          isPrimary: Boolean(agent.isPrimary),
-          skillId: normalizeOptionalValue(agent.skillId) ?? null,
-          modelId: normalizeOptionalValue(agent.modelId) ?? null,
-          policy: agent.policy ?? null
-        }))
+        agents: options.agents.map((agent) => {
+          const skillIds = normalizeWorkspaceAgentSkillIds(agent);
+
+          return {
+            id: createWorkspaceScopedAgentId(workspaceSlug, agent.id),
+            name: agent.name,
+            role: agent.role,
+            enabled: agent.enabled,
+            emoji: normalizeOptionalValue(agent.emoji) ?? null,
+            theme: normalizeOptionalValue(agent.theme) ?? null,
+            isPrimary: Boolean(agent.isPrimary),
+            skillId: skillIds[0] ?? null,
+            skillIds,
+            modelId: normalizeOptionalValue(agent.modelId) ?? null,
+            policy: agent.policy ?? null
+          };
+        })
       },
       null,
       2
@@ -662,14 +676,10 @@ export async function scaffoldWorkspaceContents(
   await syncWorkspaceAgentsMarkdown(workspacePath);
 
   for (const agent of options.agents) {
-    const skillId = normalizeOptionalValue(agent.skillId);
-
-    if (!skillId) {
-      continue;
+    for (const skillId of normalizeWorkspaceAgentSkillIds(agent)) {
+      await mkdir(path.join(workspacePath, "skills", skillId), { recursive: true });
+      await writeTextFileIfMissing(path.join(workspacePath, "skills", skillId, "SKILL.md"), `${renderSkillMarkdown(skillId, agent.role)}\n`);
     }
-
-    await mkdir(path.join(workspacePath, "skills", skillId), { recursive: true });
-    await writeTextFileIfMissing(path.join(workspacePath, "skills", skillId, "SKILL.md"), `${renderSkillMarkdown(skillId, agent.role)}\n`);
   }
 }
 
@@ -697,42 +707,40 @@ export function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): Res
   const normalizedAgents = (input.agents?.length
     ? input.agents
     : buildDefaultWorkspaceAgents(template, teamPreset, name)
-  ).map((agent) => ({
-    id: slugify(agent.id) || "agent",
-    role: agent.role.trim() || prettifyAgentName(agent.id),
-    name:
-      normalizeOptionalValue(agent.name) ??
-      (agent.isPrimary
-        ? buildWorkspaceAgentName(name, agent.role, prettifyAgentName(agent.id))
-        : prettifyAgentName(agent.id)),
-    enabled: agent.enabled !== false,
-    emoji: normalizeOptionalValue(agent.emoji) ?? undefined,
-    theme: normalizeOptionalValue(agent.theme) ?? undefined,
-    skillId: normalizeOptionalValue(agent.skillId) ?? undefined,
-    modelId: normalizeOptionalValue(agent.modelId) ?? undefined,
-    isPrimary: Boolean(agent.isPrimary),
-    heartbeat: resolveHeartbeatDraft(
-      agent.policy?.preset ??
-        inferAgentPresetFromContext({
-          skills: agent.skillId ? [agent.skillId] : [],
-          id: agent.id,
-          name: agent.name
-        }),
-      agent.heartbeat
-    ),
-    policy: resolveAgentPolicy(
-      agent.policy?.preset ??
-        inferAgentPresetFromContext({
-          skills: agent.skillId ? [agent.skillId] : [],
-          id: agent.id,
-          name: agent.name
-        }),
-      {
-        ...agent.policy,
-        fileAccess: rules.workspaceOnly ? agent.policy?.fileAccess ?? "workspace-only" : "extended"
-      }
-    )
-  }));
+  ).map((agent) => {
+    const skillIds = normalizeWorkspaceAgentSkillIds(agent);
+    const inferredPreset = agent.policy?.preset ??
+      inferAgentPresetFromContext({
+        skills: skillIds,
+        id: agent.id,
+        name: agent.name
+      });
+
+    return {
+      id: slugify(agent.id) || "agent",
+      role: agent.role.trim() || prettifyAgentName(agent.id),
+      name:
+        normalizeOptionalValue(agent.name) ??
+        (agent.isPrimary
+          ? buildWorkspaceAgentName(name, agent.role, prettifyAgentName(agent.id))
+          : prettifyAgentName(agent.id)),
+      enabled: agent.enabled !== false,
+      emoji: normalizeOptionalValue(agent.emoji) ?? undefined,
+      theme: normalizeOptionalValue(agent.theme) ?? undefined,
+      skillId: skillIds[0] ?? undefined,
+      skillIds,
+      modelId: normalizeOptionalValue(agent.modelId) ?? undefined,
+      isPrimary: Boolean(agent.isPrimary),
+      heartbeat: resolveHeartbeatDraft(inferredPreset, agent.heartbeat),
+      policy: resolveAgentPolicy(
+        inferredPreset,
+        {
+          ...agent.policy,
+          fileAccess: rules.workspaceOnly ? agent.policy?.fileAccess ?? "workspace-only" : "extended"
+        }
+      )
+    };
+  });
 
   if (!normalizedAgents.some((agent) => agent.enabled && agent.isPrimary)) {
     const firstEnabledAgent = normalizedAgents.find((agent) => agent.enabled);
