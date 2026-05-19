@@ -1305,7 +1305,6 @@ export interface AgentCreateInput {
   avatar?: string;
   policy?: AgentPolicy;
   heartbeat?: AgentHeartbeatInput;
-  bootstrapFiles?: AgentBootstrapFileInput[];
   channelIds?: string[];
 }
 

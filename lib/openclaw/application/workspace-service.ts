@@ -73,6 +73,7 @@ import {
 } from "@/lib/openclaw/domains/agent-config";
 import { readWorkspaceProjectManifest } from "@/lib/openclaw/domains/workspace-manifest";
 import type { WorkspaceProjectManifestAgent } from "@/lib/openclaw/domains/workspace-manifest";
+import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import { normalizeOptionalValue } from "@/lib/openclaw/domains/control-plane-normalization";
 import {
   getConfiguredWorkspaceRoot
@@ -260,6 +261,7 @@ export async function createWorkspaceProject(
 
   invalidateSnapshotCache();
   await syncWorkspaceAgentPolicySkills(targetDir);
+  await syncWorkspaceAgentsMarkdown(targetDir);
 
   const primaryAgentId =
     createdAgentIds.find((agentId) =>
@@ -820,6 +822,7 @@ async function applyWorkspacePlanEdits(
   }
 
   await writeTextFileEnsured(projectManifestPath, `${JSON.stringify(projectManifest, null, 2)}\n`);
+  await syncWorkspaceAgentsMarkdown(currentWorkspacePath);
 
   invalidateSnapshotCache();
   clearRuntimeHistoryCache();

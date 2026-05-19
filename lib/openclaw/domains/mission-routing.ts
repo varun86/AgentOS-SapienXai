@@ -63,12 +63,23 @@ export function composeMissionWithOutputRouting(
   outputPlan: Pick<MissionOutputPlan, "relativeOutputDir" | "notesDirRelative">,
   policy?: AgentPolicy,
   setupAgentId?: string | null,
-  workspaceSurfacePrompt?: string | null
+  workspaceSurfacePrompt?: string | null,
+  currentAgent?: { id: string; name?: string | null } | null
 ) {
   const resolvedPolicy = policy ?? resolveAgentPolicy(DEFAULT_AGENT_PRESET);
+  const agentContextLines = currentAgent
+    ? [
+        "Agent workspace context:",
+        `- Your current OpenClaw agent id is \`${currentAgent.id}\`${currentAgent.name ? ` and your AgentOS display name is ${currentAgent.name}` : ""}.`,
+        "- Use the matching subsection in workspace root `AGENTS.md` as your agent-specific role/persona.",
+        "- Treat other `AGENTS.md` agent subsections as teammates in the same workspace.",
+        "- Use root `SOUL.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `memory/*.md`, and `docs/*.md` as shared workspace/project context."
+      ]
+    : [];
 
   return [
     mission,
+    ...(agentContextLines.length > 0 ? ["", ...agentContextLines] : []),
     "",
     "Task output routing:",
     `- Put substantial outputs, drafts, reports, docs, and file deliverables under \`${outputPlan.relativeOutputDir}/\`.`,

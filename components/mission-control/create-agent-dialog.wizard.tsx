@@ -1,8 +1,8 @@
 "use client";
 
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronRight, FileText, LoaderCircle, PencilLine, Plus, Sparkles, Trash2, X, type LucideIcon } from "lucide-react";
+import { Bot, ChevronRight, FileText, LoaderCircle, Plus, Sparkles, type LucideIcon } from "lucide-react";
 
 import { ChannelBindingPicker } from "@/components/mission-control/channel-binding-picker";
 import { AgentPolicySelect, AgentPresetCard, FormField } from "@/components/mission-control/create-agent-dialog.parts";
@@ -18,7 +18,6 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 import {
   AGENT_FILE_ACCESS_OPTIONS,
@@ -38,19 +37,12 @@ import {
   syncWorkspaceAgentChannelBindings
 } from "@/lib/openclaw/channel-bindings";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
-import { parseAgentIdentityMarkdown } from "@/lib/openclaw/agent-bootstrap-files";
 import type { AgentPreset, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 import {
   applyAgentPreset,
-  AGENT_BOOTSTRAP_FILE_OPTIONS,
   buildAgentDraft,
-  buildAgentBootstrapFileDraftsForDraft,
   buildUniqueAgentId,
-  rebaseAgentBootstrapFilesForDraft,
-  type AgentBootstrapFileDraft,
-  type AgentBootstrapFileKind,
-  type AgentBootstrapFilePath,
   type AgentDraft
 } from "@/components/mission-control/create-agent-dialog.utils";
 
@@ -96,16 +88,6 @@ export function CreateAgentDialog({
   const isSubmittingRef = useRef(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<AgentDraft>(() => createCustomAgentDraft(initialWorkspaceId));
-  const [bootstrapFiles, setBootstrapFiles] = useState<AgentBootstrapFileDraft[]>(() =>
-    buildAgentBootstrapFileDraftsForDraft(createCustomAgentDraft(initialWorkspaceId))
-  );
-  const [activeBootstrapFilePath, setActiveBootstrapFilePath] = useState<AgentBootstrapFilePath | null>(null);
-  const [bootstrapFileEditorValue, setBootstrapFileEditorValue] = useState("");
-  const [bootstrapFileEditorInitialValue, setBootstrapFileEditorInitialValue] = useState("");
-  const [bootstrapFileDiscardConfirm, setBootstrapFileDiscardConfirm] = useState(false);
-  const [bootstrapFileResetConfirm, setBootstrapFileResetConfirm] = useState(false);
-  const [bootstrapFileDiscardNextPath, setBootstrapFileDiscardNextPath] = useState<AgentBootstrapFilePath | null>(null);
-  const bootstrapFileEditorTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const createSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedWorkspace = snapshot.workspaces.find((workspace) => workspace.id === draft.workspaceId) ?? null;
@@ -161,13 +143,6 @@ export function CreateAgentDialog({
       });
   }, [importSearch, selectedImportAgentId, snapshot.agents, snapshot.workspaces]);
 
-  const defaultBootstrapFiles = useMemo(
-    () => buildAgentBootstrapFileDraftsForDraft(draft),
-    [draft]
-  );
-  const activeBootstrapFile =
-    activeBootstrapFilePath ? bootstrapFiles.find((entry) => entry.path === activeBootstrapFilePath) ?? null : null;
-
   const stepLabels = getWizardStepLabels(startPoint);
   const activeStepIndex = getWizardActiveStepIndex(startPoint, stage);
   const canCreate = Boolean(generatedAgentId && selectedWorkspace) && !isSaving;
@@ -179,7 +154,7 @@ export function CreateAgentDialog({
   );
   const createProgressMessage =
     createProgress === "creating"
-      ? "Creating the agent and writing its bootstrap files."
+      ? "Creating the agent and updating the workspace AGENTS.md role section."
       : createProgress === "syncing"
         ? "Agent created. Waiting for the canvas card to appear."
         : null;
@@ -203,39 +178,6 @@ export function CreateAgentDialog({
 
     nameInputRef.current?.focus();
   }, [open, stage, startPoint]);
-
-  useEffect(() => {
-    setBootstrapFiles((current) => rebaseAgentBootstrapFilesForDraft(current, draft));
-  }, [draft]);
-
-  useEffect(() => {
-    if (!activeBootstrapFile) {
-      return;
-    }
-
-    const frame = requestAnimationFrame(() => {
-      bootstrapFileEditorTextareaRef.current?.focus();
-    });
-
-    return () => cancelAnimationFrame(frame);
-  }, [activeBootstrapFile]);
-
-  useEffect(() => {
-    if (!activeBootstrapFilePath) {
-      return;
-    }
-
-    if (bootstrapFiles.some((entry) => entry.path === activeBootstrapFilePath)) {
-      return;
-    }
-
-    setActiveBootstrapFilePath(null);
-    setBootstrapFileEditorValue("");
-    setBootstrapFileEditorInitialValue("");
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    setBootstrapFileDiscardNextPath(null);
-  }, [activeBootstrapFilePath, bootstrapFiles]);
 
   useEffect(() => {
     return () => {
@@ -302,13 +244,6 @@ export function CreateAgentDialog({
     setSelectedImportAgentId(null);
     setImportSearch("");
     setDraft(nextDraft);
-    setBootstrapFiles(buildAgentBootstrapFileDraftsForDraft(nextDraft));
-    setActiveBootstrapFilePath(null);
-    setBootstrapFileEditorValue("");
-    setBootstrapFileEditorInitialValue("");
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    setBootstrapFileDiscardNextPath(null);
     setIsSaving(false);
     setCreateProgress("idle");
     setCreatedAgentId(null);
@@ -341,13 +276,6 @@ export function CreateAgentDialog({
     setSelectedImportAgentId(null);
     setImportSearch("");
     setDraft(nextDraft);
-    setBootstrapFiles(buildAgentBootstrapFileDraftsForDraft(nextDraft));
-    setActiveBootstrapFilePath(null);
-    setBootstrapFileEditorValue("");
-    setBootstrapFileEditorInitialValue("");
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    setBootstrapFileDiscardNextPath(null);
 
     // Empty için ara adım yok — direkt details'e geç
     if (nextStartPoint === "empty") {
@@ -378,13 +306,6 @@ export function CreateAgentDialog({
     setSelectedImportAgentId(agentId);
     const nextDraft = buildImportedAgentDraft(workspaceId, sourceAgent, channelIds);
     setDraft(nextDraft);
-    setBootstrapFiles(buildAgentBootstrapFileDraftsForDraft(nextDraft));
-    setActiveBootstrapFilePath(null);
-    setBootstrapFileEditorValue("");
-    setBootstrapFileEditorInitialValue("");
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    setBootstrapFileDiscardNextPath(null);
   };
 
   const handleNext = () => {
@@ -470,10 +391,6 @@ export function CreateAgentDialog({
         },
         body: JSON.stringify({
           ...draft,
-          bootstrapFiles: bootstrapFiles.map((entry) => ({
-            path: entry.path,
-            content: entry.content
-          })),
           id: generatedAgentId
         })
       });
@@ -525,205 +442,6 @@ export function CreateAgentDialog({
     handleNext();
   };
 
-  const handleOpenBootstrapFile = (path: AgentBootstrapFilePath) => {
-    if (bootstrapFileDiscardConfirm || bootstrapFileResetConfirm || activeBootstrapFilePath === path) {
-      return;
-    }
-
-    const file = bootstrapFiles.find((entry) => entry.path === path);
-
-    if (!file) {
-      return;
-    }
-
-    if (activeBootstrapFile && bootstrapFileEditorValue !== bootstrapFileEditorInitialValue) {
-      setBootstrapFileDiscardNextPath(path);
-      setBootstrapFileDiscardConfirm(true);
-      return;
-    }
-
-    setActiveBootstrapFilePath(path);
-    setBootstrapFileEditorValue(file.content);
-    setBootstrapFileEditorInitialValue(file.content);
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    setBootstrapFileDiscardNextPath(null);
-  };
-
-  const handleAddBootstrapFile = (kind: AgentBootstrapFileKind) => {
-    if (bootstrapFileDiscardConfirm || bootstrapFileResetConfirm) {
-      return;
-    }
-
-    const template = defaultBootstrapFiles.find((entry) => entry.kind === kind);
-
-    if (!template || bootstrapFiles.some((entry) => entry.path === template.path)) {
-      return;
-    }
-
-    if (activeBootstrapFile && bootstrapFileEditorValue !== bootstrapFileEditorInitialValue) {
-      setBootstrapFileDiscardNextPath(template.path);
-      setBootstrapFileDiscardConfirm(true);
-      return;
-    }
-
-    setBootstrapFiles((current) => sortBootstrapFiles([...current, template]));
-    setActiveBootstrapFilePath(template.path);
-    setBootstrapFileEditorValue(template.content);
-    setBootstrapFileEditorInitialValue(template.content);
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    setBootstrapFileDiscardNextPath(null);
-  };
-
-  const handleRemoveBootstrapFile = (path: AgentBootstrapFilePath) => {
-    if (bootstrapFileDiscardConfirm || bootstrapFileResetConfirm) {
-      return;
-    }
-
-    setBootstrapFiles((current) => current.filter((entry) => entry.path !== path));
-
-    if (activeBootstrapFilePath === path) {
-      setActiveBootstrapFilePath(null);
-      setBootstrapFileEditorValue("");
-      setBootstrapFileEditorInitialValue("");
-      setBootstrapFileDiscardConfirm(false);
-      setBootstrapFileResetConfirm(false);
-      setBootstrapFileDiscardNextPath(null);
-    }
-  };
-
-  const handleSaveBootstrapFile = () => {
-    if (!activeBootstrapFile) {
-      return;
-    }
-
-    const nextContent = bootstrapFileEditorValue;
-    const manuallyEdited = nextContent !== activeBootstrapFile.baseContent;
-
-    setBootstrapFiles((current) =>
-      sortBootstrapFiles(
-        current.map((entry) =>
-          entry.path === activeBootstrapFile.path
-            ? {
-                ...entry,
-                content: nextContent,
-                manuallyEdited
-              }
-            : entry
-        )
-      )
-    );
-
-    if (activeBootstrapFile.path === "IDENTITY.md") {
-      const parsedIdentity = parseAgentIdentityMarkdown(nextContent);
-
-      setDraft((current) => ({
-        ...current,
-        name: parsedIdentity.name ?? current.name,
-        emoji: parsedIdentity.emoji ?? current.emoji,
-        theme: parsedIdentity.theme ?? current.theme,
-        avatar: parsedIdentity.avatar ?? current.avatar
-      }));
-    }
-
-    setActiveBootstrapFilePath(null);
-    setBootstrapFileEditorValue("");
-    setBootstrapFileEditorInitialValue("");
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    setBootstrapFileDiscardNextPath(null);
-  };
-
-  const handleResetBootstrapFile = () => {
-    if (!activeBootstrapFile) {
-      return;
-    }
-
-    setBootstrapFileResetConfirm(true);
-  };
-
-  const handleConfirmResetBootstrapFile = () => {
-    if (!activeBootstrapFile) {
-      return;
-    }
-
-    setBootstrapFileEditorValue(activeBootstrapFile.baseContent);
-    setBootstrapFileEditorInitialValue(activeBootstrapFile.baseContent);
-    setBootstrapFileResetConfirm(false);
-  };
-
-  const handleCloseBootstrapFile = () => {
-    if (bootstrapFileEditorValue !== bootstrapFileEditorInitialValue) {
-      setBootstrapFileDiscardConfirm(true);
-      setBootstrapFileDiscardNextPath(null);
-      return;
-    }
-
-    setActiveBootstrapFilePath(null);
-    setBootstrapFileEditorValue("");
-    setBootstrapFileEditorInitialValue("");
-    setBootstrapFileDiscardNextPath(null);
-  };
-
-  const handleConfirmDiscardBootstrapFile = () => {
-    setBootstrapFileDiscardConfirm(false);
-    setBootstrapFileResetConfirm(false);
-    const nextPath = bootstrapFileDiscardNextPath;
-    setBootstrapFileDiscardNextPath(null);
-
-    if (nextPath) {
-      const nextFile = bootstrapFiles.find((entry) => entry.path === nextPath);
-      const nextTemplate = defaultBootstrapFiles.find((entry) => entry.path === nextPath);
-      const fileToOpen = nextFile ?? nextTemplate ?? null;
-
-      if (!nextFile && nextTemplate) {
-        setBootstrapFiles((current) => sortBootstrapFiles([...current, nextTemplate]));
-      }
-
-      if (fileToOpen) {
-        setActiveBootstrapFilePath(nextPath);
-        setBootstrapFileEditorValue(fileToOpen.content);
-        setBootstrapFileEditorInitialValue(fileToOpen.content);
-        return;
-      }
-    }
-
-    setActiveBootstrapFilePath(null);
-    setBootstrapFileEditorValue("");
-    setBootstrapFileEditorInitialValue("");
-  };
-
-  const discardPendingBootstrapFileActionLabel = bootstrapFileDiscardNextPath
-    ? bootstrapFiles.some((entry) => entry.path === bootstrapFileDiscardNextPath)
-      ? "Discard & switch"
-      : "Discard & add"
-    : "Discard";
-
-  const bootstrapFileEditor = activeBootstrapFile ? (
-    <AgentBootstrapFileEditorPanel
-      file={activeBootstrapFile}
-      value={bootstrapFileEditorValue}
-      surfaceTheme={surfaceTheme}
-      discardConfirm={bootstrapFileDiscardConfirm}
-      resetConfirm={bootstrapFileResetConfirm}
-      onChange={setBootstrapFileEditorValue}
-      onClose={handleCloseBootstrapFile}
-      onReset={handleResetBootstrapFile}
-      onConfirmReset={handleConfirmResetBootstrapFile}
-      onCancelReset={() => setBootstrapFileResetConfirm(false)}
-      onConfirmDiscard={handleConfirmDiscardBootstrapFile}
-      onCancelDiscard={() => {
-        setBootstrapFileDiscardConfirm(false);
-        setBootstrapFileDiscardNextPath(null);
-      }}
-      discardActionLabel={discardPendingBootstrapFileActionLabel}
-      onRemove={handleRemoveBootstrapFile}
-      onSave={handleSaveBootstrapFile}
-      textareaRef={bootstrapFileEditorTextareaRef}
-    />
-  ) : null;
-
   if (!isMounted) {
     return <>{trigger}</>;
   }
@@ -734,14 +452,6 @@ export function CreateAgentDialog({
       <DialogContent
         overlayClassName={isLight ? "bg-[#eadfd4]/72 backdrop-blur-[18px]" : undefined}
         closeClassName="hidden"
-        onEscapeKeyDown={(event) => {
-          if (!activeBootstrapFile) {
-            return;
-          }
-
-          event.preventDefault();
-          handleCloseBootstrapFile();
-        }}
         className={cn(
           "flex h-[min(84dvh,800px)] w-[calc(100vw-10px)] max-w-[920px] flex-col overflow-hidden p-0 sm:w-[min(920px,calc(100vw-20px))]",
           isLight
@@ -760,7 +470,7 @@ export function CreateAgentDialog({
             )}
           >
             <DialogDescription className="sr-only">
-              Create a new OpenClaw agent by choosing a starter mode, editing identity and policy, and saving the workspace agent.
+              Create a new OpenClaw agent by choosing a starter mode, editing profile and policy, and saving the workspace agent.
             </DialogDescription>
             {stage === "start" ? (
               <div className="flex items-center justify-between gap-4">
@@ -961,16 +671,7 @@ export function CreateAgentDialog({
                       </Badge>
                     </div>
 
-                    <AgentBootstrapFilesSummary
-                      files={bootstrapFiles}
-                      surfaceTheme={surfaceTheme}
-                      activePath={activeBootstrapFilePath}
-                      onOpenFile={handleOpenBootstrapFile}
-                      onAddFile={handleAddBootstrapFile}
-                      onRemoveFile={handleRemoveBootstrapFile}
-                    />
-
-                    {bootstrapFileEditor}
+                    <AgentRootContextNotice surfaceTheme={surfaceTheme} />
 
                     <div
                       className={cn(
@@ -1071,16 +772,7 @@ export function CreateAgentDialog({
                         </Badge>
                       </div>
 
-                      <AgentBootstrapFilesSummary
-                        files={bootstrapFiles}
-                        surfaceTheme={surfaceTheme}
-                        activePath={activeBootstrapFilePath}
-                        onOpenFile={handleOpenBootstrapFile}
-                        onAddFile={handleAddBootstrapFile}
-                        onRemoveFile={handleRemoveBootstrapFile}
-                      />
-
-                      {bootstrapFileEditor}
+                      <AgentRootContextNotice surfaceTheme={surfaceTheme} />
 
                       <div
                         className={cn(
@@ -1104,14 +796,7 @@ export function CreateAgentDialog({
                         Choose an existing agent on the left. Its configuration will be cloned into the new draft.
                       </div>
 
-                      <AgentBootstrapFilesSummary
-                        files={bootstrapFiles}
-                        surfaceTheme={surfaceTheme}
-                        activePath={activeBootstrapFilePath}
-                        onOpenFile={handleOpenBootstrapFile}
-                        onAddFile={handleAddBootstrapFile}
-                        onRemoveFile={handleRemoveBootstrapFile}
-                      />
+                      <AgentRootContextNotice surfaceTheme={surfaceTheme} />
                     </div>
                   )}
                 </PanelCard>
@@ -1475,15 +1160,7 @@ export function CreateAgentDialog({
                         </Badge>
                       </div>
 
-                      <AgentBootstrapFilesSummary
-                        files={bootstrapFiles}
-                        surfaceTheme={surfaceTheme}
-                        onOpenFile={handleOpenBootstrapFile}
-                        onAddFile={handleAddBootstrapFile}
-                        onRemoveFile={handleRemoveBootstrapFile}
-                      />
-
-                      {bootstrapFileEditor}
+                      <AgentRootContextNotice surfaceTheme={surfaceTheme} />
 
                       <div
                         className={cn(
@@ -2039,442 +1716,29 @@ function ImportAgentCard({
   );
 }
 
-function AgentBootstrapFilesSummary({
-  files,
-  surfaceTheme = "dark",
-  activePath,
-  onOpenFile,
-  onAddFile,
-  onRemoveFile
-}: {
-  files: AgentBootstrapFileDraft[];
-  surfaceTheme?: SurfaceTheme;
-  activePath?: AgentBootstrapFilePath | null;
-  onOpenFile: (path: AgentBootstrapFilePath) => void;
-  onAddFile: (kind: AgentBootstrapFileKind) => void;
-  onRemoveFile: (path: AgentBootstrapFilePath) => void;
-}) {
+function AgentRootContextNotice({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
   const isLight = surfaceTheme === "light";
-  const filePaths = new Set(files.map((entry) => entry.path));
-  const missingOptionalFiles = AGENT_BOOTSTRAP_FILE_OPTIONS.filter(
-    (option) => option.removable && !filePaths.has(option.path)
-  );
 
   return (
     <div
       className={cn(
-        "space-y-2.5 rounded-[18px] border p-3.5",
-        isLight ? "border-[#e2d5c9] bg-[#faf6f1] text-[#3f2f24]" : "border-white/10 bg-white/[0.03] text-white"
+        "rounded-[18px] border p-3 text-[11px] leading-5",
+        isLight
+          ? "border-[#e2d5c9] bg-[#faf6f1] text-[#6f5849]"
+          : "border-white/10 bg-white/[0.03] text-slate-400"
       )}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start gap-2">
+        <FileText className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", isLight ? "text-[#8b6d56]" : "text-cyan-200")} />
         <div className="min-w-0">
-          <p className={cn("text-[10px] uppercase tracking-[0.18em]", isLight ? "text-[#8b7462]" : "text-slate-500")}>
-            Files
+          <p className={cn("text-[12px] font-medium", isLight ? "text-[#3f2f24]" : "text-slate-100")}>
+            Workspace-root context
           </p>
-          <p className={cn("mt-1 text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
-            These files will be written into the agent state directory. Click a file to edit it inline.
+          <p className="mt-1">
+            This agent profile is written to the workspace root <code>AGENTS.md</code>. OpenClaw loads that file as shared runtime context.
           </p>
         </div>
-
-        <Badge
-          variant="muted"
-          className={cn(
-            "shrink-0 px-2 py-0.5 text-[9px] normal-case tracking-normal",
-            isLight ? "border-[#e1d5c8] bg-white text-[#846a58]" : ""
-          )}
-        >
-          {files.length} files
-        </Badge>
       </div>
-
-      <div className="flex flex-wrap gap-2">
-        {files.map((file) => (
-          <AgentBootstrapFileChip
-            key={file.path}
-            file={file}
-            surfaceTheme={surfaceTheme}
-            active={activePath === file.path}
-            onOpenFile={onOpenFile}
-            onRemoveFile={onRemoveFile}
-          />
-        ))}
-      </div>
-
-      {missingOptionalFiles.length > 0 ? (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {missingOptionalFiles.map((option) => (
-            <button
-              key={option.path}
-              type="button"
-              onClick={() => onAddFile(option.kind)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 text-[10px] transition-colors",
-                isLight
-                  ? "border-[#d9cbbd] bg-white text-[#7f6958] hover:border-[#c89e73] hover:bg-[#fff9f2]"
-                  : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20 hover:bg-white/[0.05]"
-              )}
-            >
-              <Plus className="h-3 w-3" />
-              Add {option.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
-}
-
-function AgentBootstrapFileChip({
-  file,
-  surfaceTheme = "dark",
-  active = false,
-  onOpenFile,
-  onRemoveFile
-}: {
-  file: AgentBootstrapFileDraft;
-  surfaceTheme?: SurfaceTheme;
-  active?: boolean;
-  onOpenFile: (path: AgentBootstrapFilePath) => void;
-  onRemoveFile: (path: AgentBootstrapFilePath) => void;
-}) {
-  const isLight = surfaceTheme === "light";
-  const isDirty = file.content !== file.baseContent;
-
-  return (
-    <div
-      className={cn(
-        "inline-flex items-stretch overflow-hidden rounded-full border text-left transition-colors",
-        isLight
-          ? active
-            ? "border-[#c89e73] bg-[#fff7ef] text-[#3f2f24] shadow-[0_10px_24px_rgba(161,125,101,0.12)]"
-            : file.required
-            ? "border-[#d8c9bb] bg-white text-[#3f2f24]"
-            : "border-[#d8c9bb] bg-white text-[#3f2f24] hover:border-[#c89e73]"
-          : active
-            ? "border-cyan-300/30 bg-cyan-400/10 text-white shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
-            : file.required
-            ? "border-white/10 bg-white/[0.04] text-white"
-            : "border-white/10 bg-white/[0.03] text-white hover:border-white/20"
-      )}
-    >
-      <button
-        type="button"
-        onClick={() => onOpenFile(file.path)}
-        className={cn(
-          "flex min-w-0 items-center gap-2 px-2.5 py-1.5 transition-colors",
-          isLight ? "hover:bg-[#fff8f0]" : "hover:bg-white/[0.04]"
-        )}
-      >
-        <span
-          className={cn(
-            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border",
-            isLight ? "border-[#dfd2c5] bg-[#faf6f0] text-[#7a5f4c]" : "border-white/10 bg-white/5 text-slate-200"
-          )}
-        >
-          <FileText className="h-3.5 w-3.5" />
-        </span>
-        <span className="min-w-0">
-          <span className={cn("block truncate text-[10px] font-medium", isLight ? "text-[#3f2f24]" : "text-white")}>
-            {file.path}
-          </span>
-          <span className={cn("block text-[9px] uppercase tracking-[0.14em]", isLight ? "text-[#8b7462]" : "text-slate-500")}>
-            {active ? "Editing" : isDirty ? "Edited" : "Open editor"}
-          </span>
-        </span>
-        {isDirty ? <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-amber-400" /> : null}
-        <span
-          className={cn(
-            "ml-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.14em]",
-            isLight
-              ? active
-                ? "border-[#c89e73] bg-[#fff1e1] text-[#5d4331]"
-                : "border-[#e1d5c8] bg-[#faf6f1] text-[#8b7462]"
-              : active
-                ? "border-cyan-300/30 bg-cyan-400/10 text-cyan-50"
-                : "border-white/10 bg-white/[0.03] text-slate-400"
-          )}
-        >
-          <PencilLine className="h-3 w-3" />
-          Edit
-        </span>
-      </button>
-
-      {file.removable ? (
-        <button
-          type="button"
-          aria-label={`Remove ${file.path}`}
-          onClick={() => onRemoveFile(file.path)}
-          className={cn(
-            "inline-flex items-center justify-center border-l px-2.5 transition-colors",
-            isLight ? "border-[#d8c9bb] text-[#8b7462] hover:bg-[#fff3e8] hover:text-[#5d4331]" : "border-white/10 text-slate-400 hover:bg-white/[0.04] hover:text-white"
-          )}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function AgentBootstrapFileEditorPanel({
-  file,
-  value,
-  surfaceTheme = "dark",
-  discardConfirm,
-  resetConfirm,
-  onChange,
-  onClose,
-  onReset,
-  onConfirmReset,
-  onCancelReset,
-  onConfirmDiscard,
-  onCancelDiscard,
-  discardActionLabel,
-  onRemove,
-  onSave,
-  textareaRef
-}: {
-  file: AgentBootstrapFileDraft;
-  value: string;
-  surfaceTheme?: SurfaceTheme;
-  discardConfirm: boolean;
-  resetConfirm: boolean;
-  onChange: (value: string) => void;
-  onClose: () => void;
-  onReset: () => void;
-  onConfirmReset: () => void;
-  onCancelReset: () => void;
-  onConfirmDiscard: () => void;
-  onCancelDiscard: () => void;
-  discardActionLabel: string;
-  onRemove: (path: AgentBootstrapFilePath) => void;
-  onSave: () => void;
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
-}) {
-  const isLight = surfaceTheme === "light";
-  const isDirty = value !== file.baseContent;
-
-  return (
-    <section
-      className={cn(
-        "space-y-3 rounded-[22px] border p-3.5 shadow-[0_14px_34px_rgba(0,0,0,0.12)]",
-        isLight
-          ? "border-[#e2d5c9] bg-[#fffaf5] text-[#3f2f24]"
-          : "border-white/10 bg-white/[0.03] text-white"
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className={cn("text-[10px] uppercase tracking-[0.18em]", isLight ? "text-[#8b7462]" : "text-slate-500")}>
-            Agent file
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span className={cn("inline-flex items-center gap-1.5 text-[14px] font-medium", isLight ? "text-[#37291f]" : "text-white")}>
-              <FileText className="h-4 w-4" />
-              {file.label}
-            </span>
-            <Badge
-              variant="muted"
-              className={cn(
-                "px-2 py-0.5 text-[9px] normal-case tracking-normal",
-                isLight ? "border-[#d8c9bb] bg-white text-[#846a58]" : ""
-              )}
-            >
-              {file.path}
-            </Badge>
-            <Badge
-              variant={file.required ? "default" : "muted"}
-              className={cn(
-                "px-2 py-0.5 text-[9px] normal-case tracking-normal",
-                isLight
-                  ? file.required
-                    ? "border-[#c89e73]/35 bg-[#f5e7d8] text-[#6a4a34]"
-                    : "border-[#d8c9bb] bg-white text-[#846a58]"
-                  : ""
-              )}
-            >
-              {file.required ? "Required" : "Optional"}
-            </Badge>
-            {isDirty ? (
-              <Badge
-                variant="warning"
-                className={cn(
-                  "px-2 py-0.5 text-[9px] normal-case tracking-normal",
-                  isLight ? "border-amber-300/40 bg-amber-100 text-amber-900" : ""
-                )}
-              >
-                Edited
-              </Badge>
-            ) : null}
-          </div>
-          <p className={cn("mt-1 text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>{file.description}</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {file.removable ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                onRemove(file.path);
-              }}
-              className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Remove
-            </Button>
-          ) : null}
-
-          <button
-            type="button"
-            aria-label="Close inline file editor"
-            onClick={onClose}
-            className={cn(
-              "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
-              isLight
-                ? "border-[#e2d3c2] bg-[#f5ece1] text-[#7b6657] hover:bg-[#f2e8df] hover:text-[#3f2f24]"
-                : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white"
-            )}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <Textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className={cn(
-            "min-h-[240px] resize-y font-mono text-[12px] leading-5",
-            isLight
-              ? "border-[#dccfc3] bg-white text-[#3f2f24] placeholder:text-[#9b8573] focus-visible:ring-[#c89e73]/30"
-              : "border-white/10 bg-white/5 text-white placeholder:text-slate-500"
-          )}
-        />
-
-        <div
-          className={cn(
-            "rounded-[18px] border p-3 text-[11px] leading-5",
-            isLight
-              ? "border-[#e2d5c9] bg-[#faf6f1] text-[#7b6657]"
-              : "border-white/10 bg-white/[0.03] text-slate-400"
-          )}
-        >
-          <p className={cn("text-[10px] uppercase tracking-[0.18em]", isLight ? "text-[#8b7462]" : "text-slate-500")}>
-            Notes
-          </p>
-          <p className="mt-1.5">
-            {file.path === "IDENTITY.md"
-              ? "This file seeds the agent identity. Saving it will also update the name, emoji, theme, and avatar fields."
-              : file.path === "SOUL.md"
-                ? "This file is read as the agent's operating posture and purpose."
-                : file.path === "TOOLS.md"
-                  ? "This file captures tool preferences and workflow cues for the agent."
-                  : "This file captures recurring watch-cycle guidance for heartbeat-enabled agents."}
-          </p>
-        </div>
-      </div>
-
-      {discardConfirm ? (
-        <div className="flex flex-col gap-2 rounded-[18px] border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: isLight ? "#e2d5c9" : "rgba(255,255,255,0.1)" }}>
-          <p className={cn("text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
-            Discard unsaved changes?
-          </p>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={onCancelDiscard}
-              className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
-            >
-              Keep editing
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={onConfirmDiscard}
-            >
-              {discardActionLabel}
-            </Button>
-          </div>
-        </div>
-      ) : resetConfirm ? (
-        <div className="flex flex-col gap-2 rounded-[18px] border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: isLight ? "#e2d5c9" : "rgba(255,255,255,0.1)" }}>
-          <p className={cn("text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
-            Reset to default content?
-          </p>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={onCancelReset}
-              className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={onConfirmReset}
-            >
-              Reset
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <p className={cn("text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
-            Changes stay local until you apply them.
-          </p>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={onClose}
-              className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
-            >
-              Cancel
-            </Button>
-
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={onReset}
-              disabled={!isDirty}
-              className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
-            >
-              Reset
-            </Button>
-
-            <Button
-              type="button"
-              size="sm"
-              onClick={onSave}
-              className={
-                isLight
-                  ? "bg-[#c89e73] text-white shadow-[0_10px_26px_rgba(161,125,101,0.22)] hover:bg-[#b47f53]"
-                  : undefined
-              }
-            >
-              <PencilLine className="mr-1.5 h-3.5 w-3.5" />
-              Save file
-            </Button>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function sortBootstrapFiles(files: AgentBootstrapFileDraft[]) {
-  const order = new Map(AGENT_BOOTSTRAP_FILE_OPTIONS.map((entry, index) => [entry.path, index] as const));
-
-  return [...files].sort((left, right) => (order.get(left.path) ?? 0) - (order.get(right.path) ?? 0));
 }

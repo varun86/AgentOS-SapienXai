@@ -439,6 +439,7 @@ test("agent chat prompt keeps direct identity chat out of task recovery", () => 
     ],
     "so what is your name and how old are you",
     {
+      agentId: "little-boy",
       agentName: "Little Boy",
       agentDir: "/tmp/agent",
       workspacePath: "/tmp/workspace"
@@ -446,7 +447,8 @@ test("agent chat prompt keeps direct identity chat out of task recovery", () => 
   );
 
   assert.match(prompt, /Answer the operator's latest message directly/);
-  assert.match(prompt, /Your current display name in AgentOS is Little Boy/);
+  assert.match(prompt, /current AgentOS display name is Little Boy/);
+  assert.match(prompt, /matching `AGENTS.md` role section/);
   assert.match(prompt, /Operator: so what is your name and how old are you/);
   assert.doesNotMatch(prompt, /couldn't recover any prior task context/i);
   assert.doesNotMatch(prompt, /Send me the last goal or file/i);

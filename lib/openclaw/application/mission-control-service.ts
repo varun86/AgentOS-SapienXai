@@ -116,14 +116,14 @@ import {
   sortRuntimesByUpdatedAtDesc
 } from "@/lib/openclaw/domains/runtime-history";
 import {
-  filterAgentPolicySkills,
-  readAgentIdentityOverrides
+  filterAgentPolicySkills
 } from "@/lib/openclaw/domains/agent-config";
 import {
   normalizeChannelRegistry,
   reconcileWorkspaceProjectManifestAgents,
   readWorkspaceProjectManifest
 } from "@/lib/openclaw/domains/workspace-manifest";
+import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import type { WorkspaceProjectManifest } from "@/lib/openclaw/domains/workspace-manifest";
 import {
   applyChannelAccountDisplayNames,
@@ -608,6 +608,7 @@ async function loadMissionControlSnapshots({
       workspacePaths.map(async (workspacePath) => {
         const activeAgentIds = activeAgentIdsByWorkspacePath.get(workspacePath) ?? [];
         const manifest = await reconcileWorkspaceProjectManifestAgents(workspacePath, activeAgentIds);
+        await syncWorkspaceAgentsMarkdown(workspacePath);
         manifestByWorkspace.set(workspacePath, manifest);
         workspaceBootstrapProfileByWorkspace.set(
           workspacePath,
@@ -623,7 +624,7 @@ async function loadMissionControlSnapshots({
     const agentEntries = await Promise.all(
       workspaceBoundAgents.map(async (rawAgent) => {
         const configured = configByAgent.get(rawAgent.id);
-        const identityOverrides = await readAgentIdentityOverrides(rawAgent.agentDir);
+        const identityOverrides = null;
         const workspaceId = resolveWorkspaceId(rawAgent.workspace);
         const sessionList = recentSessionsByAgent.get(rawAgent.id) ?? [];
         const manifest =
@@ -634,13 +635,11 @@ async function loadMissionControlSnapshots({
         const profile = await readAgentBootstrapProfile(rawAgent.workspace, {
           agentId: rawAgent.id,
           agentName:
-            normalizeOptionalValue(identityOverrides.name) ||
             configured?.name ||
             rawAgent.name ||
             configured?.identity?.name ||
             rawAgent.identityName ||
             rawAgent.id,
-          agentDir: rawAgent.agentDir,
           configuredSkills: filterAgentPolicySkills(configured?.skills ?? []),
           configuredTools: uniqueStrings([
             ...(manifestAgent?.toolIds ?? []),

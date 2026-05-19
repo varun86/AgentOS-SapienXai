@@ -15,10 +15,11 @@ import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
 import {
   buildAgentPolicySkillId,
   buildWorkspaceAgentStatePath,
-  applyAgentIdentity,
+  removeLegacyAgentContextFiles,
   upsertAgentConfigEntry
 } from "@/lib/openclaw/domains/agent-config";
 import { buildAgentPolicyPromptLines, renderSkillMarkdown, writeTextFileEnsured, writeTextFileIfMissing } from "@/lib/openclaw/domains/workspace-bootstrap";
+import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import { readWorkspaceProjectManifest, uniqueByChatId } from "@/lib/openclaw/domains/workspace-manifest";
 import type {
   AgentPolicy,
@@ -178,7 +179,7 @@ export async function createBootstrappedWorkspaceAgent(params: {
     policy
   });
 
-  const configEntry = await upsertAgentConfigEntry(agentId, params.workspacePath, {
+  await upsertAgentConfigEntry(agentId, params.workspacePath, {
     agentDir,
     name: normalizeOptionalValue(params.agent.name) ?? undefined,
     model: modelId ?? undefined,
@@ -201,16 +202,8 @@ export async function createBootstrappedWorkspaceAgent(params: {
     }
   });
 
-  await applyAgentIdentity(
-    agentId,
-    params.workspacePath,
-    {
-      name: normalizeOptionalValue(params.agent.name) ?? configEntry.name,
-      emoji: normalizeOptionalValue(params.agent.emoji) ?? undefined,
-      theme: normalizeOptionalValue(params.agent.theme) ?? undefined
-    },
-    agentDir
-  );
+  await syncWorkspaceAgentsMarkdown(params.workspacePath);
+  await removeLegacyAgentContextFiles(agentId, params.workspacePath, agentDir);
 
   return agentId;
 }

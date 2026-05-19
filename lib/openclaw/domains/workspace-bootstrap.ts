@@ -21,6 +21,7 @@ import {
   buildWorkspaceAgentName,
   getWorkspaceTemplateMeta
 } from "@/lib/openclaw/workspace-presets";
+import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import type {
   AgentPolicy,
   PlannerContextSource,
@@ -657,6 +658,8 @@ export async function scaffoldWorkspaceContents(
   for (const document of scaffoldDocuments) {
     await writeTextFileIfMissing(path.join(workspacePath, document.path), document.content);
   }
+
+  await syncWorkspaceAgentsMarkdown(workspacePath);
 
   for (const agent of options.agents) {
     const skillId = normalizeOptionalValue(agent.skillId);

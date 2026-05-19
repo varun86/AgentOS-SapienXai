@@ -63,7 +63,14 @@ export async function submitMissionDispatch(
   const thinking = input.thinking ?? "medium";
   const workspaceSurfacePrompt = renderWorkspaceSurfaceCoordinationMarkdownForAgent(agentId, snapshot);
   const routedMission = outputPlan
-    ? composeMissionWithOutputRouting(mission, outputPlan, missionAgent?.policy, setupAgentId, workspaceSurfacePrompt)
+    ? composeMissionWithOutputRouting(
+        mission,
+        outputPlan,
+        missionAgent?.policy,
+        setupAgentId,
+        workspaceSurfacePrompt,
+        missionAgent ? { id: missionAgent.id, name: missionAgent.name } : null
+      )
     : mission;
   const readinessError = resolveMissionDispatchReadinessError(snapshot);
 

@@ -22,7 +22,7 @@ test("lists official OpenClaw workspace files and discovered safe context files"
   await mkdir(path.join(workspacePath, "memory"), { recursive: true });
   await mkdir(path.join(workspacePath, "docs"), { recursive: true });
   await mkdir(path.join(workspacePath, "skills", "reviewer"), { recursive: true });
-  await mkdir(path.join(workspacePath, ".openclaw", "agents", "builder", "agent"), { recursive: true });
+  await mkdir(path.join(workspacePath, ".openclaw"), { recursive: true });
 
   await writeFile(path.join(workspacePath, "AGENTS.md"), "# Agents\n");
   await writeFile(path.join(workspacePath, "memory", "2026-05-18.md"), "Daily memory\n");
@@ -31,8 +31,6 @@ test("lists official OpenClaw workspace files and discovered safe context files"
   await writeFile(path.join(workspacePath, ".openclaw", "project.json"), JSON.stringify({ name: "Lab" }));
   await writeFile(path.join(workspacePath, ".openclaw", "config.json"), JSON.stringify({ safeLooking: true }));
   await writeFile(path.join(workspacePath, ".openclaw", "token.json"), JSON.stringify({ token: "hidden" }));
-  await writeFile(path.join(workspacePath, ".openclaw", "agents", "builder", "agent", "POLICY.md"), "Policy\n");
-  await writeFile(path.join(workspacePath, ".openclaw", "agents", "builder", "agent", "config.json"), "{}");
 
   const files = await listWorkspaceManagedFilesForPath(workspacePath);
   const paths = files.map((file) => file.path);
@@ -50,7 +48,7 @@ test("lists official OpenClaw workspace files and discovered safe context files"
   assert.ok(paths.includes("docs/brief.md"));
   assert.ok(paths.includes("skills/reviewer/SKILL.md"));
   assert.ok(paths.includes(".openclaw/project.json"));
-  assert.ok(paths.includes(".openclaw/agents/builder/agent/POLICY.md"));
+  assert.equal(paths.includes(".openclaw/agents/builder/agent/POLICY.md"), false);
   assert.equal(paths.includes(".openclaw/config.json"), false);
   assert.equal(paths.includes(".openclaw/token.json"), false);
   assert.equal(paths.includes(".openclaw/agents/builder/agent/config.json"), false);
@@ -58,7 +56,6 @@ test("lists official OpenClaw workspace files and discovered safe context files"
   assert.equal(files.find((file) => file.path === "USER.md")?.exists, false);
   assert.equal(files.find((file) => file.path === "USER.md")?.createable, true);
   assert.equal(files.find((file) => file.path === ".openclaw/project.json")?.category, "project-config");
-  assert.equal(files.find((file) => file.path === ".openclaw/agents/builder/agent/POLICY.md")?.category, "agent-policy-config");
 });
 
 test("reads and writes safe workspace files while blocking traversal and invalid JSON", async () => {

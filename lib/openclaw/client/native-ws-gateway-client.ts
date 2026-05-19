@@ -3077,6 +3077,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     const chatParams = {
       sessionKey,
       sessionId: input.sessionId,
+      workspace: input.workspace ?? undefined,
       message: input.message,
       thinking: input.thinking,
       timeoutMs,
@@ -3095,6 +3096,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       "sessions.send",
       {
         key: sessionKey,
+        workspace: input.workspace ?? undefined,
         message: input.message,
         thinking: input.thinking,
         timeoutMs,

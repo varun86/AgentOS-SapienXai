@@ -1,4 +1,4 @@
-import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
+import { renderWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document";
 import type {
   AgentPolicy,
   PlannerContextSource,
@@ -614,46 +614,25 @@ function renderAgentsMarkdown({
   rules,
   agents = []
 }: WorkspaceScaffoldDocumentContext) {
-  const teamLines = agents.map(
-    (agent) =>
-      `- ${agent.role}: ${agent.name}${agent.skillId ? ` · skill ${agent.skillId}` : ""}${
-        agent.policy ? ` · ${formatAgentPresetLabel(agent.policy.preset)}` : ""
-      }`
-  );
+  return renderWorkspaceAgentsMarkdown({
+    name,
+    brief,
+    templateLabel: TEMPLATE_LABELS[template],
+    sourceMode,
+    workspaceOnly: rules.workspaceOnly,
+    workspaceSlug: slugify(name),
+    agents
+  });
+}
 
-  return `# ${name}
-
-Shared project context for all agents working in this workspace.
-
-## Workspace
-- Template: ${TEMPLATE_LABELS[template]}
-- Source mode: ${sourceMode}
-- Workspace-only access: ${rules.workspaceOnly ? "enabled" : "disabled"}
-
-## Team
-${teamLines.length > 0 ? teamLines.join("\n") : "- No agents configured yet."}
-
-## Customize
-${brief || "Clarify the project goal, definition of done, constraints, and success signals before large changes."}
-
-## Safety defaults
-- Stay inside the attached workspace unless the task explicitly requires another location.
-- Prefer direct, reviewable changes over speculative rewrites.
-- Preserve user work and avoid destructive actions without clear approval.
-- Update durable docs when stable architecture, workflow, or product decisions change.
-- Worker and browser agents should not install tooling unless their explicit policy allows it.
-- Route environment preparation to setup-oriented agents when the work depends on new tooling.
-
-## Daily memory
-- Capture durable facts in MEMORY.md and memory/*.md.
-- Record stable decisions in memory/decisions.md.
-- Keep temporary chatter and scratch notes in memory/.
-
-## Output
-- Be concise in chat and write longer output to files when the artifact matters.
-- Put task-specific deliverables, drafts, reports, and docs inside per-run folders under deliverables/.
-- Avoid writing final artifacts to the workspace root unless explicitly requested.
-`;
+function slugify(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
 }
 
 function renderSoulMarkdown(

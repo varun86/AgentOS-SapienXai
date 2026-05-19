@@ -251,6 +251,7 @@ export async function POST(
           const history = normalizeAgentChatHistory(input.history ?? []).slice(-16);
 
           message = buildAgentChatPrompt(history, operatorMessage, {
+            agentId,
             agentName: formatAgentDisplayName(agent),
             agentDir: agent.agentDir,
             workspacePath: agent.workspacePath,
@@ -272,6 +273,7 @@ export async function POST(
             message,
             thinking: input.thinking ?? "low",
             timeoutSeconds: 90,
+            workspace: agent.workspacePath,
             local: !snapshot.diagnostics.rpcOk
           },
           {},

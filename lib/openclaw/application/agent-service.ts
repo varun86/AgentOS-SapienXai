@@ -15,7 +15,6 @@ import {
   resolveHeartbeatDraft,
   serializeHeartbeatConfig
 } from "@/lib/openclaw/agent-heartbeat";
-import { parseAgentIdentityMarkdown } from "@/lib/openclaw/agent-bootstrap-files";
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   clearMissionControlRuntimeHistoryCache,
@@ -23,15 +22,14 @@ import {
   invalidateMissionControlSnapshotCache
 } from "@/lib/openclaw/application/mission-control-service";
 import {
-  applyAgentIdentity,
   buildAgentPolicySkillId,
   buildWorkspaceAgentStatePath,
   filterAgentPolicySkills,
   mapAgentHeartbeatToInput,
   normalizeDeclaredAgentTools,
   readAgentConfigList,
+  removeLegacyAgentContextFiles,
   upsertAgentConfigEntry,
-  writeAgentBootstrapFiles,
   writeAgentConfigList
 } from "@/lib/openclaw/domains/agent-config";
 import {
@@ -42,6 +40,7 @@ import {
   parseWorkspaceProjectManifestAgent,
   type WorkspaceProjectManifestAgent
 } from "@/lib/openclaw/domains/workspace-manifest";
+import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import { normalizeOptionalValue } from "@/lib/openclaw/domains/control-plane-normalization";
 import { writeTextFileEnsured } from "@/lib/openclaw/domains/workspace-bootstrap";
 import { workspaceIdFromPath, workspacePathMatchesId } from "@/lib/openclaw/domains/workspace-id";
@@ -87,23 +86,16 @@ export async function createAgent(input: AgentCreateInput) {
   const presetMeta = getAgentPresetMeta(policy.preset);
   const presetSkillIds = filterKnownOpenClawSkillIds(presetMeta.skillIds);
   const presetToolIds = filterKnownOpenClawToolIds(presetMeta.tools);
-  const bootstrapFiles = input.bootstrapFiles ?? [];
-  const bootstrapFileMap = new Map(bootstrapFiles.map((entry) => [entry.path, entry.content] as const));
-  const identityMarkdown = bootstrapFileMap.get("IDENTITY.md") ?? null;
-  const parsedIdentity = identityMarkdown ? parseAgentIdentityMarkdown(identityMarkdown) : null;
   const displayName =
-    normalizeOptionalValue(parsedIdentity?.name) ??
     normalizeOptionalValue(input.name) ??
     presetMeta.defaultName;
   const emoji =
-    normalizeOptionalValue(parsedIdentity?.emoji) ??
     normalizeOptionalValue(input.emoji) ??
     presetMeta.defaultEmoji;
   const theme =
-    normalizeOptionalValue(parsedIdentity?.theme) ??
     normalizeOptionalValue(input.theme) ??
     presetMeta.defaultTheme;
-  const avatar = normalizeOptionalValue(parsedIdentity?.avatar) ?? normalizeOptionalValue(input.avatar);
+  const avatar = normalizeOptionalValue(input.avatar);
   const heartbeat = serializeHeartbeatConfig(resolveHeartbeatDraft(policy.preset, input.heartbeat));
   const setupAgentId =
     snapshot.agents.find((entry) => entry.workspaceId === resolvedWorkspaceId && entry.policy.preset === "setup")?.id ?? null;
@@ -133,7 +125,7 @@ export async function createAgent(input: AgentCreateInput) {
     await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
-  const configEntry = await upsertAgentConfigEntry(
+  await upsertAgentConfigEntry(
     agentId,
     resolvedWorkspacePath,
     {
@@ -160,20 +152,6 @@ export async function createAgent(input: AgentCreateInput) {
     snapshot
   );
 
-  await applyAgentIdentity(agentId, resolvedWorkspacePath, {
-    name: displayName || configEntry.name,
-    emoji,
-    theme,
-    avatar,
-    content: identityMarkdown ?? undefined
-  }, agentDir);
-
-  const bootstrapFilesToWrite = bootstrapFiles.filter((entry) => entry.path !== "IDENTITY.md");
-
-  if (bootstrapFilesToWrite.length > 0) {
-    await writeAgentBootstrapFiles(agentId, resolvedWorkspacePath, bootstrapFilesToWrite, agentDir);
-  }
-
   await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,
     name: displayName,
@@ -188,6 +166,8 @@ export async function createAgent(input: AgentCreateInput) {
     policy,
     channelIds: input.channelIds ?? []
   });
+  await syncWorkspaceAgentsMarkdown(resolvedWorkspacePath);
+  await removeLegacyAgentContextFiles(agentId, resolvedWorkspacePath, agentDir);
 
   invalidateMissionControlSnapshotCache();
   await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
@@ -290,6 +270,12 @@ export async function updateAgent(input: AgentUpdateInput) {
       isPrimary: agent.isDefault,
       policy
     });
+    await syncWorkspaceAgentsMarkdown(resolvedWorkspacePath);
+    await removeLegacyAgentContextFiles(
+      agentId,
+      resolvedWorkspacePath,
+      agent.agentDir ?? buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId)
+    );
 
     invalidateMissionControlSnapshotCache();
 
@@ -360,13 +346,6 @@ export async function updateAgent(input: AgentUpdateInput) {
         : undefined
       : normalizeDeclaredAgentTools(input.tools);
 
-  await applyAgentIdentity(agentId, resolvedWorkspacePath, {
-    name: normalizeOptionalValue(input.name) ?? configEntry.name,
-    emoji: normalizeOptionalValue(input.emoji) ?? currentEmoji,
-    theme: normalizeOptionalValue(input.theme) ?? currentTheme,
-    avatar: normalizeOptionalValue(input.avatar)
-  }, agent.agentDir ?? buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId));
-
   await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,
     name: normalizeOptionalValue(input.name) ?? currentName ?? configEntry.name ?? agentId,
@@ -380,6 +359,12 @@ export async function updateAgent(input: AgentUpdateInput) {
     skillId: nextDeclaredSkills[0] ?? policySkillId,
     toolIds: nextDeclaredTools
   });
+  await syncWorkspaceAgentsMarkdown(resolvedWorkspacePath);
+  await removeLegacyAgentContextFiles(
+    agentId,
+    resolvedWorkspacePath,
+    agent.agentDir ?? buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId)
+  );
 
   invalidateMissionControlSnapshotCache();
   await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
@@ -427,6 +412,8 @@ export async function deleteAgent(input: AgentDeleteInput) {
 
   if (workspace) {
     await removeWorkspaceProjectAgentMetadata(workspace.path, agent.id);
+    await syncWorkspaceAgentsMarkdown(workspace.path);
+    await removeLegacyAgentContextFiles(agent.id, workspace.path, agent.agentDir);
 
     try {
       await rm(path.join(workspace.path, "skills", buildAgentPolicySkillId(agent.id)), {

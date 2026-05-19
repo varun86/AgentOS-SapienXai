@@ -83,6 +83,14 @@ test("workspace context survives create, dispatch, restart, and second-workspace
   assertAddAgentPayload(adapterState.addAgentInputs, first.builderAgentId, first.workspacePath, "openai/test");
   assertAgentConfig(adapterState.agentConfig, first.builderAgentId, first.workspacePath);
   assert.equal(adapterState.identityInputs.length, 0);
+  const agentsMarkdown = await readFile(path.join(first.workspacePath, "AGENTS.md"), "utf8");
+  assert.match(agentsMarkdown, /## Agent Roles/);
+  assert.match(agentsMarkdown, new RegExp(`Agent id: \`${first.builderAgentId}\``));
+  assert.match(agentsMarkdown, /Role: Implementation lead/);
+  await assert.rejects(
+    () => readFile(path.join(buildWorkspaceAgentStatePath(first.workspacePath, first.builderAgentId), "SOUL.md"), "utf8"),
+    /ENOENT/
+  );
 
   const dispatched = await submitMissionDispatch(
     {

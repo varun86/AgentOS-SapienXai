@@ -1,6 +1,5 @@
 import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
 import {
-  buildDirectAgentIdentityReply,
   isDirectAgentIdentityQuestion,
   isStaleAgentChatContextRecoveryText
 } from "@/lib/openclaw/agent-chat-guards";
@@ -14,6 +13,7 @@ export type AgentChatHistoryEntry = {
 };
 
 export type AgentChatPromptOptions = {
+  agentId: string;
   agentName: string;
   agentDir?: string;
   workspacePath?: string;
@@ -111,18 +111,20 @@ export function buildAgentChatPrompt(
   const instructions = [
     "You are chatting directly with the operator inside AgentOS. Reply conversationally, be concise, and ask a clarifying question when needed. Do not create tasks or mention task cards.",
     "Answer the operator's latest message directly. Do not turn ordinary chat, greetings, or identity questions into a request to recover task context.",
-    "For simple identity questions, answer from the current display name. You do not have a real age; if asked, say that briefly instead of searching memory or the workspace."
+    `Your current OpenClaw agent id is \`${options.agentId}\` and your current AgentOS display name is ${options.agentName}.`,
+    "Use the workspace root `AGENTS.md` file as the source of truth for agent-specific roles. Use the subsection whose agent id matches your current agent id as your own role/persona, and treat other agent subsections as teammates.",
+    "Use workspace root `SOUL.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `memory/*.md`, and `docs/*.md` as shared workspace/project context when they are present."
   ];
 
   if (options.agentDir) {
     instructions.push(
-      `Your agent-specific identity file is ${options.agentDir}/IDENTITY.md. If the operator renames you or asks about your identity file, use that path.`
+      `Agent-local markdown files under ${options.agentDir} are legacy AgentOS state and are not the runtime source of truth. Do not use them as your persona unless the operator explicitly asks you to inspect that path.`
     );
   }
 
   if (options.workspacePath) {
     instructions.push(
-      `Do not treat ${options.workspacePath}/IDENTITY.md as your personal identity file unless the operator explicitly asks for a workspace-wide identity change.`
+      `The active workspace root is ${options.workspacePath}. OpenClaw loads the official workspace context files from this root.`
     );
     instructions.push(
       `Do not update ${options.workspacePath}/MEMORY.md for a self-rename unless the operator explicitly asks to store that as workspace memory.`
@@ -138,7 +140,7 @@ export function buildAgentChatPrompt(
 
   if (options.agentDir) {
     instructions.push(
-      `If the operator asks which path would be updated, explain that AgentOS applies the rename centrally and then syncs ${options.agentDir}/IDENTITY.md.`
+      "If the operator asks which context path would be updated, explain that AgentOS updates the agent record and the matching role section in workspace root `AGENTS.md`."
     );
   }
 
@@ -156,10 +158,9 @@ export function buildAgentChatPrompt(
     );
   }
 
-  instructions.push(`Your current display name in AgentOS is ${options.agentName}.`);
   if (isIdentityQuestion) {
     instructions.push(
-      `The operator is asking a direct identity question. Answer with this substance: "${buildDirectAgentIdentityReply(options.agentName)}" Do not inspect files, memory, session metadata, or prior task context for this question.`
+      "The operator is asking a direct identity question. Answer as the current agent using your matching `AGENTS.md` role section and the shared workspace context. If those files do not contain enough detail, fall back to your current display name and say that no richer role context is available."
     );
   }
   instructions.push(

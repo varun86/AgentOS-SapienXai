@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
@@ -309,6 +309,21 @@ export async function writeAgentBootstrapFiles(
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, file.content, "utf8");
   }
+}
+
+export async function removeLegacyAgentContextFiles(
+  agentId: string,
+  workspacePath: string,
+  agentDir?: string
+) {
+  const resolvedAgentDir = normalizeOptionalValue(agentDir) ?? buildWorkspaceAgentStatePath(workspacePath, agentId);
+  const legacyFileNames = ["IDENTITY.md", "SOUL.md", "TOOLS.md", "HEARTBEAT.md"];
+
+  await Promise.all(
+    legacyFileNames.map((fileName) =>
+      rm(path.join(resolvedAgentDir, fileName), { force: true }).catch(() => undefined)
+    )
+  );
 }
 
 export async function readAgentIdentityOverrides(agentDir?: string) {

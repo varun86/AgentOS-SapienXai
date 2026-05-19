@@ -1,6 +1,5 @@
 import {
   buildWorkspaceBootstrapProfileCache,
-  readBootstrapProfileFile,
   type WorkspaceBootstrapProfileCache
 } from "@/lib/openclaw/adapter/workspace-inspector-adapter";
 import type {
@@ -31,28 +30,13 @@ export async function readAgentBootstrapProfile(
       options.template,
       options.rules
     ));
-  const profileFiles = workspaceBootstrapProfile.profileFiles;
   const contextManifest = workspaceBootstrapProfile.contextManifest;
   const sections = new Map(workspaceBootstrapProfile.workspaceSections);
   const sources = [...workspaceBootstrapProfile.workspaceSources];
-  const agentDir = normalizeOptionalValue(options.agentDir);
-
-  if (agentDir) {
-    const agentEntries = await Promise.all(
-      profileFiles.map((fileName) => readBootstrapProfileFile(agentDir, workspacePath, fileName))
-    );
-
-    for (const entry of agentEntries) {
-      if (!entry) {
-        continue;
-      }
-
-      sources.push(entry.source);
-      sections.set(entry.fileName, entry.lines);
-    }
-  }
+  const agentRoleSection = extractAgentRoleSection(sections.get("AGENTS.md"), options.agentId);
 
   const purpose =
+    extractInlineValue(agentRoleSection, "Role") ??
     extractPurpose(sections) ??
     inferPurposeFromConfig({
       agentId: options.agentId,
@@ -85,6 +69,7 @@ export async function readAgentBootstrapProfile(
   const responseStyle =
     uniqueStrings([
       ...extractInlineList(sections.get("IDENTITY.md"), "Vibe"),
+      ...extractAgentRoleTraits(agentRoleSection),
       ...extractBulletSection(sections.get("SOUL.md"), "My Quirks"),
       ...extractBulletSection(sections.get("SOUL.md"), "How I Operate")
     ]).slice(0, 6) || [];
@@ -272,6 +257,63 @@ function extractInlineList(lines: string[] | undefined, label: string) {
     .filter(Boolean);
 }
 
+function extractAgentRoleSection(lines: string[] | undefined, agentId: string) {
+  if (!lines) {
+    return [];
+  }
+
+  const normalizedAgentId = agentId.trim().toLowerCase();
+  const start = lines.findIndex((line) => {
+    if (!/^###\s+/.test(line)) {
+      return false;
+    }
+
+    return line.toLowerCase().includes(`\`${normalizedAgentId}\``);
+  });
+
+  if (start === -1) {
+    return [];
+  }
+
+  const collected: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (/^###\s+/.test(line)) {
+      break;
+    }
+
+    collected.push(line);
+  }
+
+  return collected;
+}
+
+function extractInlineValue(lines: string[] | undefined, label: string) {
+  if (!lines) {
+    return null;
+  }
+
+  const prefix = `- ${label}:`;
+  const entry = lines.find((line) => line.trim().toLowerCase().startsWith(prefix.toLowerCase()));
+
+  if (!entry) {
+    return null;
+  }
+
+  return cleanMarkdown(entry.slice(prefix.length));
+}
+
+function extractAgentRoleTraits(lines: string[] | undefined) {
+  const traits = [
+    extractInlineValue(lines, "Role"),
+    extractInlineValue(lines, "Preset"),
+    extractInlineValue(lines, "File access")
+  ];
+
+  return traits.filter((value): value is string => Boolean(value));
+}
+
 function normalizeHeading(line: string) {
   return line.replace(/^#+\s+/, "").trim().toLowerCase();
 }
@@ -281,10 +323,6 @@ function cleanMarkdown(value: string) {
     .replace(/[`*_>#-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function normalizeOptionalValue(value: string | null | undefined) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function uniqueStrings(values: string[]) {
