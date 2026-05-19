@@ -2858,12 +2858,16 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   addAgent(input: OpenClawAddAgentInput, options: OpenClawCommandOptions = {}) {
+    // OpenClaw Gateway agents.create currently rejects agentDir and derives state
+    // under the default agent store. AgentOS needs the explicit workspace-local
+    // agentDir, so creation must use the official CLI path until Gateway exposes it.
+    if (input.agentDir?.trim()) {
+      return this.fallback.addAgent(input, options);
+    }
+
     const params: Record<string, unknown> = {
-      id: input.id,
-      agentId: input.id,
       name: input.name?.trim() || input.id,
-      workspace: input.workspace,
-      agentDir: input.agentDir
+      workspace: input.workspace
     };
 
     if (input.model) {

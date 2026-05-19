@@ -11,6 +11,7 @@ import {
   type WebSocketFactory
 } from "@/lib/openclaw/client/native-ws-gateway-client";
 import type {
+  OpenClawAddAgentInput,
   OpenClawCommandOptions,
   OpenClawGatewayClient
 } from "@/lib/openclaw/client/gateway-client";
@@ -23,7 +24,7 @@ type SentFrame = {
 };
 
 class FallbackGatewayClient implements OpenClawGatewayClient {
-  calls: Array<{ method: string; params?: Record<string, unknown>; options?: OpenClawCommandOptions }> = [];
+  calls: Array<{ method: string; params?: unknown; options?: OpenClawCommandOptions }> = [];
   configCalls: string[] = [];
   config = new Map<string, unknown>();
   failConfigWithInvalidConfig = false;
@@ -261,8 +262,8 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
     return { stdout: "", stderr: "", code: 0 };
   }
 
-  async addAgent() {
-    this.calls.push({ method: "addAgent" });
+  async addAgent(input: OpenClawAddAgentInput) {
+    this.calls.push({ method: "addAgent", params: input });
     return { stdout: "", stderr: "", code: 0 };
   }
 
@@ -1999,10 +2000,10 @@ test("native WS gateway client does not CLI fallback after sent mutation timeout
   });
 
   await assert.rejects(
-    () => client.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" }),
-    /Timed out waiting for OpenClaw Gateway method "agents.create"/
+    () => client.deleteAgent("agent-1"),
+    /Timed out waiting for OpenClaw Gateway method "agents.delete"/
   );
-  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "agents.create"]);
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "agents.delete"]);
   assert.deepEqual(fallback.calls, []);
 });
 
@@ -2027,10 +2028,10 @@ test("native WS gateway client falls back for unadvertised mutation methods befo
     timeoutMs: 250
   });
 
-  await client.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" });
+  await client.deleteAgent("agent-1");
 
   assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect"]);
-  assert.deepEqual(fallback.calls.map((call) => call.method), ["addAgent"]);
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["deleteAgent"]);
 });
 
 test("native WS gateway client blocks CLI fallback for sent mutation auth failures", async () => {
@@ -2054,10 +2055,10 @@ test("native WS gateway client blocks CLI fallback for sent mutation auth failur
   });
 
   await assert.rejects(
-    () => client.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" }),
+    () => client.deleteAgent("agent-1"),
     /unauthorized/
   );
-  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "agents.create"]);
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "agents.delete"]);
   assert.deepEqual(fallback.calls, []);
 });
 
@@ -2159,7 +2160,7 @@ test("native WS gateway client classifies unknown Gateway methods as unsupported
   assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.kind, "unsupported");
 });
 
-test("native WS gateway client uses Gateway first for critical workflows", async () => {
+test("native WS gateway client uses Gateway first for critical workflows with compatible payloads", async () => {
   const fallback = new FallbackGatewayClient();
   const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
     globalThis.queueMicrotask(() => {
@@ -2185,16 +2186,13 @@ test("native WS gateway client uses Gateway first for critical workflows", async
 
   assert.deepEqual(sentFrames.map((frame) => frame.method), [
     "connect",
-    "agents.create",
     "agents.delete",
     "chat.send",
     "sessions.abort"
   ]);
-  assert.deepEqual(fallback.calls.map((call) => call.method), []);
-  assert.deepEqual(sentFrames.find((frame) => frame.method === "agents.create")?.params, {
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["addAgent"]);
+  assert.deepEqual(fallback.calls.find((call) => call.method === "addAgent")?.params, {
     id: "agent-1",
-    agentId: "agent-1",
-    name: "agent-1",
     workspace: "/workspace",
     agentDir: "/agent"
   });
@@ -2202,7 +2200,7 @@ test("native WS gateway client uses Gateway first for critical workflows", async
   assert.equal(sentFrames.find((frame) => frame.method === "sessions.abort")?.params.runId, "run-1");
 });
 
-test("native WS gateway client falls back before agents.create when method is not advertised", async () => {
+test("native WS gateway client uses CLI agent creation to preserve explicit agentDir", async () => {
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();
   const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
@@ -2231,10 +2229,14 @@ test("native WS gateway client falls back before agents.create when method is no
 
   await client.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" });
 
-  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect"]);
+  assert.deepEqual(sentFrames.map((frame) => frame.method), []);
   assert.deepEqual(fallback.calls.map((call) => call.method), ["addAgent"]);
-  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.operation, "agents.create");
-  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.kind, "unsupported");
+  assert.deepEqual(fallback.calls[0]?.params, {
+    id: "agent-1",
+    workspace: "/workspace",
+    agentDir: "/agent"
+  });
+  assert.deepEqual(getRecentOpenClawGatewayFallbackDiagnostics(), []);
 });
 
 test("native WS gateway client uses agents.update when supported", async () => {
