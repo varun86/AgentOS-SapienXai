@@ -1148,6 +1148,50 @@ function buildSessionReferenceParams(input: OpenClawSessionReferenceInput = {}) 
   };
 }
 
+function buildSessionHistoryParams(input: OpenClawSessionHistoryInput = {}) {
+  return {
+    ...buildSessionReferenceParams(input),
+    limit: input.limit,
+    cursor: input.cursor ?? undefined
+  };
+}
+
+function buildSessionPreviewParams(input: OpenClawSessionHistoryInput = {}) {
+  const reference = buildSessionReferenceParams(input);
+  const key = reference.key;
+  return {
+    ...reference,
+    sessionKey: key,
+    sessionKeys: key ? [key] : undefined,
+    limit: input.limit,
+    cursor: input.cursor ?? undefined
+  };
+}
+
+function buildSessionExportPayload(
+  input: OpenClawSessionExportInput,
+  payload: Record<string, unknown>
+): OpenClawSessionExportPayload {
+  if (typeof payload.content === "string") {
+    return {
+      ...payload,
+      format: input.format ?? (typeof payload.format === "string" ? payload.format : "json")
+    };
+  }
+
+  const format = input.format ?? "json";
+  return {
+    ...payload,
+    format,
+    session: payload.session ?? payload,
+    content: format === "json" ? JSON.stringify(payload) : undefined
+  };
+}
+
+function summarizeSnapshotError(reason: unknown) {
+  return reason instanceof Error ? reason.message : String(reason || "Unknown OpenClaw Gateway snapshot error.");
+}
+
 function buildSessionSteerParams(input: OpenClawSessionSteerInput) {
   const key = input.key?.trim();
   const sessionId = input.sessionId?.trim();
@@ -1497,6 +1541,34 @@ function readGatewayMessageText(value: unknown): string | null {
     return value.trim();
   }
 
+  if (Array.isArray(value)) {
+    const text = value
+      .flatMap((item) => {
+        if (!isObjectRecord(item)) {
+          return [];
+        }
+
+        if (
+          (item.type === "text" || item.type === "output_text") &&
+          typeof item.text === "string" &&
+          item.text.trim()
+        ) {
+          return [item.text.trim()];
+        }
+
+        if (item.type === "toolResult") {
+          const toolResultText = readGatewayMessageText(item.content) ?? readNonEmptyString(item.text);
+          return toolResultText ? [toolResultText] : [];
+        }
+
+        return [];
+      })
+      .join("\n\n")
+      .trim();
+
+    return text || null;
+  }
+
   if (!isObjectRecord(value)) {
     return null;
   }
@@ -1504,6 +1576,7 @@ function readGatewayMessageText(value: unknown): string | null {
   return (
     readNonEmptyString(value.text) ??
     readNonEmptyString(value.content) ??
+    readGatewayMessageText(value.content) ??
     readNonEmptyString(value.summary) ??
     readNonEmptyString(value.message)
   );
@@ -2585,30 +2658,11 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   getSessionHistory(input: OpenClawSessionHistoryInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.gatewayFirst<OpenClawSessionHistoryPayload>(
-      "sessions.history",
-      {
-        ...buildSessionReferenceParams(input),
-        limit: input.limit,
-        cursor: input.cursor ?? undefined
-      },
-      options,
-      (payload) => parseObjectGatewayPayload<OpenClawSessionHistoryPayload>("sessions.history", payload),
-      () => this.fallback.getSessionHistory(input, options)
-    );
+    return this.gatewayFirstSessionHistory(input, options);
   }
 
   exportSession(input: OpenClawSessionExportInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.gatewayFirst<OpenClawSessionExportPayload>(
-      "sessions.export",
-      {
-        ...buildSessionReferenceParams(input),
-        format: input.format
-      },
-      options,
-      (payload) => parseObjectGatewayPayload<OpenClawSessionExportPayload>("sessions.export", payload),
-      () => this.fallback.exportSession(input, options)
-    );
+    return this.gatewayFirstSessionExport(input, options);
   }
 
   listTasks(input: OpenClawTaskListInput = {}, options: OpenClawCommandOptions = {}) {
@@ -2632,6 +2686,11 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   assignTask(input: OpenClawTaskAssignInput, options: OpenClawCommandOptions = {}) {
+    const policy = {
+      ...resolveGatewayRequestPolicy("tasks.assign", options),
+      allowCliFallback: false,
+      allowMutationFallbackOnUnsupported: false
+    };
     return this.gatewayFirst<OpenClawTaskPayload>(
       "tasks.assign",
       {
@@ -2640,7 +2699,8 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       },
       options,
       (payload) => parseObjectGatewayPayload<OpenClawTaskPayload>("tasks.assign", payload),
-      () => this.fallback.assignTask(input, options)
+      () => this.fallback.assignTask(input, options),
+      policy
     );
   }
 
@@ -2678,16 +2738,27 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   putArtifact(input: OpenClawArtifactPutInput, options: OpenClawCommandOptions = {}) {
+    const policy = {
+      ...resolveGatewayRequestPolicy("artifacts.put", options),
+      allowCliFallback: false,
+      allowMutationFallbackOnUnsupported: false
+    };
     return this.gatewayFirst<OpenClawArtifactPayload>(
       "artifacts.put",
       { ...input },
       options,
       (payload) => parseObjectGatewayPayload<OpenClawArtifactPayload>("artifacts.put", payload),
-      () => this.fallback.putArtifact(input, options)
+      () => this.fallback.putArtifact(input, options),
+      policy
     );
   }
 
   deleteArtifact(input: OpenClawArtifactDeleteInput, options: OpenClawCommandOptions = {}) {
+    const policy = {
+      ...resolveGatewayRequestPolicy("artifacts.delete", options),
+      allowCliFallback: false,
+      allowMutationFallbackOnUnsupported: false
+    };
     return this.gatewayFirst<OpenClawArtifactPayload>(
       "artifacts.delete",
       {
@@ -2696,18 +2767,56 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       },
       options,
       (payload) => parseObjectGatewayPayload<OpenClawArtifactPayload>("artifacts.delete", payload),
-      () => this.fallback.deleteArtifact(input, options)
+      () => this.fallback.deleteArtifact(input, options),
+      policy
     );
   }
 
-  getRuntimeSnapshot(input: OpenClawRuntimeSnapshotInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.gatewayFirst<OpenClawRuntimeSnapshotPayload>(
-      "runtime.snapshot",
-      { ...input },
-      options,
-      (payload) => parseObjectGatewayPayload<OpenClawRuntimeSnapshotPayload>("runtime.snapshot", payload),
-      () => this.fallback.getRuntimeSnapshot(input, options)
+  async getRuntimeSnapshot(input: OpenClawRuntimeSnapshotInput = {}, options: OpenClawCommandOptions = {}) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.getRuntimeSnapshot(input, options);
+    }
+
+    const includeSessions = input.includeSessions !== false;
+    const includeTasks = input.includeTasks !== false;
+    const includeArtifacts = input.includeArtifacts !== false;
+    const results = await Promise.allSettled([
+      includeSessions
+        ? this.listSessions({ limit: input.limit, agentId: input.agentId }, options)
+        : Promise.resolve(null),
+      includeTasks
+        ? this.listTasks({ limit: input.limit, agentId: input.agentId, workspace: input.workspace }, options)
+        : Promise.resolve(null),
+      includeArtifacts
+        ? this.listArtifacts({ limit: input.limit, agentId: input.agentId, workspace: input.workspace }, options)
+        : Promise.resolve(null)
+    ]);
+    const requestedResults = results.filter((result, index) =>
+      [includeSessions, includeTasks, includeArtifacts][index]
     );
+    const rejected = requestedResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+
+    if (requestedResults.length > 0 && rejected.length === requestedResults.length) {
+      throw rejected[0]?.reason ?? new Error("OpenClaw Gateway runtime snapshot failed.");
+    }
+
+    const [sessionsResult, tasksResult, artifactsResult] = results;
+    const payload: OpenClawRuntimeSnapshotPayload = {
+      sessions: sessionsResult.status === "fulfilled" ? sessionsResult.value?.sessions ?? [] : [],
+      tasks: tasksResult.status === "fulfilled" ? tasksResult.value?.tasks ?? [] : [],
+      artifacts: artifactsResult.status === "fulfilled" ? artifactsResult.value?.artifacts ?? [] : []
+    };
+
+    if (rejected.length > 0) {
+      payload.metadata = {
+        runtimeSnapshot: {
+          partial: true,
+          errors: rejected.map((result) => summarizeSnapshotError(result.reason))
+        }
+      };
+    }
+
+    return payload;
   }
 
   getToolsCatalog(input: OpenClawToolsCatalogInput = {}, options: OpenClawCommandOptions = {}) {
@@ -3477,6 +3586,113 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   ): Promise<OpenClawGatewayEventSubscription> {
     const timeoutMs = resolveNativeTimeoutMs(options.timeoutMs ?? this.options.timeoutMs, "sessions.subscribe");
     return this.connection.subscribe(params, callbacks, options, timeoutMs);
+  }
+
+  private async gatewayFirstSessionHistory(
+    input: OpenClawSessionHistoryInput,
+    options: OpenClawCommandOptions
+  ) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.getSessionHistory(input, options);
+    }
+
+    const candidates = [
+      ["chat.history", buildSessionHistoryParams(input)] as const,
+      ["sessions.preview", buildSessionPreviewParams(input)] as const,
+      ["sessions.history", buildSessionHistoryParams(input)] as const
+    ];
+    let lastUnsupportedError: unknown = null;
+
+    for (const [method, params] of candidates) {
+      const policy = resolveGatewayRequestPolicy(method, options);
+
+      try {
+        const payload = parseObjectGatewayPayload<OpenClawSessionHistoryPayload>(
+          method,
+          await this.callNative<unknown>(method, params, options, policy)
+        );
+        for (const [candidate] of candidates) {
+          clearGatewayFallbackDiagnostic(candidate);
+        }
+        return payload;
+      } catch (error) {
+        this.options.onNativeFailure?.(error, method);
+        if (isGatewayMethodUnsupported(error)) {
+          lastUnsupportedError = error;
+          continue;
+        }
+
+        if (!shouldUseCliFallback(error, method, policy)) {
+          throw error;
+        }
+
+        this.recordGatewayFallback(method, error);
+        return this.fallback.getSessionHistory(input, options);
+      }
+    }
+
+    this.recordGatewayFallback(
+      "chat.history",
+      lastUnsupportedError ?? new NativeGatewayError(
+        "OpenClaw Gateway does not advertise a compatible session history method.",
+        { kind: "unsupported" }
+      )
+    );
+    return this.fallback.getSessionHistory(input, options);
+  }
+
+  private async gatewayFirstSessionExport(
+    input: OpenClawSessionExportInput,
+    options: OpenClawCommandOptions
+  ) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.exportSession(input, options);
+    }
+
+    const params = buildSessionReferenceParams(input);
+    const candidates = [
+      ["sessions.get", params] as const,
+      ["sessions.describe", params] as const,
+      ["sessions.export", { ...params, format: input.format }] as const
+    ];
+    let lastUnsupportedError: unknown = null;
+
+    for (const [method, candidateParams] of candidates) {
+      const policy = resolveGatewayRequestPolicy(method, options);
+
+      try {
+        const payload = parseObjectGatewayPayload<Record<string, unknown>>(
+          method,
+          await this.callNative<unknown>(method, candidateParams, options, policy)
+        );
+        for (const [candidate] of candidates) {
+          clearGatewayFallbackDiagnostic(candidate);
+        }
+        return buildSessionExportPayload(input, payload);
+      } catch (error) {
+        this.options.onNativeFailure?.(error, method);
+        if (isGatewayMethodUnsupported(error)) {
+          lastUnsupportedError = error;
+          continue;
+        }
+
+        if (!shouldUseCliFallback(error, method, policy)) {
+          throw error;
+        }
+
+        this.recordGatewayFallback(method, error);
+        return this.fallback.exportSession(input, options);
+      }
+    }
+
+    this.recordGatewayFallback(
+      "sessions.get",
+      lastUnsupportedError ?? new NativeGatewayError(
+        "OpenClaw Gateway does not advertise a compatible session export method.",
+        { kind: "unsupported" }
+      )
+    );
+    return this.fallback.exportSession(input, options);
   }
 
   private async gatewayFirst<TPayload>(

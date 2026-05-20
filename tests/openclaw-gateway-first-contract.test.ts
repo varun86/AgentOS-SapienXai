@@ -137,13 +137,15 @@ test("capability matrix tracks Phase 2 Gateway-native runtime surfaces", async (
     protocolVersion: 4,
     methods: [
       "sessions.describe",
-      "sessions.history",
-      "sessions.export",
+      "sessions.get",
+      "sessions.list",
+      "chat.history",
+      "tasks.list",
       "tasks.get",
       "tasks.subscribe",
       "artifacts.list",
       "artifacts.get",
-      "runtime.snapshot",
+      "artifacts.download",
       "tools.catalog",
       "tools.effective"
     ],
@@ -159,7 +161,7 @@ test("capability matrix tracks Phase 2 Gateway-native runtime surfaces", async (
   assert.equal(matrix.operations?.tools.mode, "gateway-native");
   assert.equal(matrix.eventBridge, "supported");
   assert.ok(!matrix.unsupportedGatewayMethods.includes("tasks.subscribe"));
-  assert.ok(!matrix.unsupportedGatewayMethods.includes("runtime.snapshot"));
+  assert.ok(!matrix.unsupportedGatewayMethods.includes("sessions.list"));
 });
 
 test("mission dispatch uses native chat when capability matrix supports it", async () => {

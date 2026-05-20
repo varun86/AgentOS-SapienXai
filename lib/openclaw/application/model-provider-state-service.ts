@@ -224,6 +224,55 @@ export async function addOpenClawModelsToConfig(provider: AddModelsProviderId, m
   await writeJsonFile(openClawConfigPath, config);
 }
 
+export async function setOpenClawDefaultModel(
+  modelId: string,
+  options: { provider?: AddModelsProviderId | null } = {}
+) {
+  const requestedModelId = modelId.trim();
+  const provider = options.provider ?? resolveProviderFromModelId(requestedModelId);
+  const normalizedModelId = provider ? normalizeModelIdForProvider(provider, requestedModelId) : requestedModelId;
+
+  try {
+    await setDefaultModelViaGateway(provider, normalizedModelId);
+    return {
+      modelId: normalizedModelId,
+      provider,
+      via: "gateway" as const
+    };
+  } catch (error) {
+    if (!isLegacyProviderFileFallbackEnabled()) {
+      throw new Error(
+        `OpenClaw Gateway config update failed while setting the default model. Legacy file fallback is disabled; set ${legacyProviderFileFallbackEnv}=1 only for explicit recovery. ${readErrorMessage(error)}`
+      );
+    }
+  }
+
+  const config = await readJsonFile<OpenClawConfigPayload>(openClawConfigPath, {});
+
+  config.meta = {
+    ...config.meta,
+    lastTouchedAt: new Date().toISOString()
+  };
+  config.agents = config.agents || {};
+  config.agents.defaults = config.agents.defaults || {};
+  config.agents.defaults.models = config.agents.defaults.models || {};
+  config.agents.defaults.models[normalizedModelId] =
+    config.agents.defaults.models[normalizedModelId] || {};
+  config.agents.defaults.model = {
+    ...(config.agents.defaults.model || {}),
+    primary: normalizedModelId
+  };
+  applyDefaultModelRuntime(config, provider);
+
+  await writeJsonFile(openClawConfigPath, config);
+
+  return {
+    modelId: normalizedModelId,
+    provider,
+    via: "legacy-file" as const
+  };
+}
+
 async function addModelsToConfigViaGateway(provider: AddModelsProviderId, normalizedModelIds: string[]) {
   let lastError: unknown = null;
 
@@ -274,6 +323,60 @@ async function addModelsToConfigViaGatewayOnce(provider: AddModelsProviderId, no
   }
 }
 
+async function setDefaultModelViaGateway(
+  provider: AddModelsProviderId | null,
+  normalizedModelId: string
+) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= gatewayConfigPatchRetryDelaysMs.length; attempt += 1) {
+    try {
+      await setDefaultModelViaGatewayOnce(provider, normalizedModelId);
+      return;
+    } catch (error) {
+      lastError = error;
+
+      if (attempt >= gatewayConfigPatchRetryDelaysMs.length || !isRetryableGatewayConfigPatchError(error)) {
+        throw error;
+      }
+
+      await delay(gatewayConfigPatchRetryDelaysMs[attempt] ?? 0);
+    }
+  }
+
+  throw lastError;
+}
+
+async function setDefaultModelViaGatewayOnce(
+  provider: AddModelsProviderId | null,
+  normalizedModelId: string
+) {
+  const adapter = getOpenClawAdapter();
+  const existingModels = await adapter.getConfig<Record<string, unknown>>(
+    "agents.defaults.models",
+    { timeoutMs: 5_000 }
+  );
+  const nextModels = isRecord(existingModels) ? { ...existingModels } : {};
+  nextModels[normalizedModelId] = isRecord(nextModels[normalizedModelId])
+    ? nextModels[normalizedModelId]
+    : {};
+
+  await adapter.setConfig("agents.defaults.models", nextModels, { timeoutMs: 5_000 });
+  await adapter.setConfig("agents.defaults.model.primary", normalizedModelId, { timeoutMs: 5_000 });
+  await setGatewayDefaultModelRuntime(provider);
+}
+
+async function setGatewayDefaultModelRuntime(provider: AddModelsProviderId | null) {
+  const adapter = getOpenClawAdapter();
+
+  if (provider === "openai-codex") {
+    await adapter.setConfig("agents.defaults.agentRuntime.id", "codex", { timeoutMs: 5_000 });
+    await adapter.setConfig("plugins.entries.codex.enabled", true, { timeoutMs: 5_000 });
+  } else if (provider === "openai") {
+    await adapter.setConfig("agents.defaults.agentRuntime.id", "pi", { timeoutMs: 5_000 });
+  }
+}
+
 function isRetryableGatewayConfigPatchError(error: unknown) {
   const message = readErrorMessage(error);
 
@@ -286,6 +389,30 @@ function normalizeModelIdForProvider(provider: AddModelsProviderId, modelId: str
   }
 
   return modelId;
+}
+
+function resolveProviderFromModelId(modelId: string): AddModelsProviderId | null {
+  const modelProvider = modelId.split("/", 1)[0] || null;
+  return isAddModelsProviderId(modelProvider) ? modelProvider : null;
+}
+
+function applyDefaultModelRuntime(config: OpenClawConfigPayload, provider: AddModelsProviderId | null) {
+  if (provider === "openai-codex") {
+    enableCodexHarness(config);
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.agentRuntime = {
+      ...(config.agents.defaults.agentRuntime || {}),
+      id: "codex"
+    };
+  } else if (provider === "openai") {
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.agentRuntime = {
+      ...(config.agents.defaults.agentRuntime || {}),
+      id: "pi"
+    };
+  }
 }
 
 function enableCodexHarness(config: OpenClawConfigPayload) {

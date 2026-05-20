@@ -12,13 +12,16 @@ import {
   ensureOpenClawRuntimeSmokeTest,
   getMissionControlSnapshot
 } from "@/lib/agentos/control-plane";
+import { setOpenClawDefaultModel } from "@/lib/openclaw/application/model-provider-state-service";
 import { resolveRequiredLoginProvider } from "@/lib/openclaw/model-onboarding";
+import { isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
   OpenClawModelOnboardingStreamEvent
 } from "@/lib/agentos/contracts";
+import type { AddModelsProviderId } from "@/lib/openclaw/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -345,6 +348,32 @@ export async function POST(request: Request) {
           phase: "configuring-default",
           message: `Setting ${modelId} as the default model...`
         });
+        try {
+          const result = await setOpenClawDefaultModel(modelId, {
+            provider: resolveSetDefaultProvider(snapshot, modelId)
+          });
+          aggregatedStdout = appendLine(
+            aggregatedStdout,
+            result.modelId === modelId
+              ? `Default model saved via OpenClaw Gateway config: ${result.modelId}.`
+              : `Default model saved via OpenClaw Gateway config: ${result.modelId} (${modelId}).`
+          );
+          return true;
+        } catch (error) {
+          const gatewayError = `OpenClaw Gateway config update did not complete: ${readErrorMessage(error)}`;
+          aggregatedStderr = appendLine(aggregatedStderr, gatewayError);
+          await send({
+            type: "log",
+            stream: "stderr",
+            text: `${gatewayError}\n`
+          });
+          await send({
+            type: "status",
+            phase: "configuring-default",
+            message: "Gateway config update did not complete. Trying OpenClaw CLI fallback..."
+          });
+        }
+
         const result = await runCommand(openClawBin, ["models", "set", modelId], send);
         appendOutput(result);
 
@@ -628,6 +657,48 @@ function buildModelManualCommand(
   return formatOpenClawCommand(commandBin || "openclaw", ["models", "status", "--json"]);
 }
 
+function resolveSetDefaultProvider(
+  snapshot: MissionControlSnapshot,
+  modelId: string
+): AddModelsProviderId | null {
+  const normalizedModelId = modelId.trim();
+  const snapshotProvider = snapshot.models.find(
+    (model) => model.id === normalizedModelId && isAddModelsProviderId(model.provider)
+  )?.provider;
+
+  if (isAddModelsProviderId(snapshotProvider)) {
+    if (snapshotProvider === "openai" && shouldTreatOpenAiModelAsCodex(snapshot)) {
+      return "openai-codex";
+    }
+
+    return snapshotProvider;
+  }
+
+  const modelProvider = normalizedModelId.split("/", 1)[0] || null;
+
+  if (modelProvider === "openai" && shouldTreatOpenAiModelAsCodex(snapshot)) {
+    return "openai-codex";
+  }
+
+  return isAddModelsProviderId(modelProvider) ? modelProvider : null;
+}
+
+function shouldTreatOpenAiModelAsCodex(snapshot: MissionControlSnapshot) {
+  const providers = snapshot.diagnostics.modelReadiness.authProviders;
+  const codexProvider = providers.find((provider) => provider.provider === "openai-codex");
+  const openAiProvider = providers.find((provider) => provider.provider === "openai");
+
+  if (codexProvider?.connected) {
+    return true;
+  }
+
+  if (snapshot.diagnostics.modelReadiness.preferredLoginProvider === "openai-codex") {
+    return true;
+  }
+
+  return Boolean(codexProvider?.canLogin && !openAiProvider?.connected);
+}
+
 function resolveVerificationFailure(
   snapshot: MissionControlSnapshot,
   preferredModelId?: string | null,
@@ -739,6 +810,14 @@ function normalizeOpenClawAuthProvider(provider: string) {
   }
 
   return normalized;
+}
+
+function appendLine(current: string, line: string) {
+  return current ? `${current}\n${line}` : line;
+}
+
+function readErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error || "Unknown Gateway error.");
 }
 
 function resolveDiscoveredModels(stdout: string, snapshot: MissionControlSnapshot) {

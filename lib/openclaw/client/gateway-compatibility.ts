@@ -60,7 +60,7 @@ export const OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS: OpenClawGatewayCompatibi
   },
   { id: "chatControl", label: "Chat control", methods: ["chat.abort", "chat.inject"] },
   { id: "agentWait", label: "Agent wait", methods: ["agent.wait"] },
-  { id: "sessionHistory", label: "Session history", methods: ["sessions.describe", "sessions.history", "sessions.export"] },
+  { id: "sessionHistory", label: "Session history", methods: ["chat.history", "sessions.preview", "sessions.get", "sessions.describe"] },
   {
     id: "taskEvents",
     label: "Task events",
@@ -71,10 +71,10 @@ export const OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS: OpenClawGatewayCompatibi
   {
     id: "artifacts",
     label: "Artifact sync",
-    methods: ["artifacts.list", "artifacts.get", "artifacts.put", "artifacts.delete"],
+    methods: ["artifacts.list", "artifacts.get", "artifacts.download"],
     events: ["artifact", "artifact.updated"]
   },
-  { id: "runtimeSnapshot", label: "Runtime snapshot", methods: ["runtime.snapshot"] },
+  { id: "runtimeSnapshot", label: "Runtime snapshot", methods: ["sessions.list", "tasks.list", "artifacts.list"] },
   { id: "tools", label: "Tool catalog", methods: ["tools.catalog", "tools.effective", "tools.invoke"] },
   {
     id: "execApprovals",
@@ -113,6 +113,7 @@ const additionalGatewayFirstMethods = [
   "sessions.patch",
   "sessions.steer",
   "sessions.preview",
+  "sessions.get",
   "sessions.resolve",
   "sessions.abort",
   "chat.history",

@@ -6,6 +6,9 @@ import path from "node:path";
 
 const recordPath = process.argv[2];
 const heartbeatIntervalMs = 15_000;
+const defaultAgentTimeoutSeconds = 45;
+const agentTimeoutGraceMs = 15_000;
+const agentForceKillGraceMs = 2_000;
 const runnerDiagnosticJsonKeys = new Set([
   "cause",
   "code",
@@ -31,6 +34,7 @@ async function main() {
   }
 
   const openClawBin = process.env.OPENCLAW_BIN || "openclaw";
+  const timeoutSeconds = resolveAgentTimeoutSeconds(record);
   const startedAt = new Date().toISOString();
   const sessionId = typeof record.sessionId === "string" && record.sessionId.trim() ? record.sessionId.trim() : null;
   const runnerLogPath = resolveRunnerLogPath(record);
@@ -48,7 +52,8 @@ async function main() {
       pid: process.pid,
       startedAt,
       lastHeartbeatAt: startedAt,
-      logPath: runnerLogPath
+      logPath: runnerLogPath,
+      timeoutSeconds
     }
   }));
   await enqueueRunnerStatus(
@@ -68,6 +73,8 @@ async function main() {
       record.routedMission,
       "--thinking",
       typeof record.thinking === "string" ? record.thinking : "medium",
+      "--timeout",
+      String(timeoutSeconds),
       "--json"
     ],
     {
@@ -80,7 +87,10 @@ async function main() {
   let stdout = "";
   let stderr = "";
   let settled = false;
+  let timedOut = false;
+  let childClosed = false;
   let heartbeat = null;
+  let watchdog = null;
 
   await mutateRecord((latest) => ({
     ...latest,
@@ -90,7 +100,8 @@ async function main() {
       childPid: child.pid ?? latest.runner?.childPid ?? null,
       startedAt: latest.runner?.startedAt || startedAt,
       lastHeartbeatAt: startedAt,
-      logPath: latest.runner?.logPath || runnerLogPath
+      logPath: latest.runner?.logPath || runnerLogPath,
+      timeoutSeconds
     }
   }));
   await enqueueRunnerStatus(
@@ -113,6 +124,9 @@ async function main() {
   heartbeat = setInterval(() => {
     void tickHeartbeat();
   }, heartbeatIntervalMs);
+  watchdog = setTimeout(() => {
+    void timeoutOpenClawAgentProcess();
+  }, timeoutSeconds * 1000 + agentTimeoutGraceMs);
 
   child.stdout.on("data", (chunk) => {
     const text = chunk.toString();
@@ -136,7 +150,12 @@ async function main() {
   });
 
   child.on("close", (code) => {
+    childClosed = true;
     void (async () => {
+      if (timedOut) {
+        return;
+      }
+
       await flushBufferedRunnerOutput();
       const current = await readRecord();
 
@@ -213,6 +232,7 @@ async function main() {
 
     settled = true;
     clearInterval(heartbeat);
+    clearTimeout(watchdog);
     await flushBufferedRunnerOutput();
     const finishedAt = new Date().toISOString();
 
@@ -234,6 +254,69 @@ async function main() {
 
     await logWriteQueue;
     process.exit(0);
+  }
+
+  async function timeoutOpenClawAgentProcess() {
+    if (settled) {
+      return;
+    }
+
+    timedOut = true;
+    await enqueueRunnerStatus(`OpenClaw agent process exceeded ${timeoutSeconds}s timeout. Terminating fallback process.`);
+    await stopChildProcessForTimeout();
+    void finalize({
+      status: "stalled",
+      result: tryParseMissionPayload(stdout || stderr),
+      error: `OpenClaw mission timed out after ${timeoutSeconds} seconds.`
+    });
+  }
+
+  async function stopChildProcessForTimeout() {
+    if (childClosed) {
+      return;
+    }
+
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+
+    if (await waitForChildClose(agentForceKillGraceMs)) {
+      return;
+    }
+
+    try {
+      child.kill("SIGKILL");
+    } catch {}
+
+    await waitForChildClose(500);
+  }
+
+  async function waitForChildClose(timeoutMs) {
+    if (childClosed) {
+      return true;
+    }
+
+    return await new Promise((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        child.off("close", onClose);
+        resolve(false);
+      }, timeoutMs);
+      const onClose = () => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        clearTimeout(timer);
+        childClosed = true;
+        resolve(true);
+      };
+      child.once("close", onClose);
+    });
   }
 
   function enqueueRunnerStatus(text) {
@@ -339,6 +422,24 @@ async function appendRunnerLogEntry(targetPath, entry) {
 function resolveRunnerLogPath(record) {
   const existingPath = record?.runner?.logPath;
   return typeof existingPath === "string" && existingPath.trim() ? existingPath.trim() : `${recordPath}.log.jsonl`;
+}
+
+function resolveAgentTimeoutSeconds(record) {
+  const candidates = [
+    record?.timeoutSeconds,
+    record?.runner?.timeoutSeconds,
+    process.env.OPENCLAW_AGENT_TIMEOUT_SECONDS,
+    process.env.AGENTOS_OPENCLAW_AGENT_TIMEOUT_SECONDS
+  ];
+
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) {
+      return Math.min(3600, Math.max(1, Math.floor(value)));
+    }
+  }
+
+  return defaultAgentTimeoutSeconds;
 }
 
 function normalizeRunnerLogText(value) {

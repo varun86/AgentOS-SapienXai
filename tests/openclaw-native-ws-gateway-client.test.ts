@@ -2740,17 +2740,15 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
               features: {
                 methods: [
                   "sessions.describe",
-                  "sessions.history",
-                  "sessions.export",
+                  "sessions.get",
+                  "sessions.list",
+                  "chat.history",
                   "tasks.list",
                   "tasks.get",
-                  "tasks.assign",
                   "tasks.cancel",
                   "artifacts.list",
                   "artifacts.get",
-                  "artifacts.put",
-                  "artifacts.delete",
-                  "runtime.snapshot",
+                  "artifacts.download",
                   "tools.catalog",
                   "tools.effective",
                   "tools.invoke"
@@ -2759,18 +2757,18 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
             }
           : frame.method === "sessions.describe"
             ? { session: { id: "session-1" } }
-            : frame.method === "sessions.history"
+            : frame.method === "chat.history"
               ? { messages: [{ text: "hello" }] }
-              : frame.method === "sessions.export"
+              : frame.method === "sessions.get"
                 ? { format: "json", content: "{}" }
-                : frame.method === "tasks.list"
-                  ? { tasks: [{ id: "task-1" }] }
-                  : frame.method === "tasks.get"
-                    ? { task: { id: "task-1" } }
-                    : frame.method === "artifacts.list"
-                      ? { artifacts: [{ id: "artifact-1" }] }
-                      : frame.method === "runtime.snapshot"
-                        ? { tasks: [], sessions: [] }
+                : frame.method === "sessions.list"
+                  ? { sessions: [{ key: "agent:agent-1:main" }] }
+                  : frame.method === "tasks.list"
+                    ? { tasks: [{ id: "task-1" }] }
+                    : frame.method === "tasks.get"
+                      ? { task: { id: "task-1" } }
+                      : frame.method === "artifacts.list"
+                        ? { artifacts: [{ id: "artifact-1" }] }
                         : frame.method === "tools.catalog"
                           ? { tools: [{ name: "shell" }] }
                           : frame.method === "tools.effective"
@@ -2796,13 +2794,14 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
   });
   assert.deepEqual(await client.listTasks({ agentId: "agent-1" }), { tasks: [{ id: "task-1" }] });
   assert.deepEqual(await client.getTask({ taskId: "task-1" }), { task: { id: "task-1" } });
-  assert.deepEqual(await client.assignTask({ taskId: "task-1", agentId: "agent-1" }), { ok: true });
   assert.deepEqual(await client.cancelTask({ taskId: "task-1", reason: "duplicate" }), { ok: true });
   assert.deepEqual(await client.listArtifacts({ taskId: "task-1" }), { artifacts: [{ id: "artifact-1" }] });
   assert.deepEqual(await client.getArtifact({ artifactId: "artifact-1", includeContent: true }), { ok: true });
-  assert.deepEqual(await client.putArtifact({ name: "result.txt", content: "ok" }), { ok: true });
-  assert.deepEqual(await client.deleteArtifact({ artifactId: "artifact-1" }), { ok: true });
-  assert.deepEqual(await client.getRuntimeSnapshot({ includeTasks: true }), { tasks: [], sessions: [] });
+  assert.deepEqual(await client.getRuntimeSnapshot({ includeTasks: true }), {
+    sessions: [{ key: "agent:agent-1:main" }],
+    tasks: [{ id: "task-1" }],
+    artifacts: [{ id: "artifact-1" }]
+  });
   assert.deepEqual(await client.getToolsCatalog({ agentId: "agent-1" }), { tools: [{ name: "shell" }] });
   assert.deepEqual(await client.getEffectiveTools({ agentId: "agent-1" }), { tools: [{ name: "shell" }] });
   assert.deepEqual(await client.invokeTool({ toolName: "shell", input: { command: "pwd" } }), { ok: true });
@@ -2810,17 +2809,16 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
   assert.deepEqual(sentFrames.map((frame) => frame.method), [
     "connect",
     "sessions.describe",
-    "sessions.history",
-    "sessions.export",
+    "chat.history",
+    "sessions.get",
     "tasks.list",
     "tasks.get",
-    "tasks.assign",
     "tasks.cancel",
     "artifacts.list",
     "artifacts.get",
-    "artifacts.put",
-    "artifacts.delete",
-    "runtime.snapshot",
+    "sessions.list",
+    "tasks.list",
+    "artifacts.list",
     "tools.catalog",
     "tools.effective",
     "tools.invoke"
@@ -2828,7 +2826,7 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
   assert.deepEqual(sentFrames[1]?.params, {
     key: "agent:agent-1:main"
   });
-  assert.deepEqual(sentFrames[15]?.params, {
+  assert.deepEqual(sentFrames[14]?.params, {
     toolName: "shell",
     input: { command: "pwd" }
   });
@@ -2961,6 +2959,68 @@ test("native WS gateway client streams agent turns through chat.send and session
   assert.equal(result.status, "completed");
   assert.equal(result.payloads?.[0]?.text, "Done from Gateway");
   assert.match(stdout.join(""), /Done from Gateway/);
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client reads assistant text from Gateway message content arrays", async () => {
+  const fallback = new FallbackGatewayClient();
+  let subscriptionSocket: { emitMessage: (frame: Record<string, unknown>) => void } | null = null;
+  const { WebSocketImpl } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["chat.send", "sessions.subscribe", "sessions.messages.subscribe"],
+                events: ["session.message"]
+              }
+            }
+          : { ok: true, runId: "run-1", status: "running" }
+      });
+
+      if (frame.method === "sessions.messages.subscribe") {
+        subscriptionSocket = socket;
+      }
+
+      if (frame.method === "chat.send") {
+        subscriptionSocket?.emitMessage({
+          type: "event",
+          event: "session.message",
+          payload: {
+            sessionKey: "agent:agent-1:explicit:session-1",
+            runId: "run-1",
+            status: "completed",
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "text",
+                  text: "Done from content array"
+                }
+              ]
+            }
+          }
+        });
+      }
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.streamAgentTurn(
+    { agentId: "agent-1", sessionId: "session-1", message: "hello", timeoutSeconds: 1 }
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.payloads?.[0]?.text, "Done from content array");
   assert.deepEqual(fallback.calls, []);
 });
 

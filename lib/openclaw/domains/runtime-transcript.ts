@@ -664,6 +664,7 @@ async function resolveRuntimeTranscriptPathFromSessionCatalog(
   sessionId: string,
   workspacePath?: string
 ) {
+  const expectedSessionKey = `agent:${agentId}:explicit:${sessionId}`;
   const catalogCandidates = [
     path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", "sessions.json"),
     workspacePath ? path.join(workspacePath, ".openclaw", "agents", agentId, "sessions", "sessions.json") : null
@@ -674,8 +675,12 @@ async function resolveRuntimeTranscriptPathFromSessionCatalog(
       const raw = await readFile(catalogPath, "utf8");
       const parsed = JSON.parse(raw) as Record<string, { sessionId?: string; sessionFile?: string }>;
 
-      for (const entry of Object.values(parsed)) {
-        if (!entry || entry.sessionId !== sessionId || typeof entry.sessionFile !== "string") {
+      for (const [sessionKey, entry] of Object.entries(parsed)) {
+        if (
+          !entry ||
+          (entry.sessionId !== sessionId && sessionKey !== expectedSessionKey) ||
+          typeof entry.sessionFile !== "string"
+        ) {
           continue;
         }
 

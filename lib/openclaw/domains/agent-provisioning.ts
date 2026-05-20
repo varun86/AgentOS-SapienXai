@@ -675,6 +675,7 @@ function parseArgs(argv) {
     agentId: "",
     message: "",
     thinking: "low",
+    timeoutSeconds: process.env.OPENCLAW_AGENT_TIMEOUT_SECONDS || process.env.AGENTOS_OPENCLAW_AGENT_TIMEOUT_SECONDS || "45",
     json: false,
     stdin: false
   };
@@ -700,6 +701,12 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--timeout") {
+      options.timeoutSeconds = argv[index + 1] ?? options.timeoutSeconds;
+      index += 1;
+      continue;
+    }
+
     if (arg === "--json") {
       options.json = true;
       continue;
@@ -716,7 +723,7 @@ function parseArgs(argv) {
 
 function usage() {
   process.stderr.write(
-    "Usage: node .openclaw/tools/telegram-delegate-agent.mjs --agent <id> --message <text> [--thinking low|medium|high] [--json]\n"
+    "Usage: node .openclaw/tools/telegram-delegate-agent.mjs --agent <id> --message <text> [--thinking low|medium|high] [--timeout seconds] [--json]\n"
   );
 }
 
@@ -758,6 +765,14 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8").trim();
 }
 
+function resolveTimeoutSeconds(value) {
+  const timeoutSeconds = Number(value);
+  if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
+    return Math.min(3600, Math.max(1, Math.floor(timeoutSeconds)));
+  }
+  return 45;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.stdin) {
@@ -769,6 +784,9 @@ async function main() {
     process.exit(1);
   }
 
+  const timeoutSeconds = resolveTimeoutSeconds(options.timeoutSeconds);
+  const openClawBin = process.env.OPENCLAW_BIN || "openclaw";
+
   const args = [
     "agent",
     "--agent",
@@ -777,12 +795,15 @@ async function main() {
     options.message.trim(),
     "--thinking",
     options.thinking,
+    "--timeout",
+    String(timeoutSeconds),
     "--json"
   ];
 
   try {
-    const { stdout } = await execFileAsync("openclaw", args, {
+    const { stdout } = await execFileAsync(openClawBin, args, {
       cwd: process.cwd(),
+      timeout: timeoutSeconds * 1000 + 15000,
       maxBuffer: 4 * 1024 * 1024
     });
     const parsed = JSON.parse(stdout);
@@ -796,11 +817,15 @@ async function main() {
     process.stdout.write((text || JSON.stringify(parsed, null, 2)) + "\n");
   } catch (error) {
     const message =
-      error && typeof error === "object" && "stderr" in error && typeof error.stderr === "string"
-        ? error.stderr.trim()
-        : error instanceof Error
-          ? error.message
-          : "Telegram delegation failed.";
+      error && typeof error === "object" && "killed" in error && error.killed
+        ? "Telegram delegation timed out after " + timeoutSeconds + " seconds."
+        : error && typeof error === "object" && "signal" in error && typeof error.signal === "string" && error.signal
+          ? "Telegram delegation stopped by signal " + error.signal + "."
+          : error && typeof error === "object" && "stderr" in error && typeof error.stderr === "string"
+            ? error.stderr.trim()
+            : error instanceof Error
+              ? error.message
+              : "Telegram delegation failed.";
     process.stderr.write(String(message) + "\n");
     process.exit(1);
   }

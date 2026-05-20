@@ -114,6 +114,73 @@ function buildAgentTurnArgs(input: OpenClawAgentTurnInput) {
   return args;
 }
 
+function buildAgentSessionKey(agentId?: string | null, sessionId?: string | null) {
+  const trimmedSessionId = sessionId?.trim();
+  const trimmedAgentId = agentId?.trim() || "main";
+  return trimmedSessionId
+    ? `agent:${trimmedAgentId}:explicit:${trimmedSessionId}`
+    : `agent:${trimmedAgentId}:main`;
+}
+
+function buildSessionReferenceParams(input: { key?: string | null; sessionKey?: string | null; sessionId?: string | null; agentId?: string | null } = {}) {
+  const key = input.key?.trim() || input.sessionKey?.trim();
+  if (key) {
+    return { key };
+  }
+
+  const sessionId = input.sessionId?.trim();
+  const agentId = input.agentId?.trim();
+  return {
+    agentId: agentId || undefined,
+    sessionId: sessionId || undefined,
+    key: agentId || sessionId ? buildAgentSessionKey(agentId, sessionId) : undefined
+  };
+}
+
+function buildSessionHistoryParams(input: OpenClawSessionHistoryInput = {}) {
+  return {
+    ...buildSessionReferenceParams(input),
+    limit: input.limit,
+    cursor: input.cursor ?? undefined
+  };
+}
+
+function buildSessionPreviewParams(input: OpenClawSessionHistoryInput = {}) {
+  const reference = buildSessionReferenceParams(input);
+  const key = reference.key;
+  return {
+    ...reference,
+    sessionKey: key,
+    sessionKeys: key ? [key] : undefined,
+    limit: input.limit,
+    cursor: input.cursor ?? undefined
+  };
+}
+
+function buildSessionExportPayload(
+  input: OpenClawSessionExportInput,
+  payload: Record<string, unknown>
+): OpenClawSessionExportPayload {
+  if (typeof payload.content === "string") {
+    return {
+      ...payload,
+      format: input.format ?? (typeof payload.format === "string" ? payload.format : "json")
+    };
+  }
+
+  const format = input.format ?? "json";
+  return {
+    ...payload,
+    format,
+    session: payload.session ?? payload,
+    content: format === "json" ? JSON.stringify(payload) : undefined
+  };
+}
+
+function summarizeSnapshotError(reason: unknown) {
+  return reason instanceof Error ? reason.message : String(reason || "Unknown OpenClaw Gateway snapshot error.");
+}
+
 function buildGmailSetupArgs(input: OpenClawGmailSetupInput) {
   const config = input.config ?? {};
   const args = ["webhooks", "gmail", "setup", "--account", input.account];
@@ -289,15 +356,55 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   describeSession(input: OpenClawDescribeSessionInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.call<OpenClawSessionPayload>("sessions.describe", { ...input }, options);
+    return this.call<OpenClawSessionPayload>(
+      "sessions.describe",
+      {
+        ...buildSessionReferenceParams(input),
+        includeMessages: input.includeMessages,
+        limit: input.limit
+      },
+      options
+    );
   }
 
-  getSessionHistory(input: OpenClawSessionHistoryInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.call<OpenClawSessionHistoryPayload>("sessions.history", { ...input }, options);
+  async getSessionHistory(input: OpenClawSessionHistoryInput = {}, options: OpenClawCommandOptions = {}) {
+    let lastError: unknown = null;
+    const candidates = [
+      ["chat.history", buildSessionHistoryParams(input)] as const,
+      ["sessions.preview", buildSessionPreviewParams(input)] as const,
+      ["sessions.history", buildSessionHistoryParams(input)] as const
+    ];
+
+    for (const [method, params] of candidates) {
+      try {
+        return await this.call<OpenClawSessionHistoryPayload>(method, params, options);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError;
   }
 
-  exportSession(input: OpenClawSessionExportInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.call<OpenClawSessionExportPayload>("sessions.export", { ...input }, options);
+  async exportSession(input: OpenClawSessionExportInput = {}, options: OpenClawCommandOptions = {}) {
+    let lastError: unknown = null;
+    const params = buildSessionReferenceParams(input);
+    const candidates = ["sessions.get", "sessions.describe", "sessions.export"];
+
+    for (const method of candidates) {
+      try {
+        const payload = await this.call<Record<string, unknown>>(
+          method,
+          method === "sessions.export" ? { ...params, format: input.format } : params,
+          options
+        );
+        return buildSessionExportPayload(input, payload);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError;
   }
 
   listTasks(input: OpenClawTaskListInput = {}, options: OpenClawCommandOptions = {}) {
@@ -336,8 +443,47 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     );
   }
 
-  getRuntimeSnapshot(input: OpenClawRuntimeSnapshotInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.call<OpenClawRuntimeSnapshotPayload>("runtime.snapshot", { ...input }, options);
+  async getRuntimeSnapshot(input: OpenClawRuntimeSnapshotInput = {}, options: OpenClawCommandOptions = {}) {
+    const includeSessions = input.includeSessions !== false;
+    const includeTasks = input.includeTasks !== false;
+    const includeArtifacts = input.includeArtifacts !== false;
+    const results = await Promise.allSettled([
+      includeSessions
+        ? this.listSessions({ limit: input.limit, agentId: input.agentId }, options)
+        : Promise.resolve(null),
+      includeTasks
+        ? this.listTasks({ limit: input.limit, agentId: input.agentId, workspace: input.workspace }, options)
+        : Promise.resolve(null),
+      includeArtifacts
+        ? this.listArtifacts({ limit: input.limit, agentId: input.agentId, workspace: input.workspace }, options)
+        : Promise.resolve(null)
+    ]);
+    const requestedResults = results.filter((result, index) =>
+      [includeSessions, includeTasks, includeArtifacts][index]
+    );
+    const rejected = requestedResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+
+    if (requestedResults.length > 0 && rejected.length === requestedResults.length) {
+      throw rejected[0]?.reason ?? new Error("OpenClaw Gateway runtime snapshot failed.");
+    }
+
+    const [sessionsResult, tasksResult, artifactsResult] = results;
+    const payload: OpenClawRuntimeSnapshotPayload = {
+      sessions: sessionsResult.status === "fulfilled" ? sessionsResult.value?.sessions ?? [] : [],
+      tasks: tasksResult.status === "fulfilled" ? tasksResult.value?.tasks ?? [] : [],
+      artifacts: artifactsResult.status === "fulfilled" ? artifactsResult.value?.artifacts ?? [] : []
+    };
+
+    if (rejected.length > 0) {
+      payload.metadata = {
+        runtimeSnapshot: {
+          partial: true,
+          errors: rejected.map((result) => summarizeSnapshotError(result.reason))
+        }
+      };
+    }
+
+    return payload;
   }
 
   getToolsCatalog(input: OpenClawToolsCatalogInput = {}, options: OpenClawCommandOptions = {}) {

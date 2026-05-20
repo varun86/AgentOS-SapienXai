@@ -4,7 +4,8 @@ import { afterEach, test } from "node:test";
 import { setOpenClawAdapterForTesting, type OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   addOpenClawModelsToConfig,
-  persistOpenClawProviderToken
+  persistOpenClawProviderToken,
+  setOpenClawDefaultModel
 } from "@/lib/openclaw/application/model-provider-state-service";
 
 const legacyProviderFileFallbackEnv = "AGENTOS_OPENCLAW_LEGACY_PROVIDER_FILE_FALLBACK";
@@ -85,5 +86,106 @@ test("adding provider models retries transient Gateway restart during config upd
     "set:agents.defaults.model.primary",
     "set:agents.defaults.agentRuntime.id",
     "set:plugins.entries.codex.enabled"
+  ]);
+});
+
+test("setting the default model writes OpenClaw Gateway config", async () => {
+  const calls: string[] = [];
+  const values = new Map<string, unknown>();
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      calls.push(`get:${path}`);
+      return path === "agents.defaults.models" ? { "openrouter/old": {} } : null;
+    },
+    async setConfig(path: string, value: unknown) {
+      calls.push(`set:${path}`);
+      values.set(path, value);
+      return { stdout: JSON.stringify({ ok: true, value }), stderr: "" };
+    }
+  } as unknown as OpenClawAdapter);
+
+  const result = await setOpenClawDefaultModel("openrouter/google/gemma-4-31b-it:free", {
+    provider: "openrouter"
+  });
+
+  assert.deepEqual(result, {
+    modelId: "openrouter/google/gemma-4-31b-it:free",
+    provider: "openrouter",
+    via: "gateway"
+  });
+  assert.deepEqual(calls, [
+    "get:agents.defaults.models",
+    "set:agents.defaults.models",
+    "set:agents.defaults.model.primary"
+  ]);
+  assert.deepEqual(values.get("agents.defaults.models"), {
+    "openrouter/old": {},
+    "openrouter/google/gemma-4-31b-it:free": {}
+  });
+  assert.equal(values.get("agents.defaults.model.primary"), "openrouter/google/gemma-4-31b-it:free");
+});
+
+test("setting a Codex default model normalizes the model ref and enables Codex runtime", async () => {
+  const calls: string[] = [];
+  const values = new Map<string, unknown>();
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      calls.push(`get:${path}`);
+      return path === "agents.defaults.models" ? {} : null;
+    },
+    async setConfig(path: string, value: unknown) {
+      calls.push(`set:${path}`);
+      values.set(path, value);
+      return { stdout: JSON.stringify({ ok: true, value }), stderr: "" };
+    }
+  } as unknown as OpenClawAdapter);
+
+  const result = await setOpenClawDefaultModel("openai-codex/gpt-5.5", {
+    provider: "openai-codex"
+  });
+
+  assert.deepEqual(result, {
+    modelId: "openai/gpt-5.5",
+    provider: "openai-codex",
+    via: "gateway"
+  });
+  assert.deepEqual(calls, [
+    "get:agents.defaults.models",
+    "set:agents.defaults.models",
+    "set:agents.defaults.model.primary",
+    "set:agents.defaults.agentRuntime.id",
+    "set:plugins.entries.codex.enabled"
+  ]);
+  assert.deepEqual(values.get("agents.defaults.models"), {
+    "openai/gpt-5.5": {}
+  });
+  assert.equal(values.get("agents.defaults.model.primary"), "openai/gpt-5.5");
+  assert.equal(values.get("agents.defaults.agentRuntime.id"), "codex");
+  assert.equal(values.get("plugins.entries.codex.enabled"), true);
+});
+
+test("setting the default model does not silently fall back to OpenClaw file writes after Gateway failure", async () => {
+  const calls: string[] = [];
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      calls.push(`get:${path}`);
+      return {};
+    },
+    async setConfig(path: string) {
+      calls.push(`set:${path}`);
+      throw new Error("Gateway config update failed");
+    }
+  } as unknown as OpenClawAdapter);
+
+  await assert.rejects(
+    () => setOpenClawDefaultModel("openrouter/test", { provider: "openrouter" }),
+    /Legacy file fallback is disabled/
+  );
+  assert.deepEqual(calls, [
+    "get:agents.defaults.models",
+    "set:agents.defaults.models"
   ]);
 });

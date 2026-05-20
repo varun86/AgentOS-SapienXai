@@ -76,6 +76,7 @@ const missionDispatchRunnerPath = path.join(
   "openclaw-mission-dispatch-runner.mjs"
 );
 const missionDispatchRetentionMs = 3 * 24 * 60 * 60 * 1000;
+const missionDispatchAgentTimeoutSeconds = 45;
 
 const execFileAsync = promisify(execFile);
 
@@ -132,7 +133,8 @@ export async function launchMissionDispatchRunner(record: MissionDispatchRecord)
     stdio: "ignore",
     env: {
       ...process.env,
-      OPENCLAW_BIN: openClawBin
+      OPENCLAW_BIN: openClawBin,
+      OPENCLAW_AGENT_TIMEOUT_SECONDS: String(missionDispatchAgentTimeoutSeconds)
     }
   });
 

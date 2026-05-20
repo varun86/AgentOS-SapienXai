@@ -314,6 +314,26 @@ test("CLI runtime event subscriptions fail closed instead of pretending to strea
   assert.doesNotMatch(source, /subscribeRuntimeEvents[\s\S]*return\s+\{\s*close\(\)/);
 });
 
+test("CLI mission dispatch fallback bounds OpenClaw agent execution", () => {
+  const runnerSource = readFileSync(path.join(rootDir, "scripts/openclaw-mission-dispatch-runner.mjs"), "utf8");
+  const lifecycleSource = readFileSync(path.join(rootDir, "lib/openclaw/domains/mission-dispatch-lifecycle.ts"), "utf8");
+
+  assert.match(lifecycleSource, /OPENCLAW_AGENT_TIMEOUT_SECONDS/);
+  assert.match(runnerSource, /process\.env\.OPENCLAW_BIN \|\| "openclaw"/);
+  assert.match(runnerSource, /"--timeout",\s*String\(timeoutSeconds\)/);
+  assert.match(runnerSource, /OpenClaw mission timed out after/);
+  assert.match(runnerSource, /SIGKILL/);
+});
+
+test("generated Telegram delegation helper uses configured OpenClaw binary and timeout", () => {
+  const source = readFileSync(path.join(rootDir, "lib/openclaw/domains/agent-provisioning.ts"), "utf8");
+
+  assert.match(source, /process\.env\.OPENCLAW_BIN \|\| "openclaw"/);
+  assert.match(source, /"--timeout",\s*String\(timeoutSeconds\)/);
+  assert.match(source, /timeout: timeoutSeconds \* 1000 \+ 15000/);
+  assert.doesNotMatch(source, /execFileAsync\("openclaw", args/);
+});
+
 test("full uninstall reset avoids OpenClaw-dependent workspace cleanup", () => {
   const source = readFileSync(path.join(rootDir, "lib/openclaw/reset.ts"), "utf8");
 
