@@ -24,7 +24,7 @@ await cp(staticDir, path.join(bundleDir, ".next", "static"), {
 await copyDirectoryTree(publicDir, path.join(bundleDir, "public"), {
   tolerateReadErrors: true
 });
-await rm(path.join(bundleDir, ".mission-control"), { recursive: true, force: true });
+await removeLocalRuntimeFiles(bundleDir);
 await removeDotStoreFiles(bundleDir);
 
 console.log(`Prepared AgentOS bundle at ${bundleDir}`);
@@ -103,7 +103,17 @@ async function copyDirectoryTree(
 
 async function materializeBundleNodeModules(nodeModulesDir) {
   const pnpmStoreDir = path.join(nodeModulesDir, ".pnpm");
-  const storeEntries = await readdir(pnpmStoreDir, { withFileTypes: true });
+  let storeEntries;
+
+  try {
+    storeEntries = await readdir(pnpmStoreDir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return;
+    }
+
+    throw error;
+  }
 
   for (const storeEntry of storeEntries) {
     if (!storeEntry.isDirectory()) {
@@ -124,6 +134,15 @@ async function materializeBundleNodeModules(nodeModulesDir) {
   }
 
   await rm(pnpmStoreDir, { recursive: true, force: true });
+}
+
+async function removeLocalRuntimeFiles(dir) {
+  await rm(path.join(dir, ".env"), { force: true });
+  await rm(path.join(dir, ".env.local"), { force: true });
+  await rm(path.join(dir, ".env.development.local"), { force: true });
+  await rm(path.join(dir, ".env.production.local"), { force: true });
+  await rm(path.join(dir, ".env.test.local"), { force: true });
+  await rm(path.join(dir, ".mission-control"), { recursive: true, force: true });
 }
 
 async function copyNestedPackagesToRoot(sourceNodeModulesDir, targetNodeModulesDir) {
