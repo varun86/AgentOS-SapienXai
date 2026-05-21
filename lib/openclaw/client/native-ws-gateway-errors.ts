@@ -1,0 +1,177 @@
+import "server-only";
+
+import {
+  MAX_CONTROL_PROTOCOL_VERSION,
+  MIN_CONTROL_PROTOCOL_VERSION
+} from "@/lib/openclaw/client/native-ws-gateway-types";
+
+export type OpenClawGatewayClientErrorKind =
+  | "auth"
+  | "conflict"
+  | "malformed-response"
+  | "protocol-mismatch"
+  | "scope-limited"
+  | "timeout"
+  | "unsupported"
+  | "unreachable"
+  | "unknown";
+
+export class NativeGatewayError extends Error {
+  readonly kind: OpenClawGatewayClientErrorKind;
+
+  constructor(
+    message: string,
+    options: {
+      cause?: unknown;
+      kind?: OpenClawGatewayClientErrorKind;
+    } = {}
+  ) {
+    super(message);
+    this.name = "NativeGatewayError";
+    this.kind = options.kind ?? classifyGatewayError(message);
+    this.cause = options.cause;
+  }
+}
+
+export class NativeGatewayRequestError extends NativeGatewayError {
+  constructor(
+    message: string,
+    readonly method: string,
+    readonly sent: boolean,
+    options: {
+      cause?: unknown;
+      kind?: OpenClawGatewayClientErrorKind;
+    } = {}
+  ) {
+    super(message, options);
+    this.name = "NativeGatewayRequestError";
+  }
+}
+
+export class OpenClawGatewayClientError extends Error {
+  constructor(
+    message: string,
+    readonly kind: OpenClawGatewayClientErrorKind,
+    options: {
+      cause?: unknown;
+    } = {}
+  ) {
+    super(message);
+    this.name = "OpenClawGatewayClientError";
+    this.cause = options.cause;
+  }
+}
+
+export type OpenClawGatewayFallbackDiagnostic = {
+  at: string;
+  operation: string;
+  issue: string;
+  kind: OpenClawGatewayClientErrorKind;
+  recovery: string;
+};
+
+export const recentGatewayFallbackDiagnostics: OpenClawGatewayFallbackDiagnostic[] = [];
+
+export const maxGatewayFallbackDiagnostics = 20;
+
+export function getRecentOpenClawGatewayFallbackDiagnostics() {
+  return [...recentGatewayFallbackDiagnostics];
+}
+
+export function recordGatewayFallbackDiagnostic(operation: string, error: unknown) {
+  const normalized = normalizeClientError(error);
+  clearGatewayFallbackDiagnostic(operation);
+  recentGatewayFallbackDiagnostics.unshift({
+    at: new Date().toISOString(),
+    operation,
+    issue: normalized.message,
+    kind: normalized.kind,
+    recovery: resolveGatewayRecoveryMessage(normalized)
+  });
+
+  recentGatewayFallbackDiagnostics.splice(maxGatewayFallbackDiagnostics);
+}
+
+export function clearGatewayFallbackDiagnostic(operation: string) {
+  for (let index = recentGatewayFallbackDiagnostics.length - 1; index >= 0; index -= 1) {
+    if (recentGatewayFallbackDiagnostics[index]?.operation === operation) {
+      recentGatewayFallbackDiagnostics.splice(index, 1);
+    }
+  }
+}
+
+export function normalizeClientError(error: unknown) {
+  if (error instanceof OpenClawGatewayClientError) {
+    return error;
+  }
+
+  if (error instanceof NativeGatewayError) {
+    return new OpenClawGatewayClientError(error.message, error.kind, { cause: error.cause ?? error });
+  }
+
+  const message = error instanceof Error ? error.message : String(error || "OpenClaw Gateway request failed.");
+  return new OpenClawGatewayClientError(message, classifyGatewayError(message), { cause: error });
+}
+
+export function classifyGatewayError(message: string): OpenClawGatewayClientErrorKind {
+  if (/protocol|version|hello|handshake/i.test(message)) {
+    return "protocol-mismatch";
+  }
+
+  if (/unknown method|method not found|unsupported method/i.test(message)) {
+    return "unsupported";
+  }
+
+  if (/auth|token|password|unauthorized|forbidden/i.test(message)) {
+    return "auth";
+  }
+
+  if (/scope|permission|not allowed/i.test(message)) {
+    return "scope-limited";
+  }
+
+  if (/base\s*hash|basehash|conflict|stale|precondition|version mismatch|already changed/i.test(message)) {
+    return "conflict";
+  }
+
+  if (/invalid[_\s-]?request|invalid .*params|invalid json|malformed|schema|payload/i.test(message)) {
+    return "malformed-response";
+  }
+
+  if (/timed out|timeout/i.test(message)) {
+    return "timeout";
+  }
+
+  if (/connect|closed|unreachable|websocket/i.test(message)) {
+    return "unreachable";
+  }
+
+  return "unknown";
+}
+
+export function resolveGatewayRecoveryMessage(error: OpenClawGatewayClientError) {
+  switch (error.kind) {
+    case "auth":
+      return "Check the OpenClaw Gateway token/password or repair local device access in Settings.";
+    case "conflict":
+      return "Refresh the Gateway config snapshot, then retry the action.";
+    case "scope-limited":
+      return "Approve AgentOS as an OpenClaw operator with the required read/write/admin scopes.";
+    case "protocol-mismatch":
+      return `Update OpenClaw or AgentOS so the Gateway protocol overlaps AgentOS' supported range ${MIN_CONTROL_PROTOCOL_VERSION}-${MAX_CONTROL_PROTOCOL_VERSION}.`;
+    case "unsupported":
+      return "OpenClaw does not advertise this Gateway method; AgentOS will use the compatibility fallback when available.";
+    case "timeout":
+      return "Check that the OpenClaw Gateway is responsive, then retry the action.";
+    case "unreachable":
+      return "Start or repair the OpenClaw Gateway, or keep using CLI fallback for recovery.";
+    case "malformed-response":
+      return "Update OpenClaw or report the incompatible Gateway response shape.";
+    default:
+      return "Inspect OpenClaw diagnostics for the underlying Gateway failure.";
+  }
+}
+
+export function clearGatewayFallbackDiagnosticsForTesting() {
+  recentGatewayFallbackDiagnostics.length = 0;
+}
