@@ -6,6 +6,7 @@ import {
   readWorkspaceManagedFile,
   writeWorkspaceManagedFile
 } from "@/lib/openclaw/application/workspace-file-service";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,15 +28,15 @@ export async function GET(request: Request, context: { params: Promise<{ workspa
         path: filePath
       });
 
-      return NextResponse.json(file);
+      return NextResponse.json(redactSecrets(file));
     }
 
     const files = await listWorkspaceManagedFiles(workspaceId);
-    return NextResponse.json(files);
+    return NextResponse.json(redactSecrets(files));
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to read workspace files."
+        error: redactErrorMessage(error, "Unable to read workspace files.")
       },
       { status: 400 }
     );
@@ -52,9 +53,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
       content: input.content
     });
 
-    return NextResponse.json(file);
+    return NextResponse.json(redactSecrets(file));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to save workspace file.";
+    const message = redactErrorMessage(error, "Unable to save workspace file.");
     const status = message.includes("exceeds") ? 413 : 400;
 
     return NextResponse.json(

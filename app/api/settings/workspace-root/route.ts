@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { updateWorkspaceRoot } from "@/lib/agentos/control-plane";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,12 +19,12 @@ export async function PATCH(request: Request) {
     });
 
     return NextResponse.json({
-      snapshot
+      snapshot: redactSecrets(snapshot)
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to update the workspace root."
+        error: redactErrorMessage(error, "Unable to update the workspace root.")
       },
       { status: 400 }
     );

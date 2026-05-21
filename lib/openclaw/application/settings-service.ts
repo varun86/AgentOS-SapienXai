@@ -31,6 +31,7 @@ import type {
   GatewayNativeAuthIssueKind,
   GatewayNativeAuthStatus
 } from "@/lib/openclaw/gateway-auth";
+import { redactErrorMessage } from "@/lib/security/redaction";
 
 const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
 const REDACTED_OPENCLAW_SECRET = "__OPENCLAW_REDACTED__";
@@ -217,7 +218,7 @@ export async function getGatewayNativeAuthStatus(
       recommendation: "Native OpenClaw Gateway WS auth is ready."
     };
   } catch (error) {
-    const issue = error instanceof Error ? error.message : String(error || "Native Gateway auth check failed.");
+    const issue = redactErrorMessage(error, "Native Gateway auth check failed.");
     const kind = readGatewayIssueKind(error, issue);
 
     return {
@@ -341,7 +342,7 @@ export async function generateGatewayNativeAuthToken(input: {
     verificationIssue = await waitForGeneratedGatewayTokenAuth(token, input.verifyNativeAuth);
     verified = !verificationIssue;
   } catch (error) {
-    restartIssue = error instanceof Error ? error.message : "Gateway restart failed.";
+    restartIssue = redactErrorMessage(error, "Gateway restart failed.");
   }
 
   invalidateSettingsSnapshot();
@@ -376,7 +377,7 @@ async function waitForGeneratedGatewayTokenAuth(
       await verify(token);
       return null;
     } catch (error) {
-      issue = error instanceof Error ? error.message : "Gateway auth verification failed.";
+      issue = redactErrorMessage(error, "Gateway auth verification failed.");
     }
   }
 
@@ -417,7 +418,7 @@ export async function repairGatewayNativeDeviceAccess(
     result = normalizeGatewayDeviceApprovePayload(payload);
     deviceToken = await syncLocalOpenClawDeviceAuthTokenFromPairing() ?? await readDeviceAuthToken();
   } catch (error) {
-    approvalIssue = error instanceof Error ? error.message : "OpenClaw device approval failed.";
+    approvalIssue = redactErrorMessage(error, "OpenClaw device approval failed.");
     deviceToken = await syncLocalOpenClawDeviceAuthTokenFromPairing() ?? await readDeviceAuthToken();
 
     if (!deviceToken?.token || !hasGatewayDeviceAccessRequiredScopes(deviceToken.scopes)) {

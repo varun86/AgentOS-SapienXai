@@ -15,6 +15,7 @@ import {
 import { setOpenClawDefaultModel } from "@/lib/openclaw/application/model-provider-state-service";
 import { resolveRequiredLoginProvider } from "@/lib/openclaw/model-onboarding";
 import { isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Model onboarding intent is required."
+        error: redactErrorMessage(error, "Model onboarding intent is required.")
       },
       { status: 400 }
     );
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
   let streamClosed = false;
 
   const send = (event: OpenClawModelOnboardingStreamEvent) => {
+    const safeEvent = redactSecrets(event);
     if (streamClosed) {
       return Promise.resolve();
     }
@@ -90,7 +92,7 @@ export async function POST(request: Request) {
           return;
         }
 
-        return writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
+        return writer.write(encoder.encode(`${JSON.stringify(safeEvent)}\n`));
       })
       .catch(() => {});
 
@@ -526,10 +528,8 @@ export async function POST(request: Request) {
       await verifyReady("Model setup still needs attention after the automatic pass.", preferredModelId);
     } catch (error) {
       aggregatedStderr = aggregatedStderr
-        ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Unexpected model onboarding failure."}`
-        : error instanceof Error
-          ? error.message
-          : "Unexpected model onboarding failure.";
+        ? `${aggregatedStderr}\n${redactErrorMessage(error, "Unexpected model onboarding failure.")}`
+        : redactErrorMessage(error, "Unexpected model onboarding failure.");
 
       await fail("detecting", "Model onboarding failed unexpectedly.", {
         docsUrl
@@ -817,7 +817,7 @@ function appendLine(current: string, line: string) {
 }
 
 function readErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error || "Unknown Gateway error.");
+  return redactErrorMessage(error, "Unknown Gateway error.");
 }
 
 function resolveDiscoveredModels(stdout: string, snapshot: MissionControlSnapshot) {

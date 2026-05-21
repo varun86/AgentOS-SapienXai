@@ -1,3 +1,5 @@
+import { redactSecretText } from "@/lib/security/redaction";
+
 export function stringifyCommandFailure(error: unknown) {
   if (!error || typeof error !== "object") {
     return "";
@@ -7,7 +9,7 @@ export function stringifyCommandFailure(error: unknown) {
   const stderr = "stderr" in error ? stringifyFailureChunk(error.stderr) : "";
   const message = "message" in error && typeof error.message === "string" ? error.message : "";
 
-  return `${message}\n${stdout}\n${stderr}`;
+  return redactSecretText(`${message}\n${stdout}\n${stderr}`);
 }
 
 export function isOpenClawInvalidConfigError(error: unknown) {

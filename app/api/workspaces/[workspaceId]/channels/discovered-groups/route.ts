@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { discoverTelegramGroups } from "@/lib/agentos/control-plane";
 import { createTimingCollector, formatTimingSummary, measureTiming } from "@/lib/openclaw/timing";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,14 +21,14 @@ export async function GET(_request: Request, context: { params: Promise<{ worksp
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
-    return NextResponse.json({ groups, timings: summary });
+    return NextResponse.json(redactSecrets({ groups, timings: summary }));
   } catch (error) {
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to discover Telegram groups.",
+        error: redactErrorMessage(error, "Unable to discover Telegram groups."),
         timings: summary
       },
       { status: 400 }

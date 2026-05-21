@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import { controlGateway } from "@/lib/openclaw/application/gateway-service";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,12 +37,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       message: actionMessageMap[input.action],
-      snapshot
+      snapshot: redactSecrets(snapshot)
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to control the OpenClaw gateway."
+        error: redactErrorMessage(error, "Unable to control the OpenClaw gateway.")
       },
       { status: 400 }
     );

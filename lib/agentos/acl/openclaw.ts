@@ -7,6 +7,7 @@ import type {
   WorkspaceChannelGroupAssignment,
   WorkspaceChannelSummary
 } from "@/lib/agentos/contracts";
+import { redactSecrets } from "@/lib/security/redaction";
 
 type OpenClawGatewayEventFrameInput = {
   type?: string;
@@ -15,7 +16,7 @@ type OpenClawGatewayEventFrameInput = {
 };
 
 export function normalizeControlPlaneSnapshot(snapshot: ControlPlaneSnapshot): ControlPlaneSnapshot {
-  const cloned = structuredClone(snapshot);
+  const cloned = redactSecrets(structuredClone(snapshot));
 
   return {
     ...cloned,

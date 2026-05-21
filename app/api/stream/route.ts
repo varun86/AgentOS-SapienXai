@@ -1,5 +1,6 @@
 import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import { subscribeOpenClawEventBridgeEvents } from "@/lib/openclaw/application/event-bridge-service";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
         }
 
         try {
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(redactSecrets(data))}\n\n`));
           return true;
         } catch {
           close();
@@ -82,7 +83,7 @@ export async function GET(request: Request) {
             sendEvent("snapshot", snapshot);
           } catch (error) {
             sendEvent("error", {
-              error: error instanceof Error ? error.message : "Unknown stream error."
+              error: redactErrorMessage(error, "Unknown stream error.")
             });
           } finally {
             snapshotTask = null;

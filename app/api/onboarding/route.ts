@@ -21,6 +21,7 @@ import {
   getMissionControlSnapshot,
   touchOpenClawRuntimeStateAccess
 } from "@/lib/agentos/control-plane";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 import type {
   MissionControlSnapshot,
   OpenClawOnboardingPhase,
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Onboarding intent is required."
+        error: redactErrorMessage(error, "Onboarding intent is required.")
       },
       { status: 400 }
     );
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
   let streamClosed = false;
 
   const send = (event: OpenClawOnboardingStreamEvent) => {
+    const safeEvent = redactSecrets(event);
     if (streamClosed) {
       return Promise.resolve();
     }
@@ -77,7 +79,7 @@ export async function POST(request: Request) {
           return;
         }
 
-        return writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
+        return writer.write(encoder.encode(`${JSON.stringify(safeEvent)}\n`));
       })
       .catch(() => {});
 
@@ -164,7 +166,7 @@ export async function POST(request: Request) {
 
       let resolveErrorMessage: string | null = null;
       let openClawBin = await resolveOpenClawBin().catch((error) => {
-        resolveErrorMessage = error instanceof Error ? error.message : "OpenClaw CLI could not be resolved.";
+        resolveErrorMessage = redactErrorMessage(error, "OpenClaw CLI could not be resolved.");
         return null;
       });
 
@@ -332,10 +334,8 @@ export async function POST(request: Request) {
             const gatewayStatusRetry = await readGatewayStatus(openClawBin);
             const gatewayModeBlocked = needsGatewayModeLocalRepair(gatewayStatusRetry);
             aggregatedStderr = aggregatedStderr
-              ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Gateway verification failed."}`
-              : error instanceof Error
-                ? error.message
-                : "Gateway verification failed.";
+              ? `${aggregatedStderr}\n${redactErrorMessage(error, "Gateway verification failed.")}`
+              : redactErrorMessage(error, "Gateway verification failed.");
 
             if (gatewayStatusRetry?.rpc?.error) {
               aggregatedStderr = aggregatedStderr
@@ -374,10 +374,8 @@ export async function POST(request: Request) {
         snapshot = await loadSnapshot(true);
       } catch (error) {
         aggregatedStderr = aggregatedStderr
-          ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Runtime state verification failed."}`
-          : error instanceof Error
-            ? error.message
-            : "Runtime state verification failed.";
+          ? `${aggregatedStderr}\n${redactErrorMessage(error, "Runtime state verification failed.")}`
+          : redactErrorMessage(error, "Runtime state verification failed.");
 
         await fail(
           "verifying",
@@ -402,10 +400,8 @@ export async function POST(request: Request) {
       await closeWriter();
     } catch (error) {
       aggregatedStderr = aggregatedStderr
-        ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Unexpected onboarding failure."}`
-        : error instanceof Error
-          ? error.message
-          : "Unexpected onboarding failure.";
+        ? `${aggregatedStderr}\n${redactErrorMessage(error, "Unexpected onboarding failure.")}`
+        : redactErrorMessage(error, "Unexpected onboarding failure.");
 
       await fail("detecting", "OpenClaw onboarding failed unexpectedly.");
     }

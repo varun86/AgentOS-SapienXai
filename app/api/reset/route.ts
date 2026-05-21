@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { executeReset, getResetPreview } from "@/lib/agentos/reset";
 import type { ResetStreamEvent } from "@/lib/agentos/contracts";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Reset request body is required."
+        error: redactErrorMessage(error, "Reset request body is required.")
       },
       { status: 400 }
     );
@@ -39,13 +40,13 @@ export async function POST(request: Request) {
   if (previewParse.success) {
     try {
       const preview = await getResetPreview(previewParse.data.target);
-      return NextResponse.json({
+      return NextResponse.json(redactSecrets({
         preview
-      });
+      }));
     } catch (error) {
       return NextResponse.json(
         {
-          error: error instanceof Error ? error.message : "Unable to prepare the reset preview."
+          error: redactErrorMessage(error, "Unable to prepare the reset preview.")
         },
         { status: 400 }
       );
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
   if (!executeParse.success) {
     return NextResponse.json(
       {
-        error: executeParse.error.message
+        error: redactErrorMessage(executeParse.error, "Invalid reset request.")
       },
       { status: 400 }
     );
@@ -69,8 +70,9 @@ export async function POST(request: Request) {
   let writeChain = Promise.resolve();
 
   const send = (event: ResetStreamEvent) => {
+    const safeEvent = redactSecrets(event);
     writeChain = writeChain
-      .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+      .then(() => writer.write(encoder.encode(`${JSON.stringify(safeEvent)}\n`)))
       .catch(() => {});
 
     return writeChain;
@@ -95,7 +97,7 @@ export async function POST(request: Request) {
         type: "done",
         ok: false,
         target: executeParse.data.target,
-        message: error instanceof Error ? error.message : "Reset operation failed."
+        message: redactErrorMessage(error, "Reset operation failed.")
       });
     } finally {
       await writeChain;

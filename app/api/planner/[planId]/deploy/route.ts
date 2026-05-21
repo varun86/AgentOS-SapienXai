@@ -6,6 +6,7 @@ import type {
   OperationProgressSnapshot,
   WorkspacePlanDeployStreamEvent
 } from "@/lib/agentos/contracts";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export async function POST(
 
     if (!input.stream) {
       const result = await deployWorkspacePlan(planId, input.plan);
-      return NextResponse.json(result);
+      return NextResponse.json(redactSecrets(result));
     }
 
     const responseStream = new TransformStream();
@@ -39,8 +40,9 @@ export async function POST(
     let latestProgress: OperationProgressSnapshot | undefined;
 
     const send = (event: WorkspacePlanDeployStreamEvent) => {
+      const safeEvent = redactSecrets(event);
       writeChain = writeChain
-        .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+        .then(() => writer.write(encoder.encode(`${JSON.stringify(safeEvent)}\n`)))
         .catch(() => {});
 
       return writeChain;
@@ -75,7 +77,7 @@ export async function POST(
         await send({
           type: "done",
           ok: false,
-          error: error instanceof Error ? error.message : "Unable to deploy planner workspace.",
+          error: redactErrorMessage(error, "Unable to deploy planner workspace."),
           progress: latestProgress
         });
       } finally {
@@ -93,7 +95,7 @@ export async function POST(
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to deploy planner workspace."
+        error: redactErrorMessage(error, "Unable to deploy planner workspace.")
       },
       { status: 400 }
     );

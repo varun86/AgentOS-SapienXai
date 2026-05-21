@@ -6,6 +6,7 @@ import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { addOpenClawModelsToConfig } from "@/lib/openclaw/application/model-provider-state-service";
 import { resolveModelRecordProvider } from "@/lib/openclaw/domains/model-provider-connection";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 import type { AddModelsCatalogModel, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import type { ModelsPayload, ModelsStatusPayload } from "@/lib/openclaw/client/gateway-client";
 import type { AddModelsProviderId } from "@/lib/openclaw/types";
@@ -22,11 +23,11 @@ const catalogAddSchema = z.object({
 export async function GET() {
   try {
     const models = await readGlobalCatalog();
-    return NextResponse.json({ models }, { status: 200 });
+    return NextResponse.json(redactSecrets({ models }), { status: 200 });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "OpenClaw catalog could not be loaded."
+        error: redactErrorMessage(error, "OpenClaw catalog could not be loaded.")
       },
       { status: 500 }
     );
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Catalog model selection is required."
+        error: redactErrorMessage(error, "Catalog model selection is required.")
       },
       { status: 400 }
     );
@@ -60,14 +61,14 @@ export async function POST(request: Request) {
         ok: true,
         provider,
         message: `Added ${modelIds.length} model${modelIds.length === 1 ? "" : "s"} to AgentOS.`,
-        snapshot
+        snapshot: redactSecrets(snapshot)
       },
       { status: 200 }
     );
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Catalog models could not be added."
+        error: redactErrorMessage(error, "Catalog models could not be added.")
       },
       { status: 500 }
     );

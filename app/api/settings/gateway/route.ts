@@ -8,6 +8,7 @@ import {
   saveGatewayNativeAuthCredential,
   updateGatewayRemoteUrl
 } from "@/lib/agentos/control-plane";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,12 +36,12 @@ export async function GET() {
     const authStatus = await getGatewayNativeAuthStatus();
 
     return NextResponse.json({
-      authStatus
+      authStatus: redactSecrets(authStatus)
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to inspect the OpenClaw gateway auth status."
+        error: redactErrorMessage(error, "Unable to inspect the OpenClaw gateway auth status.")
       },
       { status: 500 }
     );
@@ -55,12 +56,12 @@ export async function PATCH(request: Request) {
     });
 
     return NextResponse.json({
-      snapshot
+      snapshot: redactSecrets(snapshot)
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to update the OpenClaw gateway."
+        error: redactErrorMessage(error, "Unable to update the OpenClaw gateway.")
       },
       { status: 400 }
     );
@@ -78,8 +79,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         saved: true,
         generated: true,
-        result,
-        authStatus
+        result: redactSecrets(result),
+        authStatus: redactSecrets(authStatus)
       });
     }
 
@@ -90,8 +91,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         saved: true,
         repaired: true,
-        result,
-        authStatus
+        result: redactSecrets(result),
+        authStatus: redactSecrets(authStatus)
       });
     }
 
@@ -101,13 +102,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       saved: true,
-      result,
-      authStatus
+      result: redactSecrets(result),
+      authStatus: redactSecrets(authStatus)
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to save the OpenClaw gateway credential."
+        error: redactErrorMessage(error, "Unable to save the OpenClaw gateway credential.")
       },
       { status: 400 }
     );

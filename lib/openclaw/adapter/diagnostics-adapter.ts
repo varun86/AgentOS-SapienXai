@@ -85,6 +85,10 @@ export function buildGatewayDiagnostics(input: {
     ...entry,
     operationLabel: getOpenClawGatewayOperationLabel(entry.operation)
   }));
+  const securityWarnings = [
+    ...input.securityWarnings,
+    ...buildLocalExposureWarnings(input.gatewayStatus, input.configuredGatewayUrl)
+  ];
 
   return {
     installed: true,
@@ -92,7 +96,7 @@ export function buildGatewayDiagnostics(input: {
     rpcOk: Boolean(input.gatewayStatus?.rpc?.ok),
     health: resolveDiagnosticHealth({
       rpcOk: input.gatewayStatus?.rpc?.ok,
-      warningCount: input.securityWarnings.length,
+      warningCount: securityWarnings.length,
       runtimeIssueCount: input.runtimeDiagnostics.issues.length,
       hasOpenClawSignal: input.hasOpenClawSignal
     }),
@@ -123,9 +127,56 @@ export function buildGatewayDiagnostics(input: {
     runtime: input.runtimeDiagnostics,
     commandHistory: input.commandHistory,
     transport: input.transport,
-    securityWarnings: input.securityWarnings,
+    securityWarnings,
     issues: input.issues
   };
+}
+
+function buildLocalExposureWarnings(
+  gatewayStatus: GatewayStatusPayload | undefined,
+  configuredGatewayUrl: string | null | undefined
+) {
+  const warnings: string[] = [];
+  const probeHost = readUrlHostname(gatewayStatus?.gateway?.probeUrl);
+  const configuredHost = readUrlHostname(configuredGatewayUrl ?? undefined);
+  const bindMode = normalizeOptionalValue(gatewayStatus?.gateway?.bindMode ?? undefined)?.toLowerCase();
+
+  if (probeHost && !isLoopbackGatewayHost(probeHost)) {
+    warnings.push("OpenClaw Gateway is reachable on a non-loopback host. AgentOS mutation APIs stay restricted to same-origin localhost requests.");
+  }
+
+  if (configuredHost && !isLoopbackGatewayHost(configuredHost)) {
+    warnings.push("AgentOS is configured to use a non-loopback Gateway URL. Keep AgentOS itself bound to localhost unless an explicit operator tunnel is in place.");
+  }
+
+  if (bindMode && !/(local|loopback|localhost)/i.test(bindMode)) {
+    warnings.push("OpenClaw Gateway bind mode is not local-only. Review Gateway exposure before using operator write actions.");
+  }
+
+  return Array.from(new Set(warnings));
+}
+
+function readUrlHostname(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackGatewayHost(host: string) {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+
+  return (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "0:0:0:0:0:0:0:1" ||
+    /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(normalized)
+  );
 }
 
 export function buildDiagnosticIssues(input: {

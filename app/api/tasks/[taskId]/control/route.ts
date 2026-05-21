@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { controlRunningTaskSession } from "@/lib/agentos/control-plane";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export async function POST(
   if (!parseResult.success) {
     return NextResponse.json(
       {
-        error: parseResult.error.message
+        error: redactErrorMessage(parseResult.error, "Invalid task control request.")
       },
       { status: 400 }
     );
@@ -39,13 +40,13 @@ export async function POST(
 
   try {
     const result = await controlRunningTaskSession(taskId, parseResult.data);
-    return NextResponse.json({
+    return NextResponse.json(redactSecrets({
       result
-    });
+    }));
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to control the running task."
+        error: redactErrorMessage(error, "Unable to control the running task.")
       },
       { status: 400 }
     );

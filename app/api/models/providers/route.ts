@@ -40,6 +40,7 @@ import type {
   ModelsPayload,
   OpenClawModelScanPayload as OpenClawModelScanPayloadFromClient
 } from "@/lib/openclaw/client/gateway-client";
+import { redactErrorMessage, redactSecretText, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -133,7 +134,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Model provider action is required."
+        error: redactErrorMessage(error, "Model provider action is required.")
       },
       { status: 400 }
     );
@@ -141,11 +142,11 @@ export async function POST(request: Request) {
 
   try {
     const result = await handleProviderAction(input);
-    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+    return NextResponse.json(redactSecrets(result), { status: result.ok ? 200 : 400 });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Add Models request failed."
+        error: redactErrorMessage(error, "Add Models request failed.")
       },
       { status: 500 }
     );
@@ -454,17 +455,17 @@ function normalizeProviderCatalogError(provider: AddModelsProviderId, error: unk
 
 function stringifyProviderError(error: unknown) {
   if (error instanceof Error) {
-    return error.message;
+    return redactSecretText(error.message);
   }
 
   if (error && typeof error === "object") {
     const stdout = "stdout" in error && typeof error.stdout === "string" ? error.stdout : "";
     const stderr = "stderr" in error && typeof error.stderr === "string" ? error.stderr : "";
     const message = "message" in error && typeof error.message === "string" ? error.message : "";
-    return [message, stdout, stderr].filter(Boolean).join("\n");
+    return redactSecretText([message, stdout, stderr].filter(Boolean).join("\n"));
   }
 
-  return String(error || "");
+  return redactSecretText(String(error || ""));
 }
 
 function normalizeCatalogModels(
@@ -641,7 +642,7 @@ function buildActionResult({
 }
 
 function readProviderActionError(error: unknown) {
-  return error instanceof Error ? error.message : "Model provider action failed.";
+  return redactErrorMessage(error, "Model provider action failed.");
 }
 
 async function readProviderConnectionContext(provider: AddModelsProviderId) {
@@ -761,7 +762,7 @@ async function readOllamaState(): Promise<OllamaState> {
         .filter((modelName) => modelName.length > 0)
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
+    const message = error instanceof Error ? redactSecretText(error.message) : "";
 
     if (/ollama/i.test(message) && (/spawn/i.test(message) || /not found/i.test(message) || /enoent/i.test(message))) {
       return {

@@ -2,6 +2,7 @@ import { getTaskDetail } from "@/lib/agentos/control-plane";
 import type { TaskDetailRecord, TaskDetailStreamEvent } from "@/lib/agentos/contracts";
 import { subscribeOpenClawEventBridgeEvents } from "@/lib/openclaw/application/event-bridge-service";
 import type { OpenClawGatewayEventFrame } from "@/lib/openclaw/client/gateway-client";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +50,7 @@ export async function GET(
         }
 
         try {
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(redactSecrets(data))}\n\n`));
           return true;
         } catch {
           close();
@@ -91,7 +92,7 @@ export async function GET(
           } catch (error) {
             sendEvent("task-error", {
               type: "error",
-              error: error instanceof Error ? error.message : "Unable to load task detail."
+              error: redactErrorMessage(error, "Unable to load task detail.")
             });
           } finally {
             taskRequest = null;

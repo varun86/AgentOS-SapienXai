@@ -20,6 +20,7 @@ import {
 } from "@/lib/openclaw/domains/channels";
 import type { MissionControlSurfaceProvider, WorkspaceChannelGroupAssignment } from "@/lib/agentos/contracts";
 import { createTimingCollector, formatTimingSummary, measureTiming } from "@/lib/openclaw/timing";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,11 +74,11 @@ export async function GET(_request: Request, context: { params: Promise<{ worksp
     registry
   );
 
-  return NextResponse.json({
+  return NextResponse.json(redactSecrets({
     workspaceId,
     channels,
     channelAccounts: accounts
-  });
+  }));
 }
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceId: string }> }) {
@@ -128,11 +129,11 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
       const summary = timings.summary();
       console.info(formatTimingSummary(summary));
 
-      return NextResponse.json({
+      return NextResponse.json(redactSecrets({
         account: created,
         registry,
         timings: summary
-      });
+      }));
     }
 
     const registry = await measureTiming(timings, "channel.registry.upsert", () =>
@@ -154,17 +155,17 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
-    return NextResponse.json({
+    return NextResponse.json(redactSecrets({
       registry,
       timings: summary
-    });
+    }));
   } catch (error) {
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to create channel.",
+        error: redactErrorMessage(error, "Unable to create channel."),
         timings: summary
       },
       { status: 400 }
@@ -183,7 +184,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
         primaryAgentId: input.primaryAgentId ?? null
       });
 
-      return NextResponse.json({ registry });
+      return NextResponse.json(redactSecrets({ registry }));
     }
 
     if (input.action === "groups") {
@@ -193,7 +194,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
         groupAssignments: normalizeGroupAssignments(input.groupAssignments ?? [])
       });
 
-      return NextResponse.json({ registry });
+      return NextResponse.json(redactSecrets({ registry }));
     }
 
     if (input.action === "bind-agent") {
@@ -213,7 +214,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
         agentId: input.agentId
       });
 
-      return NextResponse.json({ registry });
+      return NextResponse.json(redactSecrets({ registry }));
     }
 
     if (!input.agentId) {
@@ -226,11 +227,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
       agentId: input.agentId
     });
 
-    return NextResponse.json({ registry });
+    return NextResponse.json(redactSecrets({ registry }));
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to update channel."
+        error: redactErrorMessage(error, "Unable to update channel.")
       },
       { status: 400 }
     );
@@ -265,17 +266,17 @@ export async function DELETE(request: Request, context: { params: Promise<{ work
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
-    return NextResponse.json({
+    return NextResponse.json(redactSecrets({
       registry,
       timings: summary
-    });
+    }));
   } catch (error) {
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to delete channel.",
+        error: redactErrorMessage(error, "Unable to delete channel."),
         timings: summary
       },
       { status: 400 }

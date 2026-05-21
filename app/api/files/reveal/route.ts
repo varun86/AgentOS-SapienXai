@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
+
+import { redactErrorMessage } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +44,11 @@ export async function POST(request: Request) {
 
     if (basePath) {
       const resolvedBasePath = path.resolve(basePath);
-      const relativeToBase = path.relative(resolvedBasePath, resolvedTargetPath);
+      const [baseRealPath, targetRealPath] = await Promise.all([
+        realpath(resolvedBasePath),
+        realpath(resolvedTargetPath)
+      ]);
+      const relativeToBase = path.relative(baseRealPath, targetRealPath);
 
       if (relativeToBase.startsWith("..") || path.isAbsolute(relativeToBase)) {
         throw new Error("File path must stay within the workspace.");
@@ -56,7 +62,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to reveal file."
+        error: redactErrorMessage(error, "Unable to reveal file.")
       },
       { status: 400 }
     );

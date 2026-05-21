@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { submitWorkspaceDocumentRewrite } from "@/lib/agentos/planner";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,11 +26,11 @@ export async function POST(
     const { planId } = await context.params;
     const input = documentRewriteSchema.parse(await request.json());
     const result = await submitWorkspaceDocumentRewrite(planId, input);
-    return NextResponse.json(result);
+    return NextResponse.json(redactSecrets(result));
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to rewrite planner document."
+        error: redactErrorMessage(error, "Unable to rewrite planner document.")
       },
       { status: 400 }
     );

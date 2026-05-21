@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createAgent, deleteAgent, getMissionControlSnapshot, updateAgent } from "@/lib/agentos/control-plane";
+import { redactSecretText, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,16 +56,16 @@ const deleteAgentSchema = z.object({
 
 export async function GET() {
   const snapshot = await getMissionControlSnapshot();
-  return NextResponse.json({
+  return NextResponse.json(redactSecrets({
     agents: snapshot.agents
-  });
+  }));
 }
 
 export async function POST(request: Request) {
   try {
     const input = createAgentSchema.parse(await request.json());
     const created = await createAgent(input);
-    return NextResponse.json(created);
+    return NextResponse.json(redactSecrets(created));
   } catch (error) {
     return NextResponse.json(
       {
@@ -79,7 +80,7 @@ export async function PATCH(request: Request) {
   try {
     const input = updateAgentSchema.parse(await request.json());
     const updated = await updateAgent(input);
-    return NextResponse.json(updated);
+    return NextResponse.json(redactSecrets(updated));
   } catch (error) {
     return NextResponse.json(
       {
@@ -94,7 +95,7 @@ export async function DELETE(request: Request) {
   try {
     const input = deleteAgentSchema.parse(await request.json());
     const deleted = await deleteAgent(input);
-    return NextResponse.json(deleted);
+    return NextResponse.json(redactSecrets(deleted));
   } catch (error) {
     return NextResponse.json(
       {
@@ -109,7 +110,7 @@ function formatAgentApiError(
   action: "create" | "update" | "delete",
   error: unknown
 ) {
-  const message = error instanceof Error ? error.message : "";
+  const message = error instanceof Error ? redactSecretText(error.message) : "";
 
   if (/Config path not found:\s*agents\.list/i.test(message)) {
     return "OpenClaw is still initializing the agent registry for this workspace. Please try again in a moment.";

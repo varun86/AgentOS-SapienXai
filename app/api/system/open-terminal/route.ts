@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
+import { redactErrorMessage } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to open Terminal."
+        error: redactErrorMessage(error, "Unable to open Terminal.")
       },
       { status: 400 }
     );

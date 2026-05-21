@@ -6,6 +6,7 @@ import {
   runOpenClawJsonStream
 } from "@/lib/openclaw/cli";
 import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
+import { containsRedactedOpenClawSecret } from "@/lib/openclaw/client/native-ws-gateway-utils";
 import { OPENCLAW_GATEWAY_PROTOCOL_RANGE } from "@/lib/openclaw/client/native-ws-gateway-types";
 import type {
   AgentPayload,
@@ -741,6 +742,10 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     value: unknown,
     options: OpenClawCommandOptions & { strictJson?: boolean } = {}
   ) {
+    if (containsRedactedOpenClawSecret(value)) {
+      throw new Error("Refusing to write a redacted OpenClaw secret back to config.");
+    }
+
     const args = ["config", "set", path, typeof value === "string" ? value : JSON.stringify(value)];
 
     if (options.strictJson) {

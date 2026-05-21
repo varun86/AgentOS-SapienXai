@@ -262,8 +262,7 @@ export async function writeWorkspaceManagedFileForPath(
   }
 
   const parentPath = path.dirname(absolutePath);
-  await mkdir(parentPath, { recursive: true });
-  await assertRealPathInsideWorkspace(parentPath, workspaceRealPath);
+  await ensureWorkspaceDirectory(parentPath, workspacePath, workspaceRealPath);
 
   if (file.exists) {
     await assertExistingFileSafe(absolutePath, workspaceRealPath);
@@ -815,6 +814,39 @@ async function assertExistingFileSafe(absolutePath: string, workspaceRealPath: s
   }
 
   await assertRealPathInsideWorkspace(absolutePath, workspaceRealPath);
+}
+
+async function ensureWorkspaceDirectory(absolutePath: string, workspacePath: string, workspaceRealPath: string) {
+  const absoluteWorkspacePath = path.resolve(workspacePath);
+  const workspacePrefix = `${absoluteWorkspacePath}${path.sep}`;
+
+  if (absolutePath !== absoluteWorkspacePath && !absolutePath.startsWith(workspacePrefix)) {
+    throw new Error("Workspace file path is outside the workspace.");
+  }
+
+  const relativePath = path.relative(absoluteWorkspacePath, absolutePath);
+  const segments = relativePath ? relativePath.split(path.sep).filter(Boolean) : [];
+  let currentPath = absoluteWorkspacePath;
+
+  for (const segment of segments) {
+    currentPath = path.join(currentPath, segment);
+
+    try {
+      const stat = await lstat(currentPath);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        throw new Error("Workspace file parent path is not a regular directory.");
+      }
+
+      await assertRealPathInsideWorkspace(currentPath, workspaceRealPath);
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+
+      await mkdir(currentPath);
+      await assertRealPathInsideWorkspace(currentPath, workspaceRealPath);
+    }
+  }
 }
 
 async function assertRealPathInsideWorkspace(absolutePath: string, workspaceRealPath: string) {

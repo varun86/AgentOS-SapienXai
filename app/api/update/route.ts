@@ -22,6 +22,7 @@ import {
   buildOpenClawRuntimeSmokeTestRecoveryCommand,
   classifyOpenClawRuntimeSmokeTestFailure
 } from "@/lib/openclaw/runtime-compatibility";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Update confirmation is required."
+        error: redactErrorMessage(error, "Update confirmation is required.")
       },
       { status: 400 }
     );
@@ -80,8 +81,9 @@ export async function POST(request: Request) {
   let writeChain = Promise.resolve();
 
   const send = (event: OpenClawUpdateStreamEvent) => {
+    const safeEvent = redactSecrets(event);
     writeChain = writeChain
-      .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+      .then(() => writer.write(encoder.encode(`${JSON.stringify(safeEvent)}\n`)))
       .catch(() => {});
 
     return writeChain;
@@ -111,7 +113,7 @@ export async function POST(request: Request) {
       await send({
         type: "done",
         ok: false,
-        message: error instanceof Error ? error.message : "OpenClaw CLI could not be resolved.",
+        message: redactErrorMessage(error, "OpenClaw CLI could not be resolved."),
         exitCode: null,
         stdout,
         stderr
@@ -335,10 +337,8 @@ export async function POST(request: Request) {
             exitCode: code,
             stdout,
             stderr: stderr
-              ? `${stderr}\n${error instanceof Error ? error.message : "Status refresh failed."}`
-              : error instanceof Error
-                ? error.message
-                : "Status refresh failed."
+              ? `${stderr}\n${redactErrorMessage(error, "Status refresh failed.")}`
+              : redactErrorMessage(error, "Status refresh failed.")
           });
         }
 

@@ -28,6 +28,7 @@ import {
   resolveOpenClawRuntimePreflightError
 } from "@/lib/openclaw/runtime-compatibility";
 import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
+import { redactErrorMessage, redactSecretText, redactSecrets } from "@/lib/security/redaction";
 import type { ControlPlaneSnapshot, MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
 import type { TranscriptTurn } from "@/lib/openclaw/domains/runtime-transcript";
 
@@ -109,12 +110,13 @@ export async function POST(
     let closed = false;
 
     const send = (event: AgentChatStreamEvent) => {
+      const safeEvent = redactSecrets(event);
       if (closed) {
         return Promise.resolve();
       }
 
       writeChain = writeChain
-        .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+        .then(() => writer.write(encoder.encode(`${JSON.stringify(safeEvent)}\n`)))
         .catch(() => {});
 
       return writeChain;
@@ -348,11 +350,11 @@ export async function POST(
           return;
         }
 
-        const rawFailure = stringifyCommandFailure(error) || (error instanceof Error ? error.message : "");
+        const rawFailure = redactSecretText(stringifyCommandFailure(error) || redactErrorMessage(error, ""));
         const failureMessage =
           resolveOpenClawRuntimeFailureMessage(rawFailure) ||
           (error instanceof Error
-            ? error.message
+            ? redactSecretText(error.message)
             : "OpenClaw could not send the message right now. Please try again.");
 
         if (isOpenAiCodexAuthFailure(rawFailure) || isOpenAiCodexAuthFailure(failureMessage)) {
@@ -389,9 +391,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
-            : "OpenClaw could not send the message right now. Please try again."
+          redactErrorMessage(error, "OpenClaw could not send the message right now. Please try again.")
       },
       { status: 400 }
     );

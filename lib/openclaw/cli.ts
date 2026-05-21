@@ -12,6 +12,7 @@ import {
   readOpenClawBinarySelection,
   resolveOpenClawBinarySelectionPath
 } from "@/lib/openclaw/binary-selection";
+import { redactSecretText } from "@/lib/security/redaction";
 import type { OpenClawCommandDiagnostic } from "@/lib/openclaw/types";
 
 export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
@@ -460,7 +461,7 @@ function parseJsonOutput<T>(text: string): T {
     }
   }
 
-  throw new Error(`Unable to parse OpenClaw JSON output:\n${trimmed.slice(0, 800)}`);
+  throw new Error(`Unable to parse OpenClaw JSON output:\n${redactSecretText(trimmed.slice(0, 800))}`);
 }
 
 function extractFailedCommandResult(error: unknown): CommandResult | null {
@@ -491,7 +492,7 @@ export function parseOpenClawVersion(output: string) {
 }
 
 function createCommandError(message: string, stdout: string, stderr: string, code: number | null) {
-  const failureDetail = summarizeCommandFailure(stderr || stdout);
+  const failureDetail = redactSecretText(summarizeCommandFailure(stderr || stdout));
   const resolvedMessage =
     code !== null && /^OpenClaw command failed with exit code \d+\.$/.test(message) && failureDetail
       ? `${message.slice(0, -1)}: ${failureDetail}.`
@@ -588,9 +589,13 @@ function sanitizeCommandArgs(args: string[]) {
   const redactedValueFlags = new Set([
     "--message",
     "--api-key",
+    "--bot-token",
+    "--hook-token",
+    "--push-token",
     "--token",
     "--password",
     "--secret",
+    "--webhook-url",
     "--key"
   ]);
   const sanitized: string[] = [];
@@ -629,7 +634,8 @@ function previewCommandOutput(output: string) {
     return null;
   }
 
-  return normalized.length > 800 ? `${normalized.slice(0, 797)}...` : normalized;
+  const redacted = redactSecretText(normalized);
+  return redacted.length > 800 ? `${redacted.slice(0, 797)}...` : redacted;
 }
 
 function quoteShellSegment(value: string) {

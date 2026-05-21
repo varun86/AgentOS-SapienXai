@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { discoverSurfaceRoutes } from "@/lib/agentos/control-plane";
 import { createTimingCollector, formatTimingSummary, measureTiming } from "@/lib/openclaw/timing";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,20 +24,20 @@ export async function GET(request: Request, context: { params: Promise<{ workspa
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
-    return NextResponse.json({
+    return NextResponse.json(redactSecrets({
       provider,
       accountId,
       routes,
       supported,
       timings: summary
-    });
+    }));
   } catch (error) {
     const summary = timings.summary();
     console.info(formatTimingSummary(summary));
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to discover integration routes.",
+        error: redactErrorMessage(error, "Unable to discover integration routes."),
         timings: summary
       },
       { status: 400 }

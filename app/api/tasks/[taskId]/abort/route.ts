@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { abortMissionTask } from "@/lib/agentos/control-plane";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export async function POST(
   if (!parseResult.success) {
     return NextResponse.json(
       {
-        error: parseResult.error.message
+        error: redactErrorMessage(parseResult.error, "Invalid task abort request.")
       },
       { status: 400 }
     );
@@ -38,13 +39,13 @@ export async function POST(
 
   try {
     const result = await abortMissionTask(taskId, parseResult.data.reason ?? null, parseResult.data.dispatchId ?? null);
-    return NextResponse.json({
+    return NextResponse.json(redactSecrets({
       result
-    });
+    }));
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to abort the task."
+        error: redactErrorMessage(error, "Unable to abort the task.")
       },
       { status: 400 }
     );

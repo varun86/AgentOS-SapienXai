@@ -7,6 +7,7 @@ import {
   getMissionControlSnapshot,
   updateWorkspaceProject
 } from "@/lib/agentos/control-plane";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 import type { OperationProgressSnapshot, WorkspaceCreateStreamEvent } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
@@ -88,9 +89,9 @@ const workspaceDeleteSchema = z.object({
 
 export async function GET() {
   const snapshot = await getMissionControlSnapshot();
-  return NextResponse.json({
+  return NextResponse.json(redactSecrets({
     workspaces: snapshot.workspaces
-  });
+  }));
 }
 
 export async function POST(request: Request) {
@@ -101,7 +102,7 @@ export async function POST(request: Request) {
     if (!stream) {
       const created = await createWorkspaceProject(input);
 
-      return NextResponse.json(created);
+      return NextResponse.json(redactSecrets(created));
     }
 
     const responseStream = new TransformStream();
@@ -111,8 +112,9 @@ export async function POST(request: Request) {
     let latestProgress: OperationProgressSnapshot | undefined;
 
     const send = (event: WorkspaceCreateStreamEvent) => {
+      const safeEvent = redactSecrets(event);
       writeChain = writeChain
-        .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+        .then(() => writer.write(encoder.encode(`${JSON.stringify(safeEvent)}\n`)))
         .catch(() => {});
 
       return writeChain;
@@ -147,7 +149,7 @@ export async function POST(request: Request) {
         await send({
           type: "done",
           ok: false,
-          error: error instanceof Error ? error.message : "Unable to create workspace.",
+          error: redactErrorMessage(error, "Unable to create workspace."),
           progress: latestProgress
         });
       } finally {
@@ -166,7 +168,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to create workspace."
+        error: redactErrorMessage(error, "Unable to create workspace.")
       },
       { status: 400 }
     );
@@ -178,11 +180,11 @@ export async function PATCH(request: Request) {
     const input = workspaceUpdateSchema.parse(await request.json());
     const updated = await updateWorkspaceProject(input);
 
-    return NextResponse.json(updated);
+    return NextResponse.json(redactSecrets(updated));
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to update workspace."
+        error: redactErrorMessage(error, "Unable to update workspace.")
       },
       { status: 400 }
     );
@@ -194,11 +196,11 @@ export async function DELETE(request: Request) {
     const input = workspaceDeleteSchema.parse(await request.json());
     const deleted = await deleteWorkspaceProject(input);
 
-    return NextResponse.json(deleted);
+    return NextResponse.json(redactSecrets(deleted));
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to delete workspace."
+        error: redactErrorMessage(error, "Unable to delete workspace.")
       },
       { status: 400 }
     );

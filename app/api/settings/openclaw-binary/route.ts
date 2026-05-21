@@ -12,6 +12,7 @@ import {
 } from "@/lib/openclaw/binary-selection";
 import { getOpenClawLocalPrefixBinPath } from "@/lib/openclaw/install";
 import { resetOpenClawBinCache } from "@/lib/openclaw/cli";
+import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,13 +53,13 @@ export async function PATCH(request: Request) {
     const snapshot = await getMissionControlSnapshot({ force: true });
 
     return NextResponse.json({
-      snapshot,
+      snapshot: redactSecrets(snapshot),
       selection: nextSelection
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to update the OpenClaw binary selection."
+        error: redactErrorMessage(error, "Unable to update the OpenClaw binary selection.")
       },
       { status: 400 }
     );
