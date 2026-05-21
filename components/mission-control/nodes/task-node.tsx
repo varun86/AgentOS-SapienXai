@@ -178,6 +178,14 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
   const turnCount = readTaskTurnCount(displayTask);
   const feedButtonCount = visibleFeed.length > 0 ? String(visibleFeed.length) : undefined;
   const feedPanelId = `task-feed-${data.task.id}`;
+  const visualTone = resolveTaskVisualTone({
+    completedNeedsReview,
+    isAborted,
+    isJustCreated,
+    isPendingCreation,
+    status: displayTask.status,
+    visibleReviewStatus
+  });
 
   useEffect(() => {
     if (!menuOpen) {
@@ -219,30 +227,23 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           : undefined
       }
       className={cn(
-        "relative w-[272px] overflow-visible rounded-[22px] border border-amber-200/10 bg-[linear-gradient(180deg,rgba(20,18,14,0.98),rgba(9,8,6,0.96))] p-3.5 shadow-[0_18px_36px_rgba(0,0,0,0.28)] backdrop-blur-xl",
+        "group relative w-[282px] overflow-visible rounded-[18px] border bg-[linear-gradient(180deg,rgba(13,18,30,0.96),rgba(7,10,18,0.96))] p-3 shadow-[0_18px_42px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-[border-color,box-shadow,opacity] duration-200",
+        visualTone.outer,
         data.emphasis ? "opacity-100" : "opacity-72",
-        selected && "border-cyan-300/[0.45] shadow-[0_20px_46px_rgba(34,211,238,0.16)]",
-        isPendingCreation && "border-cyan-300/30 shadow-[0_24px_54px_rgba(34,211,238,0.2)]",
-        isJustCreated && "border-cyan-200/40 shadow-[0_24px_56px_rgba(125,211,252,0.18)]",
-        isAborted && "border-rose-300/30 shadow-[0_24px_54px_rgba(244,63,94,0.14)]",
-        displayTask.status === "completed" &&
-          !completedNeedsReview &&
-          !isAborted &&
-          !isPendingCreation &&
-          !isJustCreated &&
-          "border-white/[0.06] bg-[linear-gradient(180deg,rgba(13,18,30,0.9),rgba(8,12,22,0.9))]"
+        selected && "border-cyan-300/[0.5] shadow-[0_22px_52px_rgba(34,211,238,0.18)]"
       )}
     >
-      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[22px]">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_82%_0%,rgba(251,191,36,0.22),transparent_30%),radial-gradient(circle_at_12%_100%,rgba(217,119,6,0.08),transparent_26%)]" />
-        <div className="absolute inset-x-0 top-0 h-[4px] bg-[linear-gradient(90deg,rgba(251,191,36,0.78),rgba(217,119,6,0.18),rgba(255,255,255,0.04))]" />
-        <div className="absolute right-3 top-3 h-12 w-12 rounded-full bg-amber-300/10 blur-xl" />
+      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[18px]">
+        <div className={cn("absolute inset-y-3 left-0 w-1 rounded-r-full", visualTone.rail)} />
+        <div className={cn("absolute inset-x-0 top-0 h-px", visualTone.topLine)} />
+        <div className={cn("absolute -right-10 -top-10 h-28 w-28 rounded-full blur-3xl", visualTone.glow)} />
+        <div className="absolute inset-x-3 bottom-0 h-px bg-white/[0.04]" />
       </div>
 
       <div className="relative z-10">
       {isPendingCreation ? (
         <motion.div
-          className="pointer-events-none absolute inset-[-16px] rounded-[24px] border border-cyan-200/16"
+          className="pointer-events-none absolute inset-[-14px] rounded-[22px] border border-cyan-200/16"
           animate={{ opacity: [0.18, 0.42, 0.18], scale: [0.985, 1.02, 0.985] }}
           transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
         />
@@ -252,15 +253,30 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         type="target"
         id="target-left"
         position={Position.Left}
-        className="!h-2.5 !w-2.5 !border-0 !bg-white/35"
+        className={cn("!h-2.5 !w-2.5 !border-0", visualTone.handle)}
       />
 
-      <div className="relative z-20 overflow-visible rounded-[18px] border border-amber-200/12 bg-amber-400/[0.05] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <div className="relative z-20 overflow-visible">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[9px] uppercase tracking-[0.24em] text-amber-100/75">Task</div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "inline-flex h-1.5 w-1.5 shrink-0 rounded-full",
+                  visualTone.dot,
+                  showsLiveActivity && "motion-safe:animate-pulse"
+                )}
+              />
+              <span className="text-[9px] uppercase tracking-[0.22em] text-slate-400">Task</span>
+              {data.locked ? <Lock className="h-3 w-3 text-slate-500" /> : null}
+            </div>
+            <p className="mt-1 max-w-[156px] truncate text-[10px] uppercase tracking-[0.14em] text-slate-500">
+              {displayTask.primaryAgentName || "OpenClaw"}
+            </p>
+          </div>
 
           <div className="nodrag nopan relative flex items-center gap-1.5" ref={menuRef}>
-            <Badge variant={badgeVariant} className="max-w-[112px] truncate">
+            <Badge variant={badgeVariant} className="max-w-[124px] truncate">
               {badgeLabel}
             </Badge>
             <button
@@ -271,7 +287,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
                 setMenuOpen((current) => !current);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              className="nodrag nopan inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+              className="nodrag nopan inline-flex rounded-full border border-white/[0.08] bg-white/[0.04] p-1.5 text-slate-300 transition-colors hover:border-white/[0.14] hover:bg-white/[0.08] hover:text-white"
             >
               <MoreHorizontal className="h-3 w-3" />
             </button>
@@ -345,22 +361,27 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           </div>
         </div>
 
-        <div className="mt-3 flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-amber-300/20 bg-amber-400/[0.1] text-amber-100 shadow-[0_0_20px_rgba(251,191,36,0.12)]">
+        <div className="mt-3 flex items-start gap-2.5">
+          <div
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border shadow-[0_0_22px_rgba(255,255,255,0.05)]",
+              visualTone.icon
+            )}
+          >
             <ClipboardList className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="line-clamp-2 font-display text-[1rem] leading-5 text-white">
-              {compactMissionText(promptText, 96) || promptText}
+            <p className="line-clamp-2 font-display text-[0.98rem] leading-5 text-white">
+              {compactMissionText(promptText, 112) || promptText}
             </p>
-            <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.16em] text-slate-500">
-              {displayTask.primaryAgentName || "OpenClaw"}
+            <p className="mt-1 truncate text-[10.5px] leading-4 text-slate-400">
+              {activityLabel}
             </p>
           </div>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
         {displayTask.warningCount > 0 && !hasReviewResolution ? (
           <Badge variant="warning">
             {displayTask.warningCount} review{displayTask.warningCount === 1 ? "" : "s"}
@@ -372,24 +393,28 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             new
           </Badge>
         ) : null}
-        <Badge variant="muted">{sessionCount} session{sessionCount === 1 ? "" : "s"}</Badge>
-        <Badge variant="muted">{turnCount} turn{turnCount === 1 ? "" : "s"}</Badge>
-        <span className={cn("text-[9px] uppercase tracking-[0.18em]", tone)}>
+        <span className="rounded-full border border-white/[0.08] bg-white/[0.035] px-2 py-1 text-[10px] leading-none text-slate-300">
+          {sessionCount} session{sessionCount === 1 ? "" : "s"}
+        </span>
+        <span className="rounded-full border border-white/[0.08] bg-white/[0.035] px-2 py-1 text-[10px] leading-none text-slate-300">
+          {turnCount} turn{turnCount === 1 ? "" : "s"}
+        </span>
+        <span className={cn("px-1 text-[9px] uppercase tracking-[0.16em]", tone)}>
           {formatTokens(displayTask.tokenUsage?.total)} tokens
         </span>
       </div>
 
-      <div className="mt-3 rounded-[16px] border border-amber-300/12 bg-amber-400/[0.04] px-3 py-2.5">
+      <div className={cn("mt-2.5 border-l pl-3", visualTone.resultBorder)}>
         <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Latest result</p>
-        <p className="mt-1 line-clamp-3 text-[12.5px] leading-5 text-slate-100">
-          {compactMissionText(resultPreview, 168) || resultPreview}
+        <p className="mt-1 line-clamp-2 text-[12.5px] leading-5 text-slate-100/95">
+          {compactMissionText(resultPreview, 128) || resultPreview}
         </p>
       </div>
 
       {completedNeedsReview && data.onReviewTask ? (
         <button
           type="button"
-          className="nodrag nopan mt-3 flex w-full items-center justify-between gap-3 rounded-[14px] border border-amber-300/24 bg-amber-300/[0.1] px-3 py-2.5 text-left text-amber-50 shadow-[0_10px_24px_rgba(245,158,11,0.12)] transition-colors hover:border-amber-200/38 hover:bg-amber-300/[0.14]"
+          className="nodrag nopan mt-3 flex w-full items-center justify-between gap-3 rounded-[13px] border border-amber-300/24 bg-amber-300/[0.1] px-3 py-2.5 text-left text-amber-50 shadow-[0_10px_24px_rgba(245,158,11,0.12)] transition-colors hover:border-amber-200/38 hover:bg-amber-300/[0.14]"
           onClick={(event) => {
             event.stopPropagation();
             data.onReviewTask?.(displayTask);
@@ -413,7 +438,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         </button>
       ) : null}
 
-      <div className="mt-3 grid grid-cols-3 gap-1.5">
+      <div className="mt-2.5 grid grid-cols-3 gap-1.5">
         <TaskQuickAction
           icon={Rows3}
           label="Feed"
@@ -442,12 +467,12 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         />
       </div>
 
-      <div className={cn("mt-3 border-t border-white/[0.08] pt-2.5", expanded && "pb-1")}>
+      <div className={cn("mt-2.5 rounded-[14px] border border-white/[0.07] bg-white/[0.025] px-2.5 py-1.5", expanded && "pb-2.5")}>
         <button
           type="button"
           aria-expanded={expanded}
           aria-controls={feedPanelId}
-          className="nodrag nopan group flex w-full items-start justify-between gap-3 rounded-[14px] border border-transparent px-1 py-1.5 text-left transition-colors hover:border-white/[0.06] hover:bg-white/[0.02]"
+          className="nodrag nopan group flex w-full items-start justify-between gap-3 rounded-[10px] border border-transparent px-1 py-1 text-left transition-colors hover:bg-white/[0.035]"
           onClick={(event) => {
             event.stopPropagation();
             setExpanded((current) => !current);
@@ -455,16 +480,16 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.2em] text-slate-500 transition-colors group-hover:text-slate-400">
+            <p className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.18em] text-slate-500 transition-colors group-hover:text-slate-400">
               {showsLiveActivity ? (
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.7)] motion-safe:animate-pulse" />
+                <span className={cn("inline-flex h-1.5 w-1.5 rounded-full shadow-[0_0_10px_rgba(34,211,238,0.7)]", visualTone.dot, "motion-safe:animate-pulse")} />
               ) : null}
               <span>Live feed</span>
             </p>
-            <p className="mt-1 truncate text-[10px] text-slate-300">{activityLabel}</p>
-            <p className="mt-1 truncate text-[10px] text-slate-500">{activitySummary}</p>
+            <p className="mt-1 truncate text-[10.5px] text-slate-300">{activityLabel}</p>
+            {expanded ? <p className="mt-1 truncate text-[10px] text-slate-500">{activitySummary}</p> : null}
           </div>
-          <div className="mt-0.5 shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] p-1 text-slate-400 transition-colors group-hover:border-white/[0.12] group-hover:text-slate-200">
+          <div className="mt-0.5 shrink-0 rounded-full border border-white/[0.08] bg-white/[0.035] p-1 text-slate-400 transition-colors group-hover:border-white/[0.12] group-hover:text-slate-200">
             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
           </div>
         </button>
@@ -480,7 +505,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="pt-2.5">
-              <ScrollArea className="h-[164px] w-full pr-3">
+              <ScrollArea className="h-[112px] w-full pr-3">
                 {loading && visibleFeed.length === 0 ? (
                   <div className="py-4 text-center text-[10px] text-slate-500">
                     Connecting to feed...
@@ -532,6 +557,98 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
       </div>
     </motion.div>
   );
+}
+
+function resolveTaskVisualTone({
+  completedNeedsReview,
+  isAborted,
+  isJustCreated,
+  isPendingCreation,
+  status,
+  visibleReviewStatus
+}: {
+  completedNeedsReview: boolean;
+  isAborted: boolean;
+  isJustCreated: boolean;
+  isPendingCreation: boolean;
+  status: TaskFlowNode["data"]["task"]["status"];
+  visibleReviewStatus: string | null;
+}) {
+  if (isAborted) {
+    return {
+      dot: "bg-rose-300",
+      glow: "bg-rose-400/[0.12]",
+      handle: "!bg-rose-300/70",
+      icon: "border-rose-300/20 bg-rose-400/[0.09] text-rose-100",
+      outer: "border-rose-300/[0.24]",
+      rail: "bg-gradient-to-b from-rose-300 via-rose-400/70 to-rose-500/20",
+      resultBorder: "border-rose-300/20",
+      topLine: "bg-gradient-to-r from-rose-300/55 via-rose-400/[0.16] to-transparent"
+    };
+  }
+
+  if (completedNeedsReview) {
+    return {
+      dot: "bg-amber-300",
+      glow: "bg-amber-300/[0.16]",
+      handle: "!bg-amber-300/75",
+      icon: "border-amber-300/[0.22] bg-amber-400/[0.1] text-amber-100",
+      outer: "border-amber-300/[0.26] shadow-[0_22px_50px_rgba(245,158,11,0.12)]",
+      rail: "bg-gradient-to-b from-amber-200 via-amber-400/80 to-amber-500/[0.22]",
+      resultBorder: "border-amber-300/[0.24]",
+      topLine: "bg-gradient-to-r from-amber-200/[0.62] via-amber-400/[0.18] to-transparent"
+    };
+  }
+
+  if (isPendingCreation || status === "running" || status === "queued") {
+    return {
+      dot: "bg-cyan-300",
+      glow: "bg-cyan-300/[0.14]",
+      handle: "!bg-cyan-300/75",
+      icon: "border-cyan-300/20 bg-cyan-300/[0.09] text-cyan-100",
+      outer: "border-cyan-300/[0.22] shadow-[0_22px_50px_rgba(34,211,238,0.12)]",
+      rail: "bg-gradient-to-b from-cyan-200 via-cyan-400/[0.78] to-sky-500/[0.22]",
+      resultBorder: "border-cyan-300/[0.22]",
+      topLine: "bg-gradient-to-r from-cyan-200/[0.58] via-cyan-400/[0.18] to-transparent"
+    };
+  }
+
+  if (visibleReviewStatus === "accepted" || status === "completed") {
+    return {
+      dot: "bg-emerald-300",
+      glow: "bg-emerald-300/10",
+      handle: "!bg-emerald-300/65",
+      icon: "border-emerald-300/[0.18] bg-emerald-300/[0.07] text-emerald-100",
+      outer: "border-emerald-300/[0.16]",
+      rail: "bg-gradient-to-b from-emerald-200 via-emerald-400/[0.58] to-emerald-500/[0.16]",
+      resultBorder: "border-emerald-300/[0.16]",
+      topLine: "bg-gradient-to-r from-emerald-200/[0.42] via-emerald-400/[0.12] to-transparent"
+    };
+  }
+
+  if (isJustCreated) {
+    return {
+      dot: "bg-sky-300",
+      glow: "bg-sky-300/[0.14]",
+      handle: "!bg-sky-300/70",
+      icon: "border-sky-300/20 bg-sky-300/[0.08] text-sky-100",
+      outer: "border-sky-300/[0.24]",
+      rail: "bg-gradient-to-b from-sky-200 via-sky-400/70 to-cyan-500/20",
+      resultBorder: "border-sky-300/[0.18]",
+      topLine: "bg-gradient-to-r from-sky-200/[0.52] via-sky-400/[0.14] to-transparent"
+    };
+  }
+
+  return {
+    dot: "bg-slate-400",
+    glow: "bg-slate-200/[0.08]",
+    handle: "!bg-white/35",
+    icon: "border-white/[0.08] bg-white/[0.045] text-slate-200",
+    outer: "border-white/[0.085]",
+    rail: "bg-gradient-to-b from-slate-300/70 via-slate-500/[0.42] to-slate-600/[0.12]",
+    resultBorder: "border-white/[0.1]",
+    topLine: "bg-gradient-to-r from-white/[0.24] via-white/[0.06] to-transparent"
+  };
 }
 
 function resolveTaskBadgeLabel(
@@ -691,8 +808,8 @@ function TaskQuickAction({
     <button
       type="button"
       className={cn(
-        "nodrag nopan flex min-h-[38px] w-full items-center justify-between rounded-[12px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-2.5 py-1.5 text-left transition-colors hover:border-amber-300/20 hover:bg-amber-400/[0.06]",
-        active && "border-amber-300/30 bg-amber-400/[0.08]"
+        "nodrag nopan flex min-h-[34px] w-full items-center justify-between rounded-[11px] border border-white/[0.07] bg-white/[0.03] px-2 py-1.5 text-left transition-colors hover:border-cyan-200/[0.18] hover:bg-white/[0.055]",
+        active && "border-cyan-200/25 bg-cyan-300/[0.07]"
       )}
       onClick={(event) => {
         event.stopPropagation();
@@ -700,11 +817,11 @@ function TaskQuickAction({
       }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="flex min-w-0 items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-slate-400">
-        <Icon className="h-3 w-3 shrink-0" />
-        <span className="truncate">{label}</span>
+      <div className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium text-slate-300">
+        <Icon className={cn("h-3 w-3 shrink-0", active ? "text-cyan-200" : "text-slate-500")} />
+        <span className="whitespace-nowrap">{label}</span>
       </div>
-      {value ? <span className="ml-2 shrink-0 font-mono text-[10px] text-slate-200">{value}</span> : null}
+      {value ? <span className="ml-1.5 shrink-0 font-mono text-[10px] text-slate-200">{value}</span> : null}
     </button>
   );
 }
