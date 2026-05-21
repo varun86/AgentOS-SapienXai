@@ -161,21 +161,29 @@ test("model provider API route keeps local OpenClaw config state behind the appl
 
 test("local Gateway port probes do not claim authenticated RPC readiness", () => {
   const probeSource = readFileSync(path.join(rootDir, "lib/openclaw/client/local-gateway-probe.ts"), "utf8");
-  const missionControlSource = readFileSync(
-    path.join(rootDir, "lib/openclaw/application/mission-control-service.ts"),
+  const snapshotLoaderSource = readFileSync(
+    path.join(rootDir, "lib/openclaw/application/mission-control/snapshot-loader.ts"),
+    "utf8"
+  );
+  const systemReadinessSource = readFileSync(
+    path.join(rootDir, "lib/openclaw/application/mission-control/system-readiness-snapshot.ts"),
     "utf8"
   );
 
   assert.doesNotMatch(probeSource, /rpc:\s*\{\s*ok:\s*true\s*\}/);
-  assert.match(missionControlSource, /const shouldHydrateGatewayStatus = gatewayStatusCacheNeedsRefresh;/);
-  assert.doesNotMatch(missionControlSource, /const shouldHydrateGatewayStatus = !localGatewayStatus/);
-  assert.match(missionControlSource, /let resolvedGatewayStatus = gatewayStatusCache\.resolve\(gatewayStatusResult\);/);
-  assert.match(missionControlSource, /const gatewayStatusResult = await settleGatewayStatusPayloadFromOpenClaw\(3_000\);/);
+  assert.match(snapshotLoaderSource, /const shouldHydrateGatewayStatus = gatewayStatusCacheNeedsRefresh;/);
+  assert.doesNotMatch(snapshotLoaderSource, /const shouldHydrateGatewayStatus = !localGatewayStatus/);
+  assert.match(snapshotLoaderSource, /let resolvedGatewayStatus = gatewayStatusCache\.resolve\(gatewayStatusResult\);/);
+  assert.match(systemReadinessSource, /const gatewayStatusResult = await settleGatewayStatusPayloadFromOpenClaw\(3_000\);/);
 });
 
 test("runtime state uses Gateway snapshot and adapter event subscriptions", () => {
-  const missionControlSource = readFileSync(
-    path.join(rootDir, "lib/openclaw/application/mission-control-service.ts"),
+  const snapshotLoaderSource = readFileSync(
+    path.join(rootDir, "lib/openclaw/application/mission-control/snapshot-loader.ts"),
+    "utf8"
+  );
+  const runtimeReconciliationSource = readFileSync(
+    path.join(rootDir, "lib/openclaw/application/mission-control/runtime-reconciliation.ts"),
     "utf8"
   );
   const eventBridgeSource = readFileSync(
@@ -187,8 +195,8 @@ test("runtime state uses Gateway snapshot and adapter event subscriptions", () =
     "utf8"
   );
 
-  assert.match(missionControlSource, /settleRuntimeSnapshotPayloadFromOpenClaw/);
-  assert.match(missionControlSource, /mapOpenClawRuntimeSnapshotToRuntimes/);
+  assert.match(snapshotLoaderSource, /settleRuntimeSnapshotPayloadFromOpenClaw/);
+  assert.match(runtimeReconciliationSource, /mapOpenClawRuntimeSnapshotToRuntimes/);
   assert.match(eventBridgeSource, /getOpenClawAdapter\(\)\.subscribeRuntimeEvents/);
   assert.doesNotMatch(eventBridgeSource, /new NativeWsOpenClawGatewayClient/);
   assert.match(runtimeStateSource, /getOpenClawAdapter\(\)\.getRuntimeSnapshot/);
@@ -441,7 +449,10 @@ test("sidebar keeps transient compatibility diagnostics out of the health card",
 });
 
 test("mission control snapshot does not call Gateway config.get for remote url", () => {
-  const source = readFileSync(path.join(rootDir, "lib/openclaw/application/mission-control-service.ts"), "utf8");
+  const source = readFileSync(
+    path.join(rootDir, "lib/openclaw/application/mission-control/payload-loader.ts"),
+    "utf8"
+  );
 
   assert.match(source, /readFile\(path\.join\(openClawStateRootPath, "openclaw\.json"\), "utf8"\)/);
   assert.match(source, /readNestedConfigValue\(config, gatewayRemoteUrlConfigKey\)/);
