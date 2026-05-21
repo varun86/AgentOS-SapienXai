@@ -1168,6 +1168,31 @@ function buildSessionPreviewParams(input: OpenClawSessionHistoryInput = {}) {
   };
 }
 
+function buildArtifactListParams(input: OpenClawArtifactListInput = {}) {
+  const taskId = input.taskId?.trim();
+  const runId = input.runId?.trim();
+  const sessionKey = input.sessionKey?.trim() || input.sessionId?.trim();
+
+  return {
+    taskId: taskId || undefined,
+    runId: runId || undefined,
+    sessionKey: sessionKey || undefined
+  };
+}
+
+function hasArtifactListScope(input: OpenClawArtifactListInput | OpenClawRuntimeSnapshotInput = {}) {
+  return Boolean(input.taskId?.trim() || input.runId?.trim() || input.sessionKey?.trim() || input.sessionId?.trim());
+}
+
+function buildRuntimeSnapshotArtifactListInput(input: OpenClawRuntimeSnapshotInput): OpenClawArtifactListInput {
+  return {
+    taskId: input.taskId,
+    runId: input.runId,
+    sessionKey: input.sessionKey,
+    sessionId: input.sessionId
+  };
+}
+
 function buildSessionExportPayload(
   input: OpenClawSessionExportInput,
   payload: Record<string, unknown>
@@ -2720,7 +2745,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   listArtifacts(input: OpenClawArtifactListInput = {}, options: OpenClawCommandOptions = {}) {
     return this.gatewayFirst<OpenClawArtifactListPayload>(
       "artifacts.list",
-      { ...input },
+      buildArtifactListParams(input),
       options,
       (payload) => parseObjectGatewayPayload<OpenClawArtifactListPayload>("artifacts.list", payload),
       () => this.fallback.listArtifacts(input, options)
@@ -2780,6 +2805,8 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     const includeSessions = input.includeSessions !== false;
     const includeTasks = input.includeTasks !== false;
     const includeArtifacts = input.includeArtifacts !== false;
+    const artifactListInput = buildRuntimeSnapshotArtifactListInput(input);
+    const includeScopedArtifacts = includeArtifacts && hasArtifactListScope(artifactListInput);
     const results = await Promise.allSettled([
       includeSessions
         ? this.listSessions({ limit: input.limit, agentId: input.agentId }, options)
@@ -2787,12 +2814,12 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       includeTasks
         ? this.listTasks({ limit: input.limit, agentId: input.agentId, workspace: input.workspace }, options)
         : Promise.resolve(null),
-      includeArtifacts
-        ? this.listArtifacts({ limit: input.limit, agentId: input.agentId, workspace: input.workspace }, options)
+      includeScopedArtifacts
+        ? this.listArtifacts(artifactListInput, options)
         : Promise.resolve(null)
     ]);
     const requestedResults = results.filter((result, index) =>
-      [includeSessions, includeTasks, includeArtifacts][index]
+      [includeSessions, includeTasks, includeScopedArtifacts][index]
     );
     const rejected = requestedResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
 

@@ -450,6 +450,8 @@ export type OpenClawTaskPayload = Record<string, unknown> & {
 
 export interface OpenClawArtifactListInput {
   taskId?: string;
+  runId?: string;
+  sessionKey?: string;
   sessionId?: string;
   agentId?: string;
   workspace?: string;
@@ -495,6 +497,10 @@ export interface OpenClawRuntimeSnapshotInput {
   includeArtifacts?: boolean;
   agentId?: string;
   workspace?: string;
+  taskId?: string;
+  runId?: string;
+  sessionKey?: string;
+  sessionId?: string;
   limit?: number;
 }
 

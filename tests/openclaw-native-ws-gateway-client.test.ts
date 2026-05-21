@@ -2795,12 +2795,15 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
   assert.deepEqual(await client.listTasks({ agentId: "agent-1" }), { tasks: [{ id: "task-1" }] });
   assert.deepEqual(await client.getTask({ taskId: "task-1" }), { task: { id: "task-1" } });
   assert.deepEqual(await client.cancelTask({ taskId: "task-1", reason: "duplicate" }), { ok: true });
-  assert.deepEqual(await client.listArtifacts({ taskId: "task-1" }), { artifacts: [{ id: "artifact-1" }] });
+  assert.deepEqual(
+    await client.listArtifacts({ taskId: "task-1", agentId: "agent-1", workspace: "/tmp/workspace", limit: 100 }),
+    { artifacts: [{ id: "artifact-1" }] }
+  );
   assert.deepEqual(await client.getArtifact({ artifactId: "artifact-1", includeContent: true }), { ok: true });
   assert.deepEqual(await client.getRuntimeSnapshot({ includeTasks: true }), {
     sessions: [{ key: "agent:agent-1:main" }],
     tasks: [{ id: "task-1" }],
-    artifacts: [{ id: "artifact-1" }]
+    artifacts: []
   });
   assert.deepEqual(await client.getToolsCatalog({ agentId: "agent-1" }), { tools: [{ name: "shell" }] });
   assert.deepEqual(await client.getEffectiveTools({ agentId: "agent-1" }), { tools: [{ name: "shell" }] });
@@ -2818,7 +2821,6 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
     "artifacts.get",
     "sessions.list",
     "tasks.list",
-    "artifacts.list",
     "tools.catalog",
     "tools.effective",
     "tools.invoke"
@@ -2826,10 +2828,63 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
   assert.deepEqual(sentFrames[1]?.params, {
     key: "agent:agent-1:main"
   });
-  assert.deepEqual(sentFrames[14]?.params, {
+  assert.deepEqual(sentFrames[7]?.params, {
+    taskId: "task-1"
+  });
+  assert.deepEqual(sentFrames[13]?.params, {
     toolName: "shell",
     input: { command: "pwd" }
   });
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS runtime snapshot only queries artifacts with an explicit Gateway scope", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["sessions.list", "tasks.list", "artifacts.list"]
+              }
+            }
+          : frame.method === "artifacts.list"
+            ? { artifacts: [{ id: "artifact-1", taskId: "task-1" }] }
+            : { sessions: [], tasks: [] }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(
+    await client.getRuntimeSnapshot({
+      includeSessions: false,
+      includeTasks: false,
+      includeArtifacts: true,
+      taskId: "task-1",
+      agentId: "agent-1",
+      workspace: "/tmp/workspace",
+      limit: 500
+    }),
+    {
+      sessions: [],
+      tasks: [],
+      artifacts: [{ id: "artifact-1", taskId: "task-1" }]
+    }
+  );
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "artifacts.list"]);
+  assert.deepEqual(sentFrames[1]?.params, { taskId: "task-1" });
   assert.deepEqual(fallback.calls, []);
 });
 

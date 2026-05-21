@@ -74,7 +74,7 @@ export const OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS: OpenClawGatewayCompatibi
     methods: ["artifacts.list", "artifacts.get", "artifacts.download"],
     events: ["artifact", "artifact.updated"]
   },
-  { id: "runtimeSnapshot", label: "Runtime snapshot", methods: ["sessions.list", "tasks.list", "artifacts.list"] },
+  { id: "runtimeSnapshot", label: "Runtime snapshot", methods: ["sessions.list", "tasks.list"] },
   { id: "tools", label: "Tool catalog", methods: ["tools.catalog", "tools.effective", "tools.invoke"] },
   {
     id: "execApprovals",
