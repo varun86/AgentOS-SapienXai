@@ -217,19 +217,33 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       return Number.isFinite(value) && value > 0 ? total + value : total;
     }, 0);
     const recentFallbackDiagnostics = readRecentOpenClawGatewayFallbackDiagnostics();
+    const activeFallbackTotal = hasFallbackAfterLastConnected(
+      recentFallbackDiagnostics,
+      connection.lastConnectedAt
+    )
+      ? fallbackTotal
+      : 0;
+    const activeNativeFailure = isDiagnosticAtOrAfter(
+      this.lastNativeFailure?.at ?? null,
+      connection.lastConnectedAt
+    )
+      ? this.lastNativeFailure
+      : null;
     const lastNativeError = this.lastNativeFailure?.issue || sanitizeGatewayDiagnosticText(connection.lastNativeError);
+    const activeLastNativeError =
+      activeNativeFailure?.issue || sanitizeGatewayDiagnosticText(connection.lastNativeError);
     const gatewayMode = resolveGatewayMode({
       forceCli,
       connectionState: connection.connectionState,
-      fallbackTotal,
-      lastNativeError
+      fallbackTotal: activeFallbackTotal,
+      lastNativeError: activeLastNativeError
     });
 
     return {
       mode: forceCli ? "cli" : "native-ws",
       gatewayMode,
       statusLabel: resolveGatewayStatusLabel(gatewayMode),
-      recovery: resolveGatewayStatusRecovery(gatewayMode, this.lastNativeFailure?.recovery ?? null),
+      recovery: resolveGatewayStatusRecovery(gatewayMode, activeNativeFailure?.recovery ?? null),
       connectionState: forceCli
         ? "cli-forced"
         : connection.connectionState,
@@ -780,7 +794,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     return this.fallback.probeGateway(options);
   }
 
-  controlGateway(action: "start" | "stop" | "restart", options: OpenClawCommandOptions = {}) {
+  controlGateway(action: "start" | "stop" | "restart", options: OpenClawCommandOptions & { force?: boolean } = {}) {
     this.close(`gateway.${action}`);
     return this.fallback.controlGateway(action, options).finally(() => {
       this.close(`gateway.${action}.completed`);
@@ -1193,6 +1207,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     const idempotencyKey = input.idempotencyKey?.trim() || input.dispatchId || createRequestId();
     await this.prepareNativeSession(input, sessionKey, options);
     const chatParams = {
+      agentId: input.agentId,
       sessionKey,
       sessionId: input.sessionId,
       message: input.message,
@@ -1205,6 +1220,27 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       return await this.callNative<MissionCommandPayload>("chat.send", chatParams, options);
     } catch (error) {
       if (!isGatewayMethodUnsupported(error)) {
+        if (isGatewayAgentNotFoundError(error, input.agentId)) {
+          const registryState = await this.checkGatewayAgentRegistry(input.agentId, options);
+
+          if (registryState === "present") {
+            try {
+              await this.prepareNativeSession(input, sessionKey, options);
+              return await this.callNative<MissionCommandPayload>("chat.send", chatParams, options);
+            } catch (retryError) {
+              if (isGatewayAgentNotFoundError(retryError, input.agentId)) {
+                throw buildGatewayAgentRegistryError(input.agentId, retryError);
+              }
+
+              throw retryError;
+            }
+          }
+
+          if (registryState === "missing") {
+            throw buildGatewayAgentRegistryError(input.agentId, error);
+          }
+        }
+
         throw error;
       }
     }
@@ -1212,6 +1248,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     return this.callNative<MissionCommandPayload>(
       "sessions.send",
       {
+        agentId: input.agentId,
         key: sessionKey,
         message: input.message,
         thinking: input.thinking,
@@ -1220,6 +1257,24 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       },
       options
     );
+  }
+
+  private async checkGatewayAgentRegistry(
+    agentId: string,
+    options: OpenClawCommandOptions
+  ): Promise<"present" | "missing" | "unknown"> {
+    try {
+      const payload = parseGatewayPayload<OpenClawAgentListPayload>(
+        "agents.list",
+        agentListPayloadSchema,
+        await this.callNative<unknown>("agents.list", {}, { ...options, timeoutMs: 5000 }, { safety: "read", timeoutMs: 5000 })
+      );
+      clearGatewayFallbackDiagnostic("agents.list");
+      this.clearNativeFailure("agents.list");
+      return gatewayAgentListIncludes(payload, agentId) ? "present" : "missing";
+    } catch {
+      return "unknown";
+    }
   }
 
   private async prepareNativeSession(input: OpenClawAgentTurnInput, sessionKey: string, options: OpenClawCommandOptions) {
@@ -1750,6 +1805,77 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       }
     }
   }
+}
+
+function hasFallbackAfterLastConnected(
+  diagnostics: OpenClawGatewayClientDiagnostics["recentFallbackDiagnostics"],
+  lastConnectedAt: string | null
+) {
+  if (diagnostics.length === 0) {
+    return false;
+  }
+
+  if (!lastConnectedAt) {
+    return true;
+  }
+
+  return diagnostics.some((entry) => isDiagnosticAtOrAfter(entry.at, lastConnectedAt));
+}
+
+function isGatewayAgentNotFoundError(error: unknown, agentId: string) {
+  const message = normalizeClientError(error).message.replace(/\s+/g, " ").trim();
+
+  if (!message || !/\bagent\b/i.test(message) || !/\bnot found\b/i.test(message)) {
+    return false;
+  }
+
+  const escapedAgentId = escapeRegExp(agentId);
+  return new RegExp(`\\bagent\\s+["'\`]?${escapedAgentId}["'\`]?\\s+not\\s+found\\b`, "i").test(message);
+}
+
+function gatewayAgentListIncludes(payload: OpenClawAgentListPayload, agentId: string) {
+  const normalizedAgentId = agentId.trim();
+
+  if (!normalizedAgentId) {
+    return false;
+  }
+
+  return (
+    payload.defaultId === normalizedAgentId ||
+    payload.mainKey === normalizedAgentId ||
+    payload.agents.some((entry) => entry.id === normalizedAgentId)
+  );
+}
+
+function buildGatewayAgentRegistryError(agentId: string, cause: unknown) {
+  return new OpenClawGatewayClientError(
+    `OpenClaw Gateway has not loaded agent "${agentId}" yet. Restart the Gateway or refresh AgentOS after OpenClaw finishes loading agents, then retry chat.`,
+    "conflict",
+    { cause }
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isDiagnosticAtOrAfter(value: string | null, reference: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  if (!reference) {
+    return true;
+  }
+
+  const valueMs = Date.parse(value);
+  const referenceMs = Date.parse(reference);
+
+  if (!Number.isFinite(valueMs) || !Number.isFinite(referenceMs)) {
+    return true;
+  }
+
+  return valueMs >= referenceMs;
 }
 
 function resolveGatewayMode(input: {

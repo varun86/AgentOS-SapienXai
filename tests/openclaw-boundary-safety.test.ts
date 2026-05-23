@@ -261,6 +261,28 @@ test("settings device access repair stays behind the OpenClaw adapter", () => {
   assert.match(source, /getOpenClawAdapter\(\)\.approveDeviceAccess/);
 });
 
+test("system onboarding repairs Gateway auth before runtime state verification", () => {
+  const source = readFileSync(path.join(rootDir, "app/api/onboarding/route.ts"), "utf8");
+  const repairIndex = source.indexOf("repairGatewayAuthForSystemSetup(snapshot, send)");
+  const runtimeStateIndex = source.indexOf("await touchOpenClawRuntimeStateAccess");
+
+  assert.notEqual(repairIndex, -1);
+  assert.notEqual(runtimeStateIndex, -1);
+  assert.equal(repairIndex < runtimeStateIndex, true);
+  assert.match(source, /const readyTimeoutMs = 25_000/);
+  assert.match(source, /const postAuthRepairReadyTimeoutMs = 45_000/);
+  assert.match(source, /waitForReadySnapshotAfterGatewayAuthRepair/);
+  assert.match(source, /clearMissionControlCaches\(\);/);
+  assert.match(source, /\["gateway", "restart", "--force", "--json"\]/);
+  assert.match(source, /repairGatewayAuthForSystemSetup\(latestSnapshot, send\)/);
+  assert.match(source, /syncGatewayAuthTokenBeforeFirstStart/);
+  assert.match(source, /gatewayInstallNeedsAgentOsTokenSync/);
+  assert.match(source, /saveGatewayNativeAuthCredential/);
+  assert.match(source, /Preparing Gateway auth for AgentOS before first start/);
+  assert.match(source, /generateGatewayNativeAuthToken\(\{\s*verifyDelaysMs/);
+  assert.match(source, /AgentOS repaired local Gateway token auth during system setup verification/);
+});
+
 test("planner provisioning writes stay behind the OpenClaw adapter", () => {
   const source = readFileSync(path.join(rootDir, "lib/openclaw/planner.ts"), "utf8");
 

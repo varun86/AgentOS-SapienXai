@@ -1,3 +1,8 @@
+import {
+  extractMissionControlAction,
+  MISSION_CONTROL_ACTION_TAG
+} from "@/lib/openclaw/chat-actions";
+
 export const emptyAgentChatResponseMessage =
   "OpenClaw completed the turn, but AgentOS could not find assistant response text in the Gateway stream, session history, or transcript. Retry the message; if it repeats, inspect Gateway diagnostics.";
 
@@ -10,6 +15,11 @@ export function sanitizeAgentChatReplyText(value: unknown) {
   const withoutThinking = stripLeadingThinkingBlock(trimmed);
 
   return stripInternalAgentChatPromptLeak(withoutThinking);
+}
+
+export function sanitizeAgentChatVisibleText(value: unknown) {
+  const extracted = extractMissionControlAction(sanitizeAgentChatReplyText(value));
+  return stripTrailingMissionControlActionBlock(extracted.cleanText);
 }
 
 export function extractAssistantTextFromAgentChatStreamLine(line: string) {
@@ -48,6 +58,24 @@ export function extractLatestAssistantTextFromSessionHistory(payload: unknown) {
   }
 
   return null;
+}
+
+function stripTrailingMissionControlActionBlock(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  const lowerValue = value.toLowerCase();
+  const openingTag = `<${MISSION_CONTROL_ACTION_TAG}>`;
+  const closingTag = `</${MISSION_CONTROL_ACTION_TAG}>`;
+  const latestOpenIndex = lowerValue.lastIndexOf(openingTag);
+  const latestCloseIndex = lowerValue.lastIndexOf(closingTag);
+
+  if (latestOpenIndex >= 0 && latestOpenIndex > latestCloseIndex) {
+    return value.slice(0, latestOpenIndex).trim();
+  }
+
+  return value;
 }
 
 function stripInternalAgentChatPromptLeak(value: string) {

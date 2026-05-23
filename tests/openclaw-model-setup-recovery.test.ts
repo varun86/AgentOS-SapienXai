@@ -42,6 +42,49 @@ test("model setup recovery detects Gateway token mismatch from snapshot diagnost
   assert.match(buildGatewayAuthBlockedMessage(issue, "model setup"), /local Gateway token no longer matches OpenClaw/);
 });
 
+test("model setup recovery ignores stale Gateway token mismatch after reconnect", () => {
+  const snapshot = createErrorSnapshot("OpenClaw system readiness snapshot.", {
+    installed: true,
+    loaded: true,
+    rpcOk: true
+  });
+  snapshot.diagnostics.issues = [];
+  snapshot.diagnostics.gatewayFallbackDiagnostics = [{
+    at: new Date("2026-05-22T10:00:00.000Z").toISOString(),
+    operation: "config.set",
+    operationLabel: "Config set",
+    kind: "auth",
+    issue: "INVALID_REQUEST: unauthorized: gateway token mismatch (provide gateway auth token)",
+    recovery: "Check the OpenClaw Gateway token/password."
+  }];
+  snapshot.diagnostics.gatewayFallbackReasons = [
+    "Config set (config.set): auth: gateway token mismatch Recovery: Check the OpenClaw Gateway token/password."
+  ];
+  snapshot.diagnostics.transport = {
+    mode: "native-ws",
+    gatewayMode: "native-ws",
+    statusLabel: "Native Gateway: OK",
+    recovery: null,
+    connectionState: "connected",
+    protocolVersion: 4,
+    protocolRange: {
+      min: 3,
+      max: 4
+    },
+    fallbackCounts: {
+      "config.set": 1
+    },
+    fallbackTotal: 1,
+    recentFallbackDiagnostics: [],
+    lastNativeError: "INVALID_REQUEST: unauthorized: gateway token mismatch (provide gateway auth token)",
+    lastNativeFailureAt: new Date("2026-05-22T10:00:00.000Z").toISOString(),
+    lastConnectedAt: new Date("2026-05-22T10:01:00.000Z").toISOString(),
+    lastDisconnectedAt: new Date("2026-05-22T10:00:30.000Z").toISOString()
+  };
+
+  assert.equal(resolveGatewayAuthSetupIssueFromSnapshot(snapshot), null);
+});
+
 test("model setup recovery repairs Gateway auth and retries the model config mutation once", async () => {
   const statuses: string[] = [];
   const repairs: string[] = [];

@@ -48,6 +48,7 @@ export type {
   OpenClawExecApprovalResolvePayload,
   OpenClawGatewayClientDiagnostics,
   OpenClawGatewayConnectionState,
+  OpenClawGatewayControlOptions,
   OpenClawGatewayEventCallbacks,
   OpenClawGatewayEventFrame,
   OpenClawGatewayEventSubscription,

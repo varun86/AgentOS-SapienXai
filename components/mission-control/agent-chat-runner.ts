@@ -13,7 +13,7 @@ import {
   isDirectAgentIdentityQuestion,
   isStaleAgentChatContextRecoveryText
 } from "@/lib/openclaw/agent-chat-guards";
-import { sanitizeAgentChatReplyText } from "@/lib/openclaw/agent-chat-response";
+import { sanitizeAgentChatVisibleText } from "@/lib/openclaw/agent-chat-response";
 import type { MissionControlSnapshot, MissionResponse } from "@/lib/agentos/contracts";
 
 type AgentChatStreamEvent =
@@ -219,7 +219,7 @@ async function runAgentChatTurn({
       }
 
       if (event.type === "assistant") {
-        const eventText = sanitizeAgentChatReplyText(event.text);
+        const eventText = sanitizeAgentChatVisibleText(event.text);
         const normalizedEventText = normalizeAgentChatText(eventText);
         const isStaleIdentityRecovery =
           isDirectAgentIdentityQuestion(payload.rawMessage) && isStaleAgentChatContextRecoveryText(eventText);
@@ -347,10 +347,10 @@ function updateAgentChatMessages(
 
 function renderAgentReplyText(result: MissionResponse) {
   const payloadText = result.payloads
-    .map((entry) => sanitizeAgentChatReplyText(entry.text))
+    .map((entry) => sanitizeAgentChatVisibleText(entry.text))
     .filter(Boolean)
     .join("\n\n");
-  return payloadText || sanitizeAgentChatReplyText(result.summary);
+  return payloadText || sanitizeAgentChatVisibleText(result.summary);
 }
 
 function recoverDirectIdentityText(text: string, agentName: string, operatorMessage: string) {

@@ -320,7 +320,7 @@ async function loadMissionControlSnapshots({
     });
     const status = resolvedStatus.value;
     const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig, openClawStateRootPath);
-    const modelStatus = mergeModelStatusWithAgentConfigDefaults(resolvedModelStatus.value, agentConfig);
+    const modelStatus = mergeModelStatusWithAgentConfigDefaults(resolvedModelStatus.value, agentConfig, agentsList);
     const localModels = buildFallbackModels({ agentConfig, modelStatus });
     const models = resolvedModels.value?.models ?? localModels.models;
     const presence = resolvedPresence.value ?? [];

@@ -1784,6 +1784,54 @@ test("native WS gateway client falls back to CLI for Gateway auth config repair 
   assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.kind, "auth");
 });
 
+test("native WS gateway client reports OK after auth repair reconnects", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  let connectAttempts = 0;
+  const { WebSocketImpl } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      if (frame.method === "connect") {
+        connectAttempts += 1;
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: connectAttempts > 1,
+          payload: connectAttempts > 1 ? { protocol: 4 } : undefined,
+          error: connectAttempts === 1
+            ? { message: "INVALID_REQUEST: unauthorized: gateway token mismatch (provide gateway auth token)" }
+            : undefined
+        });
+        return;
+      }
+
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "status" ? { version: "9.9.9" } : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await client.setConfig("gateway.auth.token", "fresh-token");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await client.getStatus();
+
+  const diagnostics = client.getDiagnostics();
+  assert.equal(diagnostics.gatewayMode, "native-ws");
+  assert.equal(diagnostics.statusLabel, "Native Gateway: OK");
+  assert.equal(diagnostics.recovery, null);
+  assert.equal(diagnostics.fallbackTotal, 1);
+  assert.equal(diagnostics.recentFallbackDiagnostics[0]?.kind, "auth");
+  assert.match(diagnostics.lastNativeError ?? "", /token mismatch/);
+});
+
 test("native WS gateway client falls back from config.patch to config.apply", async () => {
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();
@@ -2342,9 +2390,80 @@ test("native WS gateway client uses Gateway first for critical workflows with co
     agentDir: "/agent"
   });
   const chatParams = sentFrames.find((frame) => frame.method === "chat.send")?.params;
+  assert.equal(chatParams?.agentId, "agent-1");
   assert.equal(chatParams?.sessionKey, "agent:agent-1:main");
   assert.equal(Object.hasOwn(chatParams ?? {}, "workspace"), false);
   assert.equal(sentFrames.find((frame) => frame.method === "sessions.abort")?.params.runId, "run-1");
+});
+
+test("native WS gateway client retries chat.send when the Gateway registry confirms the agent", async () => {
+  const fallback = new FallbackGatewayClient();
+  let chatAttempts = 0;
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      if (frame.method === "connect") {
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: true,
+          payload: { protocol: 3 }
+        });
+        return;
+      }
+
+      if (frame.method === "chat.send") {
+        chatAttempts += 1;
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: chatAttempts > 1,
+          payload: chatAttempts > 1 ? { runId: "run-1", status: "running" } : undefined,
+          error: chatAttempts === 1 ? { message: 'INVALID_REQUEST: agent "agent-1" not found' } : undefined
+        });
+        return;
+      }
+
+      if (frame.method === "agents.list") {
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: true,
+          payload: {
+            agents: [
+              {
+                id: "agent-1",
+                workspace: "/workspace"
+              }
+            ]
+          }
+        });
+        return;
+      }
+
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.runAgentTurn({ agentId: "agent-1", message: "hello", workspace: "/workspace" });
+
+  assert.equal(result.runId, "run-1");
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "chat.send", "agents.list", "chat.send"]);
+  assert.deepEqual(
+    sentFrames.filter((frame) => frame.method === "chat.send").map((frame) => frame.params.agentId),
+    ["agent-1", "agent-1"]
+  );
+  assert.deepEqual(fallback.calls, []);
 });
 
 test("native WS gateway client sends task steering and context injection without CLI fallback", async () => {

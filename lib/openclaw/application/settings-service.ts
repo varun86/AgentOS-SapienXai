@@ -22,6 +22,7 @@ import {
   isCliGatewayClientForcedByEnv,
   NativeWsOpenClawGatewayClient
 } from "@/lib/openclaw/client/native-ws-gateway-client";
+import { resetOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
 import { isOpenClawInvalidConfigError } from "@/lib/openclaw/command-failure";
 import type { OpenClawDeviceApprovePayload } from "@/lib/openclaw/client/gateway-client";
 import type {
@@ -296,6 +297,8 @@ export async function saveGatewayNativeAuthCredential(input: {
     delete process.env[GATEWAY_AUTH_TOKEN_ENV_NAME];
   }
 
+  resetOpenClawGatewayClient("gateway auth credential updated");
+
   return {
     envFile: GATEWAY_AUTH_ENV_FILE_NAME,
     activeEnvName: input.kind === "token" ? GATEWAY_AUTH_TOKEN_ENV_NAME : GATEWAY_AUTH_PASSWORD_ENV_NAME,
@@ -306,6 +309,7 @@ export async function saveGatewayNativeAuthCredential(input: {
 export async function generateGatewayNativeAuthToken(input: {
   cwd?: string;
   verifyNativeAuth?: (token: string) => Promise<unknown>;
+  verifyDelaysMs?: readonly number[];
 } = {}) {
   const token = randomBytes(32).toString("base64url");
 
@@ -331,20 +335,25 @@ export async function generateGatewayNativeAuthToken(input: {
     [GATEWAY_AUTH_TOKEN_CONFIG_KEY, tokenMutation]
   ]);
 
-  try {
-    if (restartRequired) {
-      await getOpenClawAdapter().controlGateway("restart", {
-        timeoutMs: 20_000
-      });
-      restarted = true;
-      await delay(GATEWAY_AUTH_RESTART_SETTLE_MS);
-    }
-    verificationIssue = await waitForGeneratedGatewayTokenAuth(token, input.verifyNativeAuth);
-    verified = !verificationIssue;
-  } catch (error) {
-    restartIssue = redactErrorMessage(error, "Gateway restart failed.");
+  if (restartRequired) {
+    const restartResult = await restartGatewayAfterAuthTokenRotation();
+    restarted = restartResult.restarted;
+    restartIssue = restartResult.issue;
   }
 
+  verificationIssue = await waitForGeneratedGatewayTokenAuth(token, input.verifyNativeAuth, input.verifyDelaysMs);
+
+  if (verificationIssue && restartRequired) {
+    const cycleResult = await cycleGatewayAfterAuthTokenRotation();
+    restarted = restarted || cycleResult.restarted;
+    restartIssue = appendGatewayAuthIssue(restartIssue, cycleResult.issue);
+
+    if (cycleResult.restarted) {
+      verificationIssue = await waitForGeneratedGatewayTokenAuth(token, input.verifyNativeAuth, input.verifyDelaysMs);
+    }
+  }
+
+  verified = !verificationIssue;
   invalidateSettingsSnapshot();
 
   return {
@@ -358,9 +367,73 @@ export async function generateGatewayNativeAuthToken(input: {
   };
 }
 
+async function restartGatewayAfterAuthTokenRotation() {
+  try {
+    await getOpenClawAdapter().controlGateway("restart", {
+      timeoutMs: 20_000,
+      force: true
+    });
+    resetOpenClawGatewayClient("gateway auth token rotated");
+    await delay(GATEWAY_AUTH_RESTART_SETTLE_MS);
+
+    return {
+      restarted: true,
+      issue: null
+    };
+  } catch (error) {
+    return {
+      restarted: false,
+      issue: redactErrorMessage(error, "Gateway forced restart failed.")
+    };
+  }
+}
+
+async function cycleGatewayAfterAuthTokenRotation() {
+  let issue: string | null = null;
+
+  try {
+    await getOpenClawAdapter().controlGateway("stop", {
+      timeoutMs: 20_000
+    });
+    await delay(750);
+  } catch (error) {
+    issue = redactErrorMessage(error, "Gateway stop after token rotation failed.");
+  }
+
+  try {
+    await getOpenClawAdapter().controlGateway("start", {
+      timeoutMs: 20_000
+    });
+    resetOpenClawGatewayClient("gateway auth token rotation stop/start completed");
+    await delay(GATEWAY_AUTH_RESTART_SETTLE_MS);
+
+    return {
+      restarted: true,
+      issue
+    };
+  } catch (error) {
+    return {
+      restarted: false,
+      issue: appendGatewayAuthIssue(
+        issue,
+        redactErrorMessage(error, "Gateway start after token rotation failed.")
+      )
+    };
+  }
+}
+
+function appendGatewayAuthIssue(base: string | null, next: string | null) {
+  if (!next?.trim()) {
+    return base;
+  }
+
+  return base ? `${base}\n${next}` : next;
+}
+
 async function waitForGeneratedGatewayTokenAuth(
   token: string,
-  verifyNativeAuth: ((token: string) => Promise<unknown>) | undefined
+  verifyNativeAuth: ((token: string) => Promise<unknown>) | undefined,
+  verifyDelaysMs: readonly number[] = GATEWAY_AUTH_RESTART_VERIFY_DELAYS_MS
 ) {
   let issue: string | null = null;
   const verify = verifyNativeAuth ?? ((value: string) =>
@@ -368,7 +441,7 @@ async function waitForGeneratedGatewayTokenAuth(
       timeoutMs: GATEWAY_NATIVE_AUTH_CHECK_TIMEOUT_MS
     }));
 
-  for (const delayMs of GATEWAY_AUTH_RESTART_VERIFY_DELAYS_MS) {
+  for (const delayMs of verifyDelaysMs.length > 0 ? verifyDelaysMs : [0]) {
     if (delayMs > 0) {
       await delay(delayMs);
     }
@@ -453,6 +526,7 @@ export async function repairGatewayNativeDeviceAccess(
     );
   }
 
+  resetOpenClawGatewayClient("gateway device access repaired");
   invalidateSettingsSnapshot();
 
   return {
@@ -820,6 +894,10 @@ function shouldRestartAfterGatewayConfigMutations(mutations: Array<[string, Gate
   let restartRequired = false;
 
   for (const [path, result] of mutations) {
+    if (gatewayConfigPathMustRestart(path)) {
+      return true;
+    }
+
     const reloadKind = readGatewayConfigReloadKind(result);
 
     if (reloadKind === "restart") {
@@ -832,6 +910,10 @@ function shouldRestartAfterGatewayConfigMutations(mutations: Array<[string, Gate
   }
 
   return restartRequired;
+}
+
+function gatewayConfigPathMustRestart(path: string) {
+  return path === GATEWAY_AUTH_MODE_CONFIG_KEY || path === GATEWAY_AUTH_TOKEN_CONFIG_KEY;
 }
 
 function readGatewayConfigReloadKind(result: GatewayConfigCommandResult): "restart" | "hot" | "none" | "unknown" {

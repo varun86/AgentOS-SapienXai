@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { evaluateLocalOperatorRequest } from "@/lib/security/local-operator";
 import { REDACTED_SECRET_VALUE, redactSecrets } from "@/lib/security/redaction";
 import { writeWorkspaceManagedFileForPath } from "@/lib/openclaw/application/workspace-file-service";
+import { sanitizeOpenClawCommandArgsForDiagnostics } from "@/lib/openclaw/cli";
 import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 
 const rootDir = process.cwd();
@@ -19,6 +20,20 @@ test("local same-origin mutation requests are allowed", () => {
     headers: new Headers({
       host: "localhost:3000",
       origin: "http://localhost:3000"
+    })
+  });
+
+  assert.deepEqual(decision, { ok: true });
+});
+
+test("forwarded loopback mutation requests are allowed", () => {
+  const decision = evaluateLocalOperatorRequest({
+    method: "POST",
+    url: "http://127.0.0.1:3000/api/onboarding",
+    headers: new Headers({
+      host: "127.0.0.1:3000",
+      origin: "http://127.0.0.1:3000",
+      "x-forwarded-for": "::ffff:127.0.0.1"
     })
   });
 
@@ -102,6 +117,26 @@ test("secret redaction handles nested objects, arrays, and diagnostic text", () 
   assert.doesNotMatch(serialized, /top-secret|bearer-secret|sk-secret|query-secret|json-secret|client-secret/);
   assert.match(serialized, new RegExp(REDACTED_SECRET_VALUE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.deepEqual(redacted.tokenUsage, { total: 42 });
+});
+
+test("OpenClaw command diagnostics redact sensitive config values", () => {
+  assert.deepEqual(
+    sanitizeOpenClawCommandArgsForDiagnostics([
+      "config",
+      "set",
+      "gateway.auth.token",
+      "plain-secret-token"
+    ]),
+    ["config", "set", "gateway.auth.token", "[redacted]"]
+  );
+  assert.deepEqual(
+    sanitizeOpenClawCommandArgsForDiagnostics([
+      "config",
+      "set",
+      "gateway.auth.password=plain-secret-password"
+    ]),
+    ["config", "set", "gateway.auth.password=[redacted]"]
+  );
 });
 
 test("workspace managed file writes reject path traversal", async () => {

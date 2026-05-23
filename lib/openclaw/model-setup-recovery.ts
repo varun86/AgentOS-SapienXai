@@ -1,6 +1,10 @@
 import "server-only";
 
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import {
+  filterActiveOpenClawGatewayFallbackDiagnostics,
+  isOpenClawGatewayTransportIssueActive
+} from "@/lib/openclaw/client/gateway-diagnostic-activity";
 import { isGatewayDeviceAccessRepairIssue, isGatewayTokenRepairIssue } from "@/lib/openclaw/gateway-auth-actions";
 import {
   generateGatewayNativeAuthToken,
@@ -119,18 +123,35 @@ export function resolveGatewayAuthSetupIssue(error: unknown): GatewayAuthSetupIs
 
 export function resolveGatewayAuthSetupIssueFromSnapshot(snapshot: MissionControlSnapshot): GatewayAuthSetupIssue | null {
   const diagnostics = snapshot.diagnostics;
+  const transport = diagnostics.transport;
+  const transportIssueActive = isOpenClawGatewayTransportIssueActive(transport);
+  const activeGatewayFallbackDiagnostics = filterActiveOpenClawGatewayFallbackDiagnostics(
+    diagnostics.gatewayFallbackDiagnostics ?? [],
+    transport
+  );
+  const gatewayFallbackReasons = transportIssueActive ? diagnostics.gatewayFallbackReasons ?? [] : [];
+  const capabilityMatrixFallbackDiagnostics = transportIssueActive
+    ? diagnostics.capabilityMatrix?.fallbackDiagnostics ?? []
+    : [];
+  const capabilityMatrixFallbackReasons = transportIssueActive
+    ? diagnostics.capabilityMatrix?.fallbackReasons ?? []
+    : [];
   const messages = [
-    diagnostics.transport?.lastNativeError,
-    diagnostics.transport?.recovery,
+    ...(transportIssueActive
+      ? [
+        transport?.lastNativeError,
+        transport?.recovery
+      ]
+      : []),
     ...diagnostics.issues,
-    ...(diagnostics.gatewayFallbackReasons ?? []),
-    ...(diagnostics.gatewayFallbackDiagnostics ?? []).flatMap((entry) => [
+    ...gatewayFallbackReasons,
+    ...activeGatewayFallbackDiagnostics.flatMap((entry) => [
       entry.issue,
       entry.recovery
     ]),
     ...(diagnostics.capabilityMatrix?.diagnostics ?? []),
-    ...(diagnostics.capabilityMatrix?.fallbackReasons ?? []),
-    ...(diagnostics.capabilityMatrix?.fallbackDiagnostics ?? []).flatMap((entry) => [
+    ...capabilityMatrixFallbackReasons,
+    ...capabilityMatrixFallbackDiagnostics.flatMap((entry) => [
       entry.issue,
       entry.recovery
     ])
@@ -152,7 +173,7 @@ export function buildGatewayAuthBlockedMessage(
   operationLabel: string
 ) {
   if (issue.kind === "gateway-token") {
-    return `AgentOS cannot continue ${operationLabel} because its local Gateway token no longer matches OpenClaw. AgentOS tried to repair the token; restart the OpenClaw Gateway, run agentos doctor, then retry setup.`;
+    return `AgentOS cannot continue ${operationLabel} because its local Gateway token no longer matches OpenClaw. AgentOS will rotate the token and restart the Gateway automatically; if this repeats, run agentos doctor and retry setup.`;
   }
 
   return `AgentOS cannot continue ${operationLabel} because the local device is missing OpenClaw operator access. Repair device access in Gateway settings, then retry setup.`;
@@ -235,7 +256,17 @@ async function resolveGatewayAuthSetupIssueFromStatus(): Promise<GatewayAuthSetu
 
 async function repairGatewayAuthForModelSetup(kind: GatewayAuthSetupIssueKind) {
   if (kind === "gateway-token") {
-    return generateGatewayNativeAuthToken();
+    const result = await generateGatewayNativeAuthToken();
+
+    if (!result.verified) {
+      throw new Error(
+        result.verificationIssue ||
+          result.restartIssue ||
+          "Gateway token was rotated, but the new token did not verify after restarting OpenClaw."
+      );
+    }
+
+    return result;
   }
 
   return repairGatewayNativeDeviceAccess();

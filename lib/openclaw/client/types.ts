@@ -6,6 +6,10 @@ export interface OpenClawCommandOptions {
   forceCli?: boolean;
 }
 
+export type OpenClawGatewayControlOptions = OpenClawCommandOptions & {
+  force?: boolean;
+};
+
 export type OpenClawConfigReloadKind = "restart" | "hot" | "none" | "unknown";
 
 export type OpenClawConfigMutationMetadata = {
@@ -849,7 +853,7 @@ export interface OpenClawGatewayClient {
   probeGateway(options?: OpenClawCommandOptions): Promise<GatewayProbePayload>;
   controlGateway(
     action: "start" | "stop" | "restart",
-    options?: OpenClawCommandOptions
+    options?: OpenClawGatewayControlOptions
   ): Promise<Record<string, unknown>>;
   approveDeviceAccess(input?: OpenClawDeviceApproveInput, options?: OpenClawCommandOptions): Promise<OpenClawDeviceApprovePayload>;
   call<TPayload>(

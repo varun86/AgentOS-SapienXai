@@ -41,6 +41,7 @@ import type {
   OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
+  OpenClawGatewayControlOptions,
   OpenClawChatInjectInput,
   OpenClawGatewayClient,
   OpenClawGatewayEventCallbacks,
@@ -167,7 +168,7 @@ export interface OpenClawAdapter {
   probeGateway(options?: OpenClawCommandOptions): Promise<GatewayProbePayload>;
   controlGateway(
     action: "start" | "stop" | "restart",
-    options?: OpenClawCommandOptions
+    options?: OpenClawGatewayControlOptions
   ): Promise<Record<string, unknown>>;
   approveDeviceAccess(input?: OpenClawDeviceApproveInput, options?: OpenClawCommandOptions): Promise<OpenClawDeviceApprovePayload>;
   call<TPayload>(
@@ -415,7 +416,7 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
     return this.getClient().probeGateway(options);
   }
 
-  controlGateway(action: "start" | "stop" | "restart", options: OpenClawCommandOptions = {}) {
+  controlGateway(action: "start" | "stop" | "restart", options: OpenClawCommandOptions & { force?: boolean } = {}) {
     return this.getClient().controlGateway(action, options);
   }
 

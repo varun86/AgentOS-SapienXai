@@ -4,7 +4,8 @@ import { test } from "node:test";
 import {
   extractAssistantTextFromAgentChatStreamLine,
   extractLatestAssistantTextFromSessionHistory,
-  sanitizeAgentChatReplyText
+  sanitizeAgentChatReplyText,
+  sanitizeAgentChatVisibleText
 } from "@/lib/openclaw/agent-chat-response";
 
 test("agent chat response helper reads assistant stream events", () => {
@@ -85,5 +86,28 @@ test("agent chat response helper suppresses internal direct chat prompt leaks", 
   assert.equal(
     sanitizeAgentChatReplyText(`${leakedPrompt}\nAgent: Hello. How can I help?`),
     "Hello. How can I help?"
+  );
+});
+
+test("agent chat visible text suppresses mission control actions", () => {
+  assert.equal(
+    sanitizeAgentChatVisibleText(
+      [
+        "I will use Suleyman from now on.",
+        "",
+        '<mission-control-action>{"type":"rename_agent","name":"Suleyman"}</mission-control-action>'
+      ].join("\n")
+    ),
+    "I will use Suleyman from now on."
+  );
+  assert.equal(
+    sanitizeAgentChatVisibleText(
+      [
+        "I will use Suleyman from now on.",
+        "",
+        '<mission-control-action>{"type":"rename_agent"'
+      ].join("\n")
+    ),
+    "I will use Suleyman from now on."
   );
 });

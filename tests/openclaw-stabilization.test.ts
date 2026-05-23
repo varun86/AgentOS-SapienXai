@@ -914,6 +914,55 @@ test("model status keeps agent config default when native status omits it", () =
   assert.deepEqual(status?.allowed, ["openai/gpt-5.4-mini", "openai/gpt-5.5"]);
 });
 
+test("model status keeps live agent default when state config lags after setup", () => {
+  const status = mergeModelStatusWithAgentConfigDefaults(
+    {
+      allowed: ["openai/gpt-5.4-mini", "openai/gpt-5.5"],
+      auth: {
+        providers: [
+          {
+            provider: "openai-codex",
+            profiles: {
+              count: 1
+            }
+          }
+        ],
+        oauth: {
+          providers: [
+            {
+              provider: "openai-codex",
+              status: "ok"
+            }
+          ]
+        }
+      }
+    },
+    [],
+    [
+      {
+        modelId: "openai/gpt-5.4-mini",
+        isDefault: true
+      }
+    ]
+  );
+  const readiness = resolveModelReadiness(
+    [
+      {
+        key: "openai/gpt-5.4-mini",
+        local: false,
+        available: true,
+        missing: false
+      }
+    ],
+    status
+  );
+
+  assert.equal(status?.defaultModel, "openai/gpt-5.4-mini");
+  assert.equal(status?.resolvedDefault, "openai/gpt-5.4-mini");
+  assert.equal(readiness.ready, true);
+  assert.equal(readiness.defaultModelReady, true);
+});
+
 test("canonical OpenAI models can be ready through ChatGPT Codex auth", () => {
   const readiness = resolveModelReadiness(
     [

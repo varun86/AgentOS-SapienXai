@@ -661,9 +661,17 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
 
   controlGateway(
     action: "start" | "stop" | "restart",
-    options: OpenClawCommandOptions = {}
+    options: OpenClawCommandOptions & { force?: boolean } = {}
   ) {
-    return runOpenClawJson<Record<string, unknown>>(["gateway", action, "--json"], options);
+    const args = ["gateway", action];
+
+    if (action === "restart" && options.force) {
+      args.push("--force");
+    }
+
+    args.push("--json");
+
+    return runOpenClawJson<Record<string, unknown>>(args, options);
   }
 
   async approveDeviceAccess(

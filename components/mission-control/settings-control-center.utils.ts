@@ -29,6 +29,12 @@ export function resolveTransportDiagnosticsSummary(
   streamState: SnapshotStreamState
 ): TransportDiagnosticsSummary {
   const fallbackTotal = sumFallbackCounts(transport?.fallbackCounts);
+  const activeFallbackTotal = hasFallbackAfterLastConnected(
+    transport?.recentFallbackDiagnostics ?? [],
+    transport?.lastConnectedAt ?? null
+  )
+    ? fallbackTotal
+    : 0;
   const connectionLabel = formatTransportConnectionState(transport?.connectionState);
   const streamLabel = formatSnapshotStreamState(streamState);
 
@@ -53,7 +59,7 @@ export function resolveTransportDiagnosticsSummary(
       connectionState: transport?.connectionState,
       mode: transport?.mode,
       streamState,
-      fallbackTotal
+      fallbackTotal: activeFallbackTotal
     })
   };
 }
@@ -269,4 +275,27 @@ function resolveTransportStatusTone(input: {
   }
 
   return "neutral";
+}
+
+function hasFallbackAfterLastConnected(
+  diagnostics: NonNullable<TransportDiagnostics["recentFallbackDiagnostics"]>,
+  lastConnectedAt: string | null
+) {
+  if (diagnostics.length === 0) {
+    return false;
+  }
+
+  if (!lastConnectedAt) {
+    return true;
+  }
+
+  const connectedMs = Date.parse(lastConnectedAt);
+  if (!Number.isFinite(connectedMs)) {
+    return true;
+  }
+
+  return diagnostics.some((entry) => {
+    const fallbackMs = Date.parse(entry.at);
+    return !Number.isFinite(fallbackMs) || fallbackMs >= connectedMs;
+  });
 }

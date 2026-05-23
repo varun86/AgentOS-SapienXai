@@ -159,6 +159,11 @@ function isLoopbackAddress(value: string) {
     return true;
   }
 
+  const ipv4MappedLoopback = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (ipv4MappedLoopback) {
+    return isLoopbackAddress(ipv4MappedLoopback[1]);
+  }
+
   const ipv4 = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!ipv4) {
     return false;

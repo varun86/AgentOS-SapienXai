@@ -6,6 +6,12 @@ import type {
 import { resolveModelRecordProvider } from "@/lib/openclaw/domains/model-provider-connection";
 import type { ModelRecord, OpenClawAgent } from "@/lib/openclaw/types";
 
+type AgentModelDefaultLike = {
+  model?: string | null;
+  modelId?: string | null;
+  isDefault?: boolean | null;
+};
+
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
@@ -120,9 +126,12 @@ function inferOllamaContextWindow(route: string) {
 }
 
 export function buildModelStatusFromAgentConfig(
-  agentConfig: AgentConfigPayload
+  agentConfig: AgentConfigPayload,
+  agents: AgentModelDefaultLike[] = []
 ): ModelsStatusPayload | undefined {
   const defaultModel =
+    readAgentModel(agents.find((entry) => entry.isDefault)) ||
+    readAgentModel(agents.find((entry) => Boolean(readAgentModel(entry)))) ||
     agentConfig.find((entry) => entry.default)?.model ||
     agentConfig.find((entry) => Boolean(entry.model))?.model ||
     null;
@@ -139,9 +148,10 @@ export function buildModelStatusFromAgentConfig(
 
 export function mergeModelStatusWithAgentConfigDefaults(
   modelStatus: ModelsStatusPayload | undefined,
-  agentConfig: AgentConfigPayload
+  agentConfig: AgentConfigPayload,
+  agents: AgentModelDefaultLike[] = []
 ): ModelsStatusPayload | undefined {
-  const fallbackStatus = buildModelStatusFromAgentConfig(agentConfig);
+  const fallbackStatus = buildModelStatusFromAgentConfig(agentConfig, agents);
 
   if (!modelStatus) {
     return fallbackStatus;
@@ -188,4 +198,8 @@ export function buildModelRecords(
 
 function normalizeModelId(value: string | null | undefined) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readAgentModel(agent: AgentModelDefaultLike | undefined) {
+  return normalizeModelId(agent?.modelId) ?? normalizeModelId(agent?.model);
 }

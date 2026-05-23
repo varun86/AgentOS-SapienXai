@@ -21,6 +21,7 @@ import type {
   GatewayStatusPayload
 } from "@/lib/openclaw/client/gateway-client";
 import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
+import { filterActiveOpenClawGatewayFallbackDiagnostics } from "@/lib/openclaw/client/gateway-diagnostic-activity";
 import { getOpenClawGatewayOperationLabel } from "@/lib/openclaw/client/gateway-compatibility";
 import { resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
 import {
@@ -78,7 +79,11 @@ export async function buildSystemReadinessSnapshot({
     ...entry,
     operationLabel: getOpenClawGatewayOperationLabel(entry.operation)
   }));
-  const gatewayFallbackIssues = gatewayFallbackDiagnostics.map(
+  const activeGatewayFallbackDiagnostics = filterActiveOpenClawGatewayFallbackDiagnostics(
+    gatewayFallbackDiagnostics,
+    transport
+  );
+  const gatewayFallbackIssues = activeGatewayFallbackDiagnostics.map(
     (entry) => `gateway.${entry.operation}: Gateway-first request fell back to CLI (${entry.kind}): ${entry.issue} Recovery: ${entry.recovery}`
   );
   const issues = [
@@ -116,7 +121,7 @@ export async function buildSystemReadinessSnapshot({
       modelReadiness,
       capabilityMatrix: getCachedOpenClawCapabilityMatrix() ?? undefined,
       gatewayFallbackDiagnostics,
-      gatewayFallbackReasons: gatewayFallbackDiagnostics.map(
+      gatewayFallbackReasons: activeGatewayFallbackDiagnostics.map(
         (entry) => `${entry.operationLabel} (${entry.operation}): ${entry.kind}: ${entry.issue} Recovery: ${entry.recovery}`
       ),
       runtime: runtimeDiagnostics,

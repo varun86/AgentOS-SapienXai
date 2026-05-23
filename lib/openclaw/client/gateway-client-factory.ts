@@ -32,11 +32,23 @@ export function getOpenClawGatewayClient() {
   return defaultClient;
 }
 
-export function setOpenClawGatewayClientProvider(provider: OpenClawGatewayClientProvider | null) {
-  configuredProvider = provider;
+export function resetOpenClawGatewayClient(reason = "reset") {
+  const client = defaultClient;
   defaultClient = null;
+
+  try {
+    client?.close?.(reason);
+  } catch {
+    // Best-effort cleanup; the next request will create a fresh client.
+  }
+}
+
+export function setOpenClawGatewayClientProvider(provider: OpenClawGatewayClientProvider | null) {
+  resetOpenClawGatewayClient("provider changed");
+  configuredProvider = provider;
 }
 
 export function setOpenClawGatewayClientForTesting(client: OpenClawGatewayClient | null) {
+  resetOpenClawGatewayClient("testing client changed");
   defaultClient = client;
 }

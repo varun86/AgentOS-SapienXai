@@ -4,6 +4,7 @@ import type {
 } from "@/lib/openclaw/client/gateway-client";
 import { isDeferredPayloadResult } from "@/lib/openclaw/client/payload-cache";
 import { getOpenClawGatewayOperationLabel } from "@/lib/openclaw/client/gateway-compatibility";
+import { filterActiveOpenClawGatewayFallbackDiagnostics } from "@/lib/openclaw/client/gateway-diagnostic-activity";
 import {
   collectIssues,
   compareVersionStrings,
@@ -85,6 +86,10 @@ export function buildGatewayDiagnostics(input: {
     ...entry,
     operationLabel: getOpenClawGatewayOperationLabel(entry.operation)
   }));
+  const activeGatewayFallbackDiagnostics = filterActiveOpenClawGatewayFallbackDiagnostics(
+    gatewayFallbackDiagnostics,
+    input.transport
+  );
   const securityWarnings = [
     ...input.securityWarnings,
     ...buildLocalExposureWarnings(input.gatewayStatus, input.configuredGatewayUrl)
@@ -121,7 +126,7 @@ export function buildGatewayDiagnostics(input: {
     modelReadiness: input.modelReadiness,
     capabilityMatrix: input.capabilityMatrix,
     gatewayFallbackDiagnostics,
-    gatewayFallbackReasons: gatewayFallbackDiagnostics.map(
+    gatewayFallbackReasons: activeGatewayFallbackDiagnostics.map(
       (entry) => `${entry.operationLabel} (${entry.operation}): ${entry.kind}: ${entry.issue} Recovery: ${entry.recovery}`
     ),
     runtime: input.runtimeDiagnostics,

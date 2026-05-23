@@ -10,6 +10,7 @@ import {
   isGatewayConfigRateLimitError,
   readGatewayConfigRateLimitRetryAfterMs
 } from "@/lib/openclaw/client/native-ws-gateway-config";
+import { normalizeClientError } from "@/lib/openclaw/client/native-ws-gateway-errors";
 import { getModelProviderDescriptor, isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { redactSecretText } from "@/lib/security/redaction";
 import type {
@@ -72,7 +73,7 @@ const openClawAuthProfilesPath = path.join(
   "auth-profiles.json"
 );
 const legacyProviderFileFallbackEnv = "AGENTOS_OPENCLAW_LEGACY_PROVIDER_FILE_FALLBACK";
-const gatewayConfigPatchRetryDelaysMs = [500, 1_250, 2_500];
+const gatewayConfigPatchRetryDelaysMs = [750, 1_500, 3_000, 5_000, 8_000, 12_000];
 const maxInlineGatewayConfigRateLimitRetryMs = 3_000;
 
 type OpenClawAgentDefaultsConfig = NonNullable<NonNullable<OpenClawConfigPayload["agents"]>["defaults"]>;
@@ -292,6 +293,7 @@ async function addModelsToConfigViaGateway(provider: AddModelsProviderId, normal
         throw error;
       }
 
+      await tryStartGatewayAfterTransientConfigFailure(error);
       await delay(retryDelayMs);
     }
   }
@@ -348,6 +350,7 @@ async function setDefaultModelViaGateway(
         throw error;
       }
 
+      await tryStartGatewayAfterTransientConfigFailure(error);
       await delay(retryDelayMs);
     }
   }
@@ -396,11 +399,38 @@ function resolveGatewayConfigPatchRetryDelayMs(error: unknown, attempt: number) 
 
   const message = readErrorMessage(error);
 
-  if (/1012|service restart|connection closed|closed before|gateway closed|websocket|ECONNREFUSED|ECONNRESET|socket hang up|timed out|timeout/i.test(message)) {
+  if (isGatewayConfigSettleError(error) ||
+      /1012|service restart|connection closed|closed before|gateway closed|websocket|failed to connect|could not connect|unreachable|not reachable|ECONNREFUSED|ECONNRESET|socket hang up|timed out|timeout/i.test(message)) {
     return gatewayConfigPatchRetryDelaysMs[attempt] ?? null;
   }
 
   return null;
+}
+
+async function tryStartGatewayAfterTransientConfigFailure(error: unknown) {
+  if (!isGatewayConfigSettleError(error)) {
+    return;
+  }
+
+  const adapter = getOpenClawAdapter() as {
+    controlGateway?: (action: "start", options?: { timeoutMs?: number }) => Promise<unknown>;
+  };
+
+  if (typeof adapter.controlGateway !== "function") {
+    return;
+  }
+
+  await adapter.controlGateway("start", { timeoutMs: 10_000 }).catch(() => {});
+}
+
+function isGatewayTransportSettleError(error: unknown) {
+  const kind = normalizeClientError(error).kind;
+  return kind === "timeout" || kind === "unreachable";
+}
+
+function isGatewayConfigSettleError(error: unknown) {
+  return isGatewayTransportSettleError(error) ||
+    /gateway starting|retry shortly/i.test(readErrorMessage(error));
 }
 
 function buildGatewayConfigMutationFailureMessage(action: string, error: unknown) {
@@ -411,6 +441,10 @@ function buildGatewayConfigMutationFailureMessage(action: string, error: unknown
       : " Wait for the Gateway config cooldown, then retry.";
 
     return `OpenClaw Gateway is rate limiting config updates while ${action}.${retryHint} AgentOS did not use CLI or legacy file fallback for this model change.`;
+  }
+
+  if (isGatewayConfigSettleError(error)) {
+    return `OpenClaw Gateway was not reachable while ${action}. AgentOS retried the Gateway config update and attempted to start the Gateway. Start or repair the Gateway from system setup, then retry model setup. AgentOS did not use CLI or legacy file fallback for this model change. ${readErrorMessage(error)}`;
   }
 
   return `OpenClaw Gateway config update failed while ${action}. Legacy file fallback is disabled; set ${legacyProviderFileFallbackEnv}=1 only for explicit recovery. ${readErrorMessage(error)}`;

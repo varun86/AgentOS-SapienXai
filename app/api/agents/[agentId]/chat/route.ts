@@ -16,7 +16,8 @@ import {
   emptyAgentChatResponseMessage,
   extractAssistantTextFromAgentChatStreamLine,
   extractLatestAssistantTextFromSessionHistory,
-  sanitizeAgentChatReplyText
+  sanitizeAgentChatReplyText,
+  sanitizeAgentChatVisibleText
 } from "@/lib/openclaw/agent-chat-response";
 import { readLatestAgentChatTurn } from "@/lib/openclaw/domains/agent-chat-transcript";
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
@@ -142,6 +143,7 @@ export async function POST(
 
     void (async () => {
       let latestAssistantText = "";
+      let latestStreamAction: MissionControlAction | null = null;
       let latestStatusMessage = "";
       let latestTurnStatus: TranscriptTurn["status"] | null = null;
       let keepPolling = true;
@@ -154,7 +156,13 @@ export async function POST(
       const wait = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 
       const emitAssistantText = async (value: string | null | undefined) => {
-        const currentText = sanitizeAgentChatReplyText(value);
+        const sanitizedText = sanitizeAgentChatReplyText(value);
+        const extracted = extractMissionControlAction(sanitizedText);
+        const currentText = sanitizeAgentChatVisibleText(sanitizedText);
+
+        if (!latestStreamAction && extracted.action) {
+          latestStreamAction = extracted.action;
+        }
 
         if (!currentText || currentText === latestAssistantText) {
           return;
@@ -385,6 +393,7 @@ export async function POST(
           };
         }
         response = recoverDirectIdentityResponse(response, formatAgentDisplayName(agent), operatorMessage);
+        response = attachStreamMissionControlAction(response, latestStreamAction);
         if (isEmptyAgentChatResponse(response)) {
           await send({
             type: "done",
@@ -419,11 +428,17 @@ export async function POST(
         }
 
         const rawFailure = redactSecretText(stringifyCommandFailure(error) || redactErrorMessage(error, ""));
+        const agentRegistryFailureMessage = resolveGatewayAgentRegistryFailureMessage(rawFailure, agentId);
         const failureMessage =
           resolveOpenClawRuntimeFailureMessage(rawFailure) ||
+          agentRegistryFailureMessage ||
           (error instanceof Error
             ? redactSecretText(error.message)
             : "OpenClaw could not send the message right now. Please try again.");
+
+        if (agentRegistryFailureMessage) {
+          clearMissionControlCaches();
+        }
 
         if (isOpenAiCodexAuthFailure(rawFailure) || isOpenAiCodexAuthFailure(failureMessage)) {
           await persistRuntimeSmokeTest({
@@ -508,7 +523,7 @@ function resolveChatStatusMessage(turn: TranscriptTurn) {
 }
 
 function sanitizePolledAssistantText(value: string) {
-  return sanitizeAgentChatReplyText(value);
+  return sanitizeAgentChatVisibleText(value);
 }
 
 function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload): MissionResponse {
@@ -671,4 +686,44 @@ function applyMissionControlActionMetadata(response: MissionResponse, action: Mi
       }
     }
   };
+}
+
+function attachStreamMissionControlAction(
+  response: MissionResponse,
+  action: MissionControlAction | null
+): MissionResponse {
+  if (!action || readMissionControlAction(response.meta)) {
+    return response;
+  }
+
+  return {
+    ...response,
+    meta: {
+      ...response.meta,
+      missionControlAction: action
+    }
+  };
+}
+
+function resolveGatewayAgentRegistryFailureMessage(output: string, agentId: string) {
+  if (!isGatewayAgentRegistryMissingFailure(output, agentId)) {
+    return null;
+  }
+
+  return `OpenClaw Gateway has not loaded agent "${agentId}" yet. AgentOS refreshed local state; restart the OpenClaw Gateway from System Setup or Settings, then retry chat.`;
+}
+
+function isGatewayAgentRegistryMissingFailure(output: string, agentId: string) {
+  const normalized = output.replace(/\s+/g, " ").trim();
+
+  if (!normalized || !/\bagent\b/i.test(normalized) || !/\bnot found\b/i.test(normalized)) {
+    return false;
+  }
+
+  const escapedAgentId = escapeRegExp(agentId);
+  return new RegExp(`\\bagent\\s+["'\`]?${escapedAgentId}["'\`]?\\s+not\\s+found\\b`, "i").test(normalized);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

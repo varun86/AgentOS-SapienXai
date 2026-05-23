@@ -301,7 +301,14 @@ export async function runOpenClawStream(
 }
 
 export function getRecentOpenClawCommandDiagnostics() {
-  return [...commandDiagnostics].reverse();
+  return commandDiagnostics
+    .map((diagnostic) => ({
+      ...diagnostic,
+      args: sanitizeOpenClawCommandArgsForDiagnostics(diagnostic.args),
+      stdoutPreview: diagnostic.stdoutPreview ? redactSecretText(diagnostic.stdoutPreview) : null,
+      stderrPreview: diagnostic.stderrPreview ? redactSecretText(diagnostic.stderrPreview) : null
+    }))
+    .reverse();
 }
 
 export function clearOpenClawCommandDiagnostics() {
@@ -570,7 +577,7 @@ function recordOpenClawCommandDiagnostic(input: {
   commandDiagnostics.push({
     id: input.id,
     command: input.command,
-    args: sanitizeCommandArgs(input.args),
+    args: sanitizeOpenClawCommandArgsForDiagnostics(input.args),
     startedAt: input.startedAt,
     finishedAt: new Date(finishedAtMs).toISOString(),
     durationMs: Math.max(finishedAtMs - input.startedAtMs, 0),
@@ -585,7 +592,7 @@ function recordOpenClawCommandDiagnostic(input: {
   }
 }
 
-function sanitizeCommandArgs(args: string[]) {
+export function sanitizeOpenClawCommandArgsForDiagnostics(args: string[]) {
   const redactedValueFlags = new Set([
     "--message",
     "--api-key",
@@ -600,12 +607,30 @@ function sanitizeCommandArgs(args: string[]) {
   ]);
   const sanitized: string[] = [];
   let redactNext = false;
+  let redactConfigValue = false;
 
-  for (const arg of args) {
-    if (redactNext) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (redactNext || redactConfigValue) {
       sanitized.push("[redacted]");
       redactNext = false;
+      redactConfigValue = false;
       continue;
+    }
+
+    if (isOpenClawConfigSetPath(args, index)) {
+      const assignment = splitConfigPathAssignment(arg);
+      if (assignment && isSensitiveConfigPath(assignment.path)) {
+        sanitized.push(`${assignment.path}=[redacted]`);
+        continue;
+      }
+
+      if (isSensitiveConfigPath(arg)) {
+        sanitized.push(arg);
+        redactConfigValue = true;
+        continue;
+      }
     }
 
     const [flagName] = arg.split("=", 1);
@@ -620,6 +645,27 @@ function sanitizeCommandArgs(args: string[]) {
   }
 
   return sanitized;
+}
+
+function isOpenClawConfigSetPath(args: string[], index: number) {
+  return args[index - 2] === "config" && args[index - 1] === "set";
+}
+
+function splitConfigPathAssignment(value: string) {
+  const separatorIndex = value.indexOf("=");
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  return {
+    path: value.slice(0, separatorIndex),
+    value: value.slice(separatorIndex + 1)
+  };
+}
+
+function isSensitiveConfigPath(value: string) {
+  return /(^|[._-])(?:api[-_]?key|token|password|secret|private[-_]?key|credential|client[-_]?secret|webhook[-_]?token)s?($|[._-])/i
+    .test(value);
 }
 
 function previewCommandOutput(output: string) {

@@ -84,6 +84,96 @@ test("adding provider models retries transient Gateway restart during config upd
   ]);
 });
 
+test("setting the default model retries and starts Gateway after transient connect failures", async () => {
+  const calls: string[] = [];
+  let defaultsReads = 0;
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      calls.push(`get:${path}`);
+      if (path === "agents.defaults") {
+        defaultsReads += 1;
+
+        if (defaultsReads === 1) {
+          throw new Error("Failed to connect to OpenClaw Gateway.");
+        }
+
+        return { models: {} };
+      }
+
+      return null;
+    },
+    async setConfig(path: string, value: unknown) {
+      calls.push(`set:${path}`);
+      return { stdout: JSON.stringify({ ok: true, value }), stderr: "" };
+    },
+    async controlGateway(action: "start") {
+      calls.push(`gateway:${action}`);
+      return { ok: true, action };
+    }
+  } as unknown as OpenClawAdapter);
+
+  const result = await setOpenClawDefaultModel("openai/gpt-5.4-mini", {
+    provider: "openai-codex"
+  });
+
+  assert.equal(result.modelId, "openai/gpt-5.4-mini");
+  assert.equal(result.via, "gateway");
+  assert.deepEqual(calls, [
+    "get:agents.defaults",
+    "gateway:start",
+    "get:agents.defaults",
+    "set:agents.defaults",
+    "set:plugins.entries.codex.enabled"
+  ]);
+});
+
+test("setting the default model retries while Gateway is still starting", async () => {
+  const calls: string[] = [];
+  let defaultsWrites = 0;
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      calls.push(`get:${path}`);
+      if (path === "agents.defaults") {
+        return { models: {} };
+      }
+
+      return null;
+    },
+    async setConfig(path: string, value: unknown) {
+      calls.push(`set:${path}`);
+      if (path === "agents.defaults") {
+        defaultsWrites += 1;
+      }
+
+      if (path === "agents.defaults" && defaultsWrites === 1) {
+        throw new Error("UNAVAILABLE: gateway starting; retry shortly");
+      }
+
+      return { stdout: JSON.stringify({ ok: true, value }), stderr: "" };
+    },
+    async controlGateway(action: "start") {
+      calls.push(`gateway:${action}`);
+      return { ok: true, action };
+    }
+  } as unknown as OpenClawAdapter);
+
+  const result = await setOpenClawDefaultModel("openai/gpt-5.4-mini", {
+    provider: "openai"
+  });
+
+  assert.equal(result.modelId, "openai/gpt-5.4-mini");
+  assert.equal(result.via, "gateway");
+  assert.deepEqual(calls, [
+    "get:agents.defaults",
+    "set:agents.defaults",
+    "gateway:start",
+    "get:agents.defaults",
+    "set:agents.defaults"
+  ]);
+});
+
 test("setting the default model writes OpenClaw Gateway config", async () => {
   const calls: string[] = [];
   const values = new Map<string, unknown>();

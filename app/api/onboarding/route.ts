@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { access } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -18,9 +19,19 @@ import {
   getOpenClawLocalPrefixBinPath
 } from "@/lib/openclaw/install";
 import {
+  clearMissionControlCaches,
   getMissionControlSnapshot,
   touchOpenClawRuntimeStateAccess
 } from "@/lib/agentos/control-plane";
+import {
+  repairGatewayAuthForModelSetupSnapshot,
+  resolveGatewayAuthSetupIssueFromSnapshot
+} from "@/lib/openclaw/model-setup-recovery";
+import {
+  generateGatewayNativeAuthToken,
+  repairGatewayNativeDeviceAccess,
+  saveGatewayNativeAuthCredential
+} from "@/lib/openclaw/application/settings-service";
 import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 import type {
   MissionControlSnapshot,
@@ -38,7 +49,8 @@ const onboardingSchema = z.object({
 const docsUrl = OPENCLAW_INSTALL_DOCS_URL;
 const commandTimeoutMs = 10 * 60 * 1000;
 const gatewayStatusTimeoutMs = 8_000;
-const readyTimeoutMs = 12_000;
+const readyTimeoutMs = 25_000;
+const postAuthRepairReadyTimeoutMs = 45_000;
 const readyPollIntervalMs = 250;
 const readySnapshotIntervalMs = 2_000;
 type CommandResult = {
@@ -283,6 +295,7 @@ export async function POST(request: Request) {
               send
             );
             appendOutput(gatewayInstallResult);
+            const gatewayInstallPayload = parseGatewayCommandPayload(gatewayInstallResult.stdout);
 
             if (gatewayInstallResult.errorMessage || gatewayInstallResult.timedOut || gatewayInstallResult.code !== 0) {
               await fail("installing-gateway", "Gateway installation failed.", {
@@ -290,6 +303,28 @@ export async function POST(request: Request) {
                 manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "install", "--json"])
               });
               return;
+            }
+
+            if (gatewayInstallNeedsAgentOsTokenSync(gatewayInstallPayload)) {
+              try {
+                const tokenSyncResult = await syncGatewayAuthTokenBeforeFirstStart(openClawBin, send);
+                appendOutput(tokenSyncResult.modeResult);
+                appendOutput(tokenSyncResult.tokenResult);
+                aggregatedStdout = appendLine(
+                  aggregatedStdout,
+                  "AgentOS aligned Gateway token auth before first Gateway start."
+                );
+              } catch (error) {
+                const recoveryMessage = redactErrorMessage(
+                  error,
+                  "AgentOS could not align Gateway token auth before first Gateway start."
+                );
+                aggregatedStderr = appendLine(aggregatedStderr, recoveryMessage);
+                await fail("installing-gateway", recoveryMessage, {
+                  manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "status", "--json"])
+                });
+                return;
+              }
             }
 
             await send({
@@ -311,46 +346,139 @@ export async function POST(request: Request) {
           }
         }
 
-        snapshot = await loadSnapshot(true);
+      }
 
-        if (!isOpenClawReady(snapshot)) {
+      snapshot = await loadSnapshot(true);
+      let repairedGatewayAuthKind: "gateway-token" | "device-access" | null = null;
+
+      if (!isOpenClawReady(snapshot)) {
+        try {
           const repairedGatewayMode = await repairGatewayModeIfNeeded(openClawBin, send, appendOutput);
 
           if (repairedGatewayMode) {
             snapshot = await loadSnapshot(true);
           }
-        }
-
-        if (!isOpenClawReady(snapshot)) {
-          await send({
-            type: "status",
-            phase: "verifying",
-            message: "Waiting for AgentOS to detect a live OpenClaw gateway..."
+        } catch (error) {
+          const recoveryMessage = redactErrorMessage(error, "Gateway local mode repair failed during system setup.");
+          aggregatedStderr = appendLine(aggregatedStderr, recoveryMessage);
+          await fail("verifying", recoveryMessage, {
+            snapshot,
+            manualCommand: `${formatOpenClawCommand(openClawBin, ["config", "set", "gateway.mode", "local"])} && ${formatOpenClawCommand(openClawBin, ["gateway", "restart", "--force", "--json"])}`
           });
+          return;
+        }
+      }
 
-          try {
-            snapshot = await waitForReadySnapshot(gatewayStatus);
-          } catch (error) {
-            const gatewayStatusRetry = await readGatewayStatus(openClawBin);
-            const gatewayModeBlocked = needsGatewayModeLocalRepair(gatewayStatusRetry);
-            aggregatedStderr = aggregatedStderr
-              ? `${aggregatedStderr}\n${redactErrorMessage(error, "Gateway verification failed.")}`
-              : redactErrorMessage(error, "Gateway verification failed.");
+      if (!isOpenClawReady(snapshot)) {
+        try {
+          const repairedGatewayAuth = await repairGatewayAuthForSystemSetup(snapshot, send);
 
-            if (gatewayStatusRetry?.rpc?.error) {
-              aggregatedStderr = aggregatedStderr
-                ? `${aggregatedStderr}\n${gatewayStatusRetry.rpc.error}`
-                : gatewayStatusRetry.rpc.error;
+          if (repairedGatewayAuth) {
+            repairedGatewayAuthKind = repairedGatewayAuth.kind;
+            aggregatedStdout = appendLine(
+              aggregatedStdout,
+              repairedGatewayAuth.kind === "gateway-token"
+                ? "AgentOS repaired local Gateway token auth for system setup."
+                : "AgentOS repaired local Gateway device access for system setup."
+            );
+            clearMissionControlCaches();
+            try {
+              snapshot = await waitForReadySnapshotAfterGatewayAuthRepair(
+                openClawBin,
+                repairedGatewayAuth.kind,
+                send,
+                appendOutput
+              );
+            } catch (error) {
+              aggregatedStderr = appendLine(
+                aggregatedStderr,
+                redactErrorMessage(error, "Gateway auth repair readiness wait failed.")
+              );
+              const fallbackSnapshot = await loadSnapshot(true).catch(() => null);
+              if (fallbackSnapshot) {
+                snapshot = fallbackSnapshot;
+              }
             }
+          }
+        } catch (error) {
+          const recoveryMessage = redactErrorMessage(error, "Gateway auth repair failed during system setup.");
+          aggregatedStderr = appendLine(aggregatedStderr, recoveryMessage);
+          await fail("verifying", recoveryMessage, {
+            snapshot,
+            manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "status", "--json"])
+          });
+          return;
+        }
+      }
 
+      if (!isOpenClawReady(snapshot)) {
+        await send({
+          type: "status",
+          phase: "verifying",
+          message: "Waiting for AgentOS to detect a live OpenClaw gateway..."
+        });
+
+        try {
+          const verificationGatewayStatus = await readGatewayStatus(openClawBin).catch(() => gatewayStatus);
+          snapshot = await waitForReadySnapshot(verificationGatewayStatus);
+        } catch (error) {
+          const gatewayStatusRetry = await readGatewayStatus(openClawBin);
+          const gatewayModeBlocked = needsGatewayModeLocalRepair(gatewayStatusRetry);
+          const latestSnapshot = await loadSnapshot(true).catch(() => snapshot);
+          const gatewayAuthIssue = latestSnapshot
+            ? resolveGatewayAuthSetupIssueFromSnapshot(latestSnapshot)
+            : null;
+          aggregatedStderr = appendLine(
+            aggregatedStderr,
+            redactErrorMessage(error, "Gateway verification failed.")
+          );
+
+          if (gatewayStatusRetry?.rpc?.error) {
+            aggregatedStderr = appendLine(aggregatedStderr, gatewayStatusRetry.rpc.error);
+          }
+
+          if (!gatewayModeBlocked && gatewayAuthIssue && !repairedGatewayAuthKind && latestSnapshot) {
+            try {
+              const repairedGatewayAuth = await repairGatewayAuthForSystemSetup(latestSnapshot, send);
+
+              if (repairedGatewayAuth) {
+                repairedGatewayAuthKind = repairedGatewayAuth.kind;
+                aggregatedStdout = appendLine(
+                  aggregatedStdout,
+                  repairedGatewayAuth.kind === "gateway-token"
+                    ? "AgentOS repaired local Gateway token auth during system setup verification."
+                    : "AgentOS repaired local Gateway device access during system setup verification."
+                );
+                clearMissionControlCaches();
+                snapshot = await waitForReadySnapshotAfterGatewayAuthRepair(
+                  openClawBin,
+                  repairedGatewayAuth.kind,
+                  send,
+                  appendOutput
+                );
+              }
+            } catch (repairError) {
+              aggregatedStderr = appendLine(
+                aggregatedStderr,
+                redactErrorMessage(repairError, "Gateway auth repair failed during system setup verification.")
+              );
+            }
+          }
+
+          if (!snapshot || !isOpenClawReady(snapshot)) {
             await fail(
               "verifying",
               gatewayModeBlocked
                 ? "OpenClaw gateway needs local mode enabled before AgentOS can connect."
-                : "OpenClaw did not become ready in time.",
+                : gatewayAuthIssue && repairedGatewayAuthKind
+                  ? buildGatewayAuthRepairStillPendingMessage(repairedGatewayAuthKind, "system setup")
+                  : gatewayAuthIssue
+                    ? "OpenClaw Gateway auth changed while AgentOS was verifying system setup. AgentOS attempted automatic repair but OpenClaw did not become ready in time."
+                    : "OpenClaw did not become ready in time.",
               {
+                snapshot: latestSnapshot ?? snapshot ?? undefined,
                 manualCommand: gatewayModeBlocked
-                  ? `${formatOpenClawCommand(openClawBin, ["config", "set", "gateway.mode", "local"])} && ${formatOpenClawCommand(openClawBin, ["gateway", "restart", "--json"])}`
+                  ? `${formatOpenClawCommand(openClawBin, ["config", "set", "gateway.mode", "local"])} && ${formatOpenClawCommand(openClawBin, ["gateway", "restart", "--force", "--json"])}`
                   : formatOpenClawCommand(openClawBin, ["gateway", "status", "--json"])
               }
             );
@@ -526,6 +654,41 @@ async function installOpenClawCli(
   }
 }
 
+async function syncGatewayAuthTokenBeforeFirstStart(
+  openClawBin: string,
+  send: (event: OpenClawOnboardingStreamEvent) => Promise<unknown>
+) {
+  await send({
+    type: "status",
+    phase: "installing-gateway",
+    message: "Preparing Gateway auth for AgentOS before first start..."
+  });
+
+  const token = randomBytes(32).toString("base64url");
+  const modeResult = await runCommand(openClawBin, ["config", "set", "gateway.auth.mode", "token"], send);
+
+  if (modeResult.errorMessage || modeResult.timedOut || modeResult.code !== 0) {
+    throw new Error("AgentOS could not set OpenClaw gateway.auth.mode=token.");
+  }
+
+  const tokenResult = await runCommand(openClawBin, ["config", "set", "gateway.auth.token", token], send);
+
+  if (tokenResult.errorMessage || tokenResult.timedOut || tokenResult.code !== 0) {
+    throw new Error("AgentOS could not write a fresh OpenClaw Gateway token.");
+  }
+
+  await saveGatewayNativeAuthCredential({
+    kind: "token",
+    value: token
+  });
+  clearMissionControlCaches();
+
+  return {
+    modeResult,
+    tokenResult
+  };
+}
+
 async function resolveRuntimeAgentIdFromState() {
   const agentConfig = await settleAgentConfigFromStateFile(openClawStateRootPath);
 
@@ -536,8 +699,12 @@ async function resolveRuntimeAgentIdFromState() {
   return agentConfig.value.find((agent) => typeof agent.id === "string" && agent.id.trim())?.id ?? null;
 }
 
-async function waitForReadySnapshot(gatewayStatus?: GatewayStatusPayload | null) {
+async function waitForReadySnapshot(
+  gatewayStatus?: GatewayStatusPayload | null,
+  options: { timeoutMs?: number } = {}
+) {
   const startedAt = Date.now();
+  const timeoutMs = options.timeoutMs ?? readyTimeoutMs;
   const gatewayPort = gatewayStatus?.gateway?.port;
   let latestSnapshot: MissionControlSnapshot | null = null;
   let lastSnapshotAt = 0;
@@ -567,7 +734,7 @@ async function waitForReadySnapshot(gatewayStatus?: GatewayStatusPayload | null)
     return immediateSnapshot;
   }
 
-  while (Date.now() - startedAt < readyTimeoutMs) {
+  while (Date.now() - startedAt < timeoutMs) {
     const localProbe = await probeLocalGatewayStatus(gatewayPort);
     const shouldReloadSnapshot =
       Boolean(localProbe?.rpc?.ok) ||
@@ -585,7 +752,7 @@ async function waitForReadySnapshot(gatewayStatus?: GatewayStatusPayload | null)
     await delay(readyPollIntervalMs);
   }
 
-  throw new Error(`Readiness check exceeded ${Math.round(readyTimeoutMs / 1000)} seconds.`);
+  throw new Error(`Readiness check exceeded ${Math.round(timeoutMs / 1000)} seconds.`);
 }
 
 function isOpenClawReady(snapshot: MissionControlSnapshot) {
@@ -622,7 +789,7 @@ async function repairGatewayModeIfNeeded(
     message: "Restarting the local gateway service with gateway.mode=local..."
   });
 
-  const restartResult = await runCommand(openClawBin, ["gateway", "restart", "--json"], send);
+  const restartResult = await runCommand(openClawBin, ["gateway", "restart", "--force", "--json"], send);
   appendOutput(restartResult);
 
   if (restartResult.errorMessage || restartResult.timedOut || restartResult.code !== 0) {
@@ -630,6 +797,102 @@ async function repairGatewayModeIfNeeded(
   }
 
   return true;
+}
+
+async function repairGatewayAuthForSystemSetup(
+  snapshot: MissionControlSnapshot,
+  send: (event: OpenClawOnboardingStreamEvent) => Promise<unknown>
+) {
+  return repairGatewayAuthForModelSetupSnapshot(snapshot, {
+    operationLabel: "system setup readiness",
+    onStatus: async (message) => {
+      await send({
+        type: "status",
+        phase: "verifying",
+        message
+      });
+    },
+    repairGatewayAuth: async (kind) => {
+      if (kind === "gateway-token") {
+        return generateGatewayNativeAuthToken({
+          verifyDelaysMs: [0, 750, 1_500, 3_000]
+        });
+      }
+
+      return repairGatewayNativeDeviceAccess();
+    }
+  });
+}
+
+async function waitForReadySnapshotAfterGatewayAuthRepair(
+  openClawBin: string,
+  kind: "gateway-token" | "device-access",
+  send: (event: OpenClawOnboardingStreamEvent) => Promise<unknown>,
+  appendOutput: (result: CommandResult) => void
+) {
+  await send({
+    type: "status",
+    phase: "verifying",
+    message: kind === "gateway-token"
+      ? "Gateway token repaired. Waiting for OpenClaw Gateway to reconnect..."
+      : "Gateway device access repaired. Waiting for OpenClaw Gateway to reconnect..."
+  });
+
+  clearMissionControlCaches();
+  await delay(750);
+
+  await send({
+    type: "status",
+    phase: "starting-gateway",
+    message: "Restarting the local Gateway service after auth repair..."
+  });
+
+  const restartResult = await runCommand(openClawBin, ["gateway", "restart", "--force", "--json"], send, {
+    timeoutMs: 30_000
+  });
+  appendOutput(restartResult);
+
+  if (restartResult.errorMessage || restartResult.timedOut || restartResult.code !== 0) {
+    await send({
+      type: "status",
+      phase: "starting-gateway",
+      message: "Gateway restart did not complete. Trying to start the local Gateway service..."
+    });
+
+    const startResult = await runCommand(openClawBin, ["gateway", "start", "--json"], send, {
+      timeoutMs: 30_000
+    });
+    appendOutput(startResult);
+  }
+
+  clearMissionControlCaches();
+  await delay(1_000);
+
+  const gatewayStatus = await readGatewayStatus(openClawBin).catch(() => null);
+  return waitForReadySnapshot(gatewayStatus, {
+    timeoutMs: postAuthRepairReadyTimeoutMs
+  });
+}
+
+function buildGatewayAuthRepairStillPendingMessage(
+  kind: "gateway-token" | "device-access" | null,
+  operationLabel: string
+) {
+  if (kind === "device-access") {
+    return `AgentOS repaired local device access, but OpenClaw did not accept ${operationLabel} before the readiness timeout. AgentOS restarted the Gateway; run agentos doctor, then retry setup if this remains blocked.`;
+  }
+
+  return `AgentOS repaired the local Gateway token and restarted OpenClaw, but OpenClaw did not accept ${operationLabel} before the readiness timeout. Run agentos doctor, then retry setup if this remains blocked.`;
+}
+
+function appendLine(base: string, line: string) {
+  const cleanLine = redactErrorMessage(line, "Gateway setup diagnostic was unavailable.");
+
+  if (!cleanLine.trim()) {
+    return base;
+  }
+
+  return base ? `${base}\n${cleanLine}` : cleanLine;
 }
 
 async function readGatewayStatus(openClawBin: string): Promise<GatewayStatusPayload | null> {
@@ -705,6 +968,7 @@ type GatewayCommandPayload = {
   result?: string;
   ok?: boolean;
   message?: string;
+  warnings?: string[];
 };
 
 type GatewayStatusPayload = {
@@ -750,6 +1014,19 @@ function parseGatewayCommandPayload(stdout: string): GatewayCommandPayload | nul
       return null;
     }
   }
+}
+
+function gatewayInstallNeedsAgentOsTokenSync(payload: GatewayCommandPayload | null) {
+  if (!payload || payload.result !== "installed") {
+    return false;
+  }
+
+  const text = [
+    payload.message,
+    ...(Array.isArray(payload.warnings) ? payload.warnings : [])
+  ].filter(Boolean).join("\n");
+
+  return /No gateway token found|Auto-generated one and saving to config/i.test(text);
 }
 
 function parseGatewayStatusPayload(stdout: string): GatewayStatusPayload | null {

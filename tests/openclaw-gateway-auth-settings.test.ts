@@ -241,6 +241,89 @@ test("Gateway native auth token generation configures OpenClaw and local env wit
   assert.doesNotMatch(JSON.stringify(result), new RegExp(configuredToken));
 });
 
+test("Gateway native auth token generation restarts even when auth config reports hot reload", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agentos-gateway-auth-hot-reload-"));
+  const adapter = createSettingsAdapter();
+  const controlActions: Array<{ action: string; force?: boolean }> = [];
+  const setConfigPaths: string[] = [];
+  adapter.setConfig = async (path: string) => {
+    setConfigPaths.push(path);
+    return {
+      stdout: JSON.stringify({ configMutation: { reloadKind: "hot" } }),
+      stderr: "",
+      code: 0,
+      metadata: {
+        openClawConfig: {
+          reloadKind: "hot",
+          restartRequired: false,
+          hotReloaded: true
+        }
+      }
+    };
+  };
+  adapter.controlGateway = async (action, options) => {
+    controlActions.push({ action, force: options?.force });
+    return {};
+  };
+  setOpenClawAdapterForTesting(adapter);
+
+  const result = await generateGatewayNativeAuthToken({
+    cwd,
+    verifyNativeAuth: async () => ({ version: "9.9.9" })
+  });
+
+  assert.equal(result.restartRequired, true);
+  assert.equal(result.restarted, true);
+  assert.deepEqual(controlActions, [{ action: "restart", force: true }]);
+  assert.deepEqual(setConfigPaths, ["gateway.auth.mode", "gateway.auth.token"]);
+});
+
+test("Gateway native auth token generation stop-start cycles when forced restart does not verify", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agentos-gateway-auth-cycle-"));
+  const adapter = createSettingsAdapter();
+  const controlActions: Array<{ action: string; force?: boolean }> = [];
+  let verifyAttempts = 0;
+  adapter.setConfig = async () => ({
+    stdout: JSON.stringify({ configMutation: { reloadKind: "restart" } }),
+    stderr: "",
+    code: 0,
+    metadata: {
+      openClawConfig: {
+        reloadKind: "restart",
+        restartRequired: true,
+        hotReloaded: false
+      }
+    }
+  });
+  adapter.controlGateway = async (action, options) => {
+    controlActions.push({ action, force: options?.force });
+    return {};
+  };
+  setOpenClawAdapterForTesting(adapter);
+
+  const result = await generateGatewayNativeAuthToken({
+    cwd,
+    verifyDelaysMs: [0],
+    verifyNativeAuth: async () => {
+      verifyAttempts += 1;
+
+      if (verifyAttempts === 1) {
+        throw new Error("unauthorized: gateway token mismatch (provide gateway auth token)");
+      }
+
+      return { version: "9.9.9" };
+    }
+  });
+
+  assert.equal(result.restarted, true);
+  assert.equal(result.verified, true);
+  assert.deepEqual(controlActions, [
+    { action: "restart", force: true },
+    { action: "stop", force: undefined },
+    { action: "start", force: undefined }
+  ]);
+});
+
 test("Gateway native auth status explains redacted config secrets without exposing them", async () => {
   setOpenClawAdapterForTesting(
     createSettingsAdapter({

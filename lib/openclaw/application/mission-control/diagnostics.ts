@@ -28,6 +28,7 @@ import type {
 } from "@/lib/openclaw/client/gateway-client";
 import { getRecentOpenClawGatewayFallbackDiagnostics } from "@/lib/openclaw/client/gateway-client";
 import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
+import { filterActiveOpenClawGatewayFallbackDiagnostics } from "@/lib/openclaw/client/gateway-diagnostic-activity";
 import { RuntimeDiagnosticsStateCache } from "@/lib/openclaw/state/runtime-diagnostics-cache";
 import {
   buildModelRecords,
@@ -117,7 +118,11 @@ export async function buildLiveMissionControlDiagnostics(input: {
   if (input.profile === "interactive" && !capabilityMatrix) {
     warmOpenClawCapabilityMatrix();
   }
-  const gatewayFallbackIssues = getRecentOpenClawGatewayFallbackDiagnostics().map(
+  const transport = getOpenClawGatewayClient().getDiagnostics?.();
+  const gatewayFallbackIssues = filterActiveOpenClawGatewayFallbackDiagnostics(
+    getRecentOpenClawGatewayFallbackDiagnostics(),
+    transport
+  ).map(
     (entry) => `gateway.${entry.operation}: Gateway-first request fell back to CLI (${entry.kind}): ${entry.issue} Recovery: ${entry.recovery}`
   );
 
@@ -134,7 +139,7 @@ export async function buildLiveMissionControlDiagnostics(input: {
     modelReadiness,
     capabilityMatrix,
     commandHistory: getRecentOpenClawCommandDiagnostics(),
-    transport: getOpenClawGatewayClient().getDiagnostics?.(),
+    transport,
     versionDiagnostics,
     issues: buildDiagnosticIssues({
       payloadResults: input.payloadResults,

@@ -141,6 +141,40 @@ test("transport diagnostics summary totals only positive finite fallback counts"
   assert.equal(summary.statusTone, "danger");
 });
 
+test("transport diagnostics summary treats repaired pre-connect fallback as healthy", () => {
+  const summary = resolveTransportDiagnosticsSummary(
+    createTransportDiagnostics({
+      mode: "native-ws",
+      gatewayMode: "native-ws",
+      statusLabel: "Native Gateway: OK",
+      connectionState: "connected",
+      protocolVersion: 4,
+      fallbackCounts: {
+        "config.set": 2
+      },
+      fallbackTotal: 2,
+      recentFallbackDiagnostics: [{
+        at: "2026-05-16T10:00:00.000Z",
+        operation: "config.set",
+        issue: "gateway token mismatch",
+        kind: "auth",
+        recovery: "Check the Gateway token."
+      }],
+      lastNativeError: "gateway token mismatch",
+      lastConnectedAt: "2026-05-16T10:01:00.000Z",
+      lastDisconnectedAt: "2026-05-16T10:00:00.000Z"
+    }),
+    "live"
+  );
+
+  assert.equal(summary.gatewayModeLabel, "native-ws");
+  assert.equal(summary.statusLabel, "Native Gateway: OK");
+  assert.equal(summary.fallbackTotal, 2);
+  assert.equal(summary.recentFallbackDiagnostics.length, 1);
+  assert.equal(summary.lastNativeError, "gateway token mismatch");
+  assert.equal(summary.statusTone, "success");
+});
+
 test("fallback diagnostic labels and recovery messages are actionable", () => {
   assert.equal(formatGatewayFallbackDiagnosticKind("auth"), "Needs credential");
   assert.match(resolveGatewayFallbackRecovery("auth"), /token\/password/);
