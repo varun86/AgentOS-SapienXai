@@ -45,23 +45,32 @@ export function buildWizardSteps(stage: WizardStage, systemReady: boolean, model
   ] as Array<{ id: string; order: number; label: string; description: string; state: StepState }>;
 }
 
-export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboardingPhase | null) {
-  const directGatewayRun = snapshot.diagnostics.rpcOk && !snapshot.diagnostics.loaded;
+export function resolveEffectiveWizardStage(stage: WizardStage, systemReady: boolean): WizardStage {
+  return systemReady ? stage : "system";
+}
+
+export function buildSystemSteps(
+  snapshot: MissionControlSnapshot,
+  phase: OpenClawOnboardingPhase | null,
+  options: { forcePending?: boolean } = {}
+) {
+  const forcePending = options.forcePending === true;
+  const directGatewayRun = !forcePending && snapshot.diagnostics.rpcOk && !snapshot.diagnostics.loaded;
   const cliComplete =
-    snapshot.diagnostics.installed ||
+    (!forcePending && snapshot.diagnostics.installed) ||
     phase === "installing-gateway" ||
     phase === "starting-gateway" ||
     phase === "verifying" ||
     phase === "ready";
   const gatewayComplete =
-    snapshot.diagnostics.loaded ||
+    (!forcePending && snapshot.diagnostics.loaded) ||
     directGatewayRun ||
     phase === "starting-gateway" ||
     phase === "verifying" ||
     phase === "ready";
-  const liveComplete = snapshot.diagnostics.rpcOk || phase === "ready";
+  const liveComplete = (!forcePending && snapshot.diagnostics.rpcOk) || phase === "ready";
   const runtimeStateComplete =
-    (snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable) ||
+    (!forcePending && snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable) ||
     phase === "ready";
   const runtimeReady = liveComplete && runtimeStateComplete;
 
@@ -69,7 +78,16 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
     {
       id: "cli",
       label: "OpenClaw CLI",
-      description: resolveSystemStepDescription("cli", snapshot, phase, cliComplete, gatewayComplete, liveComplete, runtimeReady),
+      description: resolveSystemStepDescription(
+        "cli",
+        snapshot,
+        phase,
+        cliComplete,
+        gatewayComplete,
+        liveComplete,
+        runtimeReady,
+        forcePending
+      ),
       state: resolveStepState(cliComplete, !cliComplete && (phase === "detecting" || phase === "installing-cli"))
     },
     {
@@ -82,7 +100,8 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
         cliComplete,
         gatewayComplete,
         liveComplete,
-        runtimeReady
+        runtimeReady,
+        forcePending
       ),
       state: resolveStepState(
         gatewayComplete,
@@ -99,7 +118,8 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
         cliComplete,
         gatewayComplete,
         liveComplete,
-        runtimeReady
+        runtimeReady,
+        forcePending
       ),
       state: resolveStepState(
         runtimeReady,
@@ -121,10 +141,11 @@ function resolveSystemStepDescription(
   cliComplete: boolean,
   gatewayComplete: boolean,
   liveComplete: boolean,
-  runtimeReady: boolean
+  runtimeReady: boolean,
+  forcePending: boolean
 ) {
   if (stepId === "cli") {
-    if (snapshot.diagnostics.installed) {
+    if (!forcePending && snapshot.diagnostics.installed) {
       return `Installed${snapshot.diagnostics.version ? ` · v${snapshot.diagnostics.version}` : ""}`;
     }
 
@@ -132,7 +153,7 @@ function resolveSystemStepDescription(
       return "Installing the CLI and local wrapper.";
     }
 
-    if (phase === "detecting" || !snapshot.diagnostics.installed) {
+    if (phase === "detecting" || forcePending || !snapshot.diagnostics.installed) {
       return "Checking whether the CLI is already installed.";
     }
 
@@ -140,7 +161,7 @@ function resolveSystemStepDescription(
   }
 
   if (stepId === "gateway") {
-    if (snapshot.diagnostics.loaded) {
+    if (!forcePending && snapshot.diagnostics.loaded) {
       return "Gateway is already registered.";
     }
 
@@ -164,7 +185,7 @@ function resolveSystemStepDescription(
       return "Gateway is up and waiting on RPC.";
     }
 
-    if (snapshot.diagnostics.rpcOk) {
+    if (!forcePending && snapshot.diagnostics.rpcOk) {
       return "Gateway is running directly.";
     }
 

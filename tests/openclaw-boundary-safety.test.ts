@@ -536,6 +536,16 @@ test("onboarding refreshes full model snapshot before entering model setup", () 
   assert.doesNotMatch(source, /onContinueToModels=\{\(\) => setOnboardingStage\("models"\)\}/);
 });
 
+test("full uninstall reset reopens onboarding at system setup", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
+
+  assert.match(source, /const \[requiresFreshInstallSystemSetup, setRequiresFreshInstallSystemSetup\] = useState\(false\);/);
+  assert.match(source, /const effectiveOnboardingStage = resolveEffectiveWizardStage/);
+  assert.match(source, /setRequiresFreshInstallSystemSetup\(true\);[\s\S]*setOnboardingStage\("system"\);/);
+  assert.match(source, /stage=\{effectiveOnboardingStage\}/);
+  assert.match(source, /systemSetupRequired=\{requiresFreshInstallSystemSetup\}/);
+});
+
 function resolveLocalOpenClawImport(filePath: string, specifier: string) {
   if (specifier.startsWith("@/")) {
     return `${specifier.slice(2)}.ts`;

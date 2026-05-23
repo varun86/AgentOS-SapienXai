@@ -63,7 +63,10 @@ import {
   shouldDeferWorkspaceSelectionHydration,
   updateOptimisticMissionTask
 } from "@/components/mission-control/mission-control-shell.utils";
-import { resolveInitialOnboardingModelId } from "@/components/mission-control/openclaw-onboarding.utils";
+import {
+  resolveEffectiveWizardStage,
+  resolveInitialOnboardingModelId
+} from "@/components/mission-control/openclaw-onboarding.utils";
 import { compactPath } from "@/lib/openclaw/presenters";
 import { consumeNdjsonStream } from "@/lib/ndjson";
 import {
@@ -314,6 +317,7 @@ export function MissionControlShell({
   const [isOnboardingDismissed, setIsOnboardingDismissed] = useState(false);
   const [isOnboardingForcedOpen, setIsOnboardingForcedOpen] = useState(false);
   const [showOnboardingReadyState, setShowOnboardingReadyState] = useState(false);
+  const [requiresFreshInstallSystemSetup, setRequiresFreshInstallSystemSetup] = useState(false);
   const [hasSeenMissionReady, setHasSeenMissionReady] = useState(false);
   const [gatewayControlAction, setGatewayControlAction] = useState<GatewayControlAction | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
@@ -393,8 +397,14 @@ export function MissionControlShell({
     (runtime) =>
       (runtime.status === "running" || runtime.status === "queued") && !isDirectChatRuntime(runtime)
   ).length;
-  const isOpenClawOnboardingSystemReady = resolveOpenClawSystemReady(snapshot);
-  const isOpenClawOnboardingModelReady = resolveOpenClawModelReady(snapshot);
+  const isOpenClawOnboardingSystemReady =
+    !requiresFreshInstallSystemSetup && resolveOpenClawSystemReady(snapshot);
+  const isOpenClawOnboardingModelReady =
+    !requiresFreshInstallSystemSetup && resolveOpenClawModelReady(snapshot);
+  const effectiveOnboardingStage = resolveEffectiveWizardStage(
+    onboardingStage,
+    isOpenClawOnboardingSystemReady || onboardingRunState === "success"
+  );
   const hasWorkspaceSetup = hasAgentOSWorkspaceSetup(snapshot);
   const openClawInstallSummary = resolveOpenClawInstallSummary(snapshot);
   const onboardingAction = resolveOnboardingAction(snapshot);
@@ -1049,6 +1059,11 @@ export function MissionControlShell({
   ]);
 
   useEffect(() => {
+    if (onboardingStage === "models" && !isOpenClawOnboardingSystemReady && onboardingRunState !== "success") {
+      setOnboardingStage("system");
+      return;
+    }
+
     if (onboardingRunState === "success" || isOpenClawOnboardingSystemReady) {
       setOnboardingStage("models");
       return;
@@ -1057,7 +1072,7 @@ export function MissionControlShell({
     if (modelOnboardingRunState === "running" || modelOnboardingRunState === "success") {
       return;
     }
-  }, [isOpenClawOnboardingSystemReady, modelOnboardingRunState, onboardingRunState]);
+  }, [isOpenClawOnboardingSystemReady, modelOnboardingRunState, onboardingRunState, onboardingStage]);
 
   useEffect(() => {
     if (isOnboardingDismissed) {
@@ -1067,13 +1082,13 @@ export function MissionControlShell({
 
     if (modelSwitchFeedback.phase === "success") {
       setHasSeenMissionReady(true);
-      setOnboardingStage("models");
-      setShowOnboardingReadyState(true);
+      setOnboardingStage(isOpenClawOnboardingSystemReady ? "models" : "system");
+      setShowOnboardingReadyState(isOpenClawOnboardingSystemReady);
       return;
     }
 
     setShowOnboardingReadyState(false);
-  }, [isOnboardingDismissed, modelSwitchFeedback.phase]);
+  }, [isOnboardingDismissed, isOpenClawOnboardingSystemReady, modelSwitchFeedback.phase]);
 
   const resetUpdateDialogState = () => {
     if (updateRunState === "running") {
@@ -1087,7 +1102,7 @@ export function MissionControlShell({
     setUpdateManualCommand(null);
   };
 
-  const resetFreshInstallOnboardingState = () => {
+  const resetOnboardingProgressState = () => {
     setOnboardingRunState("idle");
     setOnboardingPhase(null);
     setOnboardingStatusMessage(null);
@@ -1110,6 +1125,14 @@ export function MissionControlShell({
     setLaunchpadWorkspaceCreateRunState("idle");
     setLaunchpadWorkspaceCreateProgress(null);
     hydratedOnboardingModelIdRef.current = null;
+  };
+
+  const resetFreshInstallOnboardingState = () => {
+    resetOnboardingProgressState();
+    setRequiresFreshInstallSystemSetup(true);
+    setOnboardingStage("system");
+    setIsOnboardingDismissed(false);
+    setIsOnboardingForcedOpen(true);
   };
 
   const appendUpdateLog = (text: string) => {
@@ -1479,7 +1502,7 @@ export function MissionControlShell({
 
   const runOpenClawOnboarding = async () => {
     setIsOnboardingDismissed(false);
-    resetFreshInstallOnboardingState();
+    resetOnboardingProgressState();
     setOnboardingStage("system");
     setOnboardingRunState("running");
     setOnboardingPhase("detecting");
@@ -1547,6 +1570,7 @@ export function MissionControlShell({
               if (event.ok) {
                 setOnboardingStatusMessage("Refreshing model status...");
                 await refreshOnboardingModelSnapshot(event.snapshot ?? null);
+                setRequiresFreshInstallSystemSetup(false);
               } else {
                 setOnboardingStatusMessage(null);
                 if (event.snapshot) {
@@ -1586,6 +1610,7 @@ export function MissionControlShell({
           if (event.ok) {
             setOnboardingStatusMessage("Refreshing model status...");
             await refreshOnboardingModelSnapshot(event.snapshot ?? null);
+            setRequiresFreshInstallSystemSetup(false);
           } else {
             setOnboardingStatusMessage(null);
             if (event.snapshot) {
@@ -2266,8 +2291,10 @@ export function MissionControlShell({
   ]);
 
   const openSetupWizard = (stage?: OnboardingWizardStage) => {
-    const systemReady = resolveOpenClawSystemReady(snapshot);
-    const resolvedStage = stage ?? (systemReady ? "models" : "system");
+    const resolvedStage = resolveEffectiveWizardStage(
+      stage ?? (isOpenClawOnboardingSystemReady ? "models" : "system"),
+      isOpenClawOnboardingSystemReady
+    );
 
     setIsSettingsOpen(false);
     setOnboardingStage(resolvedStage);
@@ -2875,12 +2902,23 @@ export function MissionControlShell({
   };
 
   const continueToModelSetup = () => {
+    let canContinueToModels = isOpenClawOnboardingSystemReady;
     setOnboardingStatusMessage("Refreshing model status...");
     void refreshOnboardingModelSnapshot(snapshot)
+      .then((nextSnapshot) => {
+        if (!nextSnapshot) {
+          return;
+        }
+
+        if (resolveOpenClawSystemReady(nextSnapshot)) {
+          canContinueToModels = true;
+          setRequiresFreshInstallSystemSetup(false);
+        }
+      })
       .catch(() => {})
       .finally(() => {
         setOnboardingStatusMessage(null);
-        setOnboardingStage("models");
+        setOnboardingStage(resolveEffectiveWizardStage("models", canContinueToModels));
       });
   };
 
@@ -3053,7 +3091,14 @@ export function MissionControlShell({
         <OpenClawOnboarding
           snapshot={snapshot}
           surfaceTheme={surfaceTheme}
-          stage={onboardingStage}
+          stage={effectiveOnboardingStage}
+          systemReady={onboardingRunState === "success" || isOpenClawOnboardingSystemReady}
+          modelReady={
+            modelSwitchFeedback.phase === "success" ||
+            showOnboardingReadyState ||
+            isOpenClawOnboardingModelReady
+          }
+          systemSetupRequired={requiresFreshInstallSystemSetup}
           showReadyState={showOnboardingReadyState}
           systemActionLabel={onboardingAction.label}
           systemActionDescription={onboardingAction.description}
@@ -3090,7 +3135,7 @@ export function MissionControlShell({
           onBackToSystem={() => setOnboardingStage("system")}
           onSelectStage={(stage) => {
             setShowOnboardingReadyState(false);
-            setOnboardingStage(stage);
+            setOnboardingStage(resolveEffectiveWizardStage(stage, isOpenClawOnboardingSystemReady));
           }}
           launchpadCreateProgress={launchpadWorkspaceCreateProgress}
           launchpadCreateRunState={launchpadWorkspaceCreateRunState}
@@ -3717,7 +3762,14 @@ export function MissionControlShell({
           <OpenClawOnboarding
             snapshot={snapshot}
             surfaceTheme={surfaceTheme}
-            stage={onboardingStage}
+            stage={effectiveOnboardingStage}
+            systemReady={onboardingRunState === "success" || isOpenClawOnboardingSystemReady}
+            modelReady={
+              modelSwitchFeedback.phase === "success" ||
+              showOnboardingReadyState ||
+              isOpenClawOnboardingModelReady
+            }
+            systemSetupRequired={requiresFreshInstallSystemSetup}
             showReadyState={showOnboardingReadyState}
             systemActionLabel={onboardingAction.label}
             systemActionDescription={onboardingAction.description}
@@ -3754,7 +3806,7 @@ export function MissionControlShell({
             onBackToSystem={() => setOnboardingStage("system")}
             onSelectStage={(stage) => {
               setShowOnboardingReadyState(false);
-              setOnboardingStage(stage);
+              setOnboardingStage(resolveEffectiveWizardStage(stage, isOpenClawOnboardingSystemReady));
             }}
             launchpadCreateProgress={launchpadWorkspaceCreateProgress}
             launchpadCreateRunState={launchpadWorkspaceCreateRunState}

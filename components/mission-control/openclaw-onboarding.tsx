@@ -48,6 +48,9 @@ export function OpenClawOnboarding({
   snapshot,
   surfaceTheme,
   stage,
+  systemReady,
+  modelReady,
+  systemSetupRequired,
   showReadyState,
   systemActionLabel,
   systemActionDescription,
@@ -75,6 +78,9 @@ export function OpenClawOnboarding({
   snapshot: MissionControlSnapshot;
   surfaceTheme: SurfaceTheme;
   stage: WizardStage;
+  systemReady?: boolean;
+  modelReady?: boolean;
+  systemSetupRequired?: boolean;
   showReadyState: boolean;
   systemActionLabel: string;
   systemActionDescription: string;
@@ -98,14 +104,18 @@ export function OpenClawOnboarding({
   onSelectStage: (stage: WizardStage) => void;
   launchpadCreateProgress: OperationProgressSnapshot | null;
   launchpadCreateRunState: "idle" | "running" | "success" | "error";
-  }) {
-  const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
+}) {
+  const onboardingSystemReady =
+    systemReady ?? (systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot));
   const hasWorkspaceSetup = hasAgentOSWorkspaceSetup(snapshot);
-  const modelReady =
-    modelSwitchFeedback.phase === "success" ||
-    showReadyState ||
-    isOpenClawOnboardingModelReady(snapshot);
-  const showLaunchpad = modelReady && (showReadyState || !hasWorkspaceSetup);
+  const onboardingModelReady =
+    modelReady ??
+    (
+      modelSwitchFeedback.phase === "success" ||
+      showReadyState ||
+      isOpenClawOnboardingModelReady(snapshot)
+    );
+  const showLaunchpad = onboardingModelReady && (showReadyState || !hasWorkspaceSetup);
   const isLaunchpadBuilding = launchpadCreateRunState === "running";
   const workspaceCount = snapshot.workspaces.length;
   const hasWorkspaces = workspaceCount > 0;
@@ -118,8 +128,10 @@ export function OpenClawOnboarding({
     snapshot.diagnostics.modelReadiness.defaultModel ||
     null;
   const systemPhaseForSteps = onboardingSystemReady ? "ready" : systemPhase;
-  const wizardSteps = buildWizardSteps(stage, onboardingSystemReady, modelReady);
-  const systemSteps = buildSystemSteps(snapshot, systemPhaseForSteps);
+  const wizardSteps = buildWizardSteps(stage, onboardingSystemReady, onboardingModelReady);
+  const systemSteps = buildSystemSteps(snapshot, systemPhaseForSteps, {
+    forcePending: systemSetupRequired
+  });
   const availableModels = snapshot.models.filter((model) => model.available !== false && !model.missing);
   const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
   const stageRun = stage === "system" ? systemRun : modelRun;
@@ -149,14 +161,16 @@ export function OpenClawOnboarding({
     stage === "system"
       ? onboardingSystemReady
         ? "ready"
-        : resolveSystemPhaseLabel(systemPhase, snapshot)
+        : systemSetupRequired
+          ? "waiting"
+          : resolveSystemPhaseLabel(systemPhase, snapshot)
       : resolveModelPhaseLabel(modelPhase, snapshot);
   const showDetails =
     stageRun.runState !== "idle" ||
     Boolean(stageRun.manualCommand) ||
     stageRun.log.trim().length > 0 ||
     (stage === "models" && discoveredModels.length > 0);
-  const stageBadgeLabel = resolveStageBadgeLabel(stageRun.runState, stage, modelReady);
+  const stageBadgeLabel = resolveStageBadgeLabel(stageRun.runState, stage, onboardingModelReady);
   const gatewayAuthNeedsSetup = snapshot.diagnostics.issues.some((issue) =>
     /gateway\..*auth|redacted secret|AGENTOS_OPENCLAW_GATEWAY_TOKEN|OPENCLAW_GATEWAY_TOKEN/i.test(issue)
   );
@@ -164,7 +178,7 @@ export function OpenClawOnboarding({
   const primaryAction = resolvePrimaryAction({
     stage,
     systemReady: onboardingSystemReady,
-    modelReady,
+    modelReady: onboardingModelReady,
     systemActionLabel,
     selectedModelId,
     defaultModelId
@@ -208,7 +222,7 @@ export function OpenClawOnboarding({
           <span
             className={cn(
               "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.16em]",
-              stageBadgeClassName(stageRun.runState, modelReady, surfaceTheme)
+              stageBadgeClassName(stageRun.runState, onboardingModelReady, surfaceTheme)
             )}
           >
             {stageBadgeLabel}
@@ -407,12 +421,12 @@ export function OpenClawOnboarding({
               </>
             ) : (
               <>
-                {stage === "models" && !modelReady ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => onOpenAddModels()}
+                {stage === "models" && !onboardingModelReady ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onOpenAddModels()}
                     className={secondaryActionClassName(surfaceTheme)}
                   >
                     Open full Add Models

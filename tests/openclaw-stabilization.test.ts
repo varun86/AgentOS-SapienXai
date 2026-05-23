@@ -53,14 +53,13 @@ import {
 import { resolveOpenAiCodexAuthOrderRepair } from "@/lib/openclaw/application/model-auth-service";
 import { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/domains/session-catalog";
 import {
+  resolveEffectiveWizardStage,
   resolveInitialOnboardingProviderId,
   resolveOnboardingModelProviderId,
+  resolvePrimaryAction,
   resolveSelectedOnboardingProviderId
 } from "@/components/mission-control/openclaw-onboarding.utils";
 import { isNewerSnapshot } from "@/hooks/use-mission-control-data";
-import {
-  resolvePrimaryAction
-} from "@/components/mission-control/openclaw-onboarding.utils";
 import {
   resolveModelOnboardingActionCopy,
   resolveModelOnboardingStartPhase
@@ -754,6 +753,10 @@ test("onboarding preserves provider context for ChatGPT catalog selections", () 
 });
 
 test("model onboarding requires an explicit selection before verification", () => {
+  assert.equal(resolveEffectiveWizardStage("models", false), "system");
+  assert.equal(resolveEffectiveWizardStage("system", false), "system");
+  assert.equal(resolveEffectiveWizardStage("models", true), "models");
+
   assert.deepEqual(
     resolvePrimaryAction({
       stage: "models",
