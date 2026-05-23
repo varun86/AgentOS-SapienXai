@@ -460,6 +460,7 @@ function ModelSwitchScene({
     "Verifying selected provider",
     "Updating AgentOS snapshot"
   ];
+  const currentStepIndex = resolveModelSwitchStepIndex(feedback);
 
   return (
     <div
@@ -551,13 +552,27 @@ function ModelSwitchScene({
                   key={step}
                   className={cn(
                     "flex items-center gap-2 rounded-[12px] border px-2.5 py-2",
-                    isLight ? "border-[#ead8c8] bg-white/55" : "border-white/8 bg-white/[0.03]"
+                    index === currentStepIndex
+                      ? isLight
+                        ? "border-[#c8946f] bg-[#fff5ed]"
+                        : "border-cyan-300/24 bg-cyan-300/[0.07]"
+                      : index < currentStepIndex
+                        ? isLight
+                          ? "border-emerald-200 bg-emerald-50/60"
+                          : "border-emerald-300/16 bg-emerald-300/[0.05]"
+                        : isLight
+                          ? "border-[#ead8c8] bg-white/55"
+                          : "border-white/8 bg-white/[0.03]"
                   )}
                 >
                   <span
                     className={cn(
                       "inline-flex h-4 w-4 items-center justify-center rounded-full border text-[8px]",
-                      index === 0
+                      index < currentStepIndex
+                        ? isLight
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200"
+                        : index === currentStepIndex
                         ? isLight
                           ? "border-[#c8946f] bg-[#f8eadf] text-[#8c5d3d]"
                           : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
@@ -566,7 +581,7 @@ function ModelSwitchScene({
                           : "border-white/10 bg-white/[0.03] text-slate-500"
                     )}
                   >
-                    {index + 1}
+                    {index < currentStepIndex ? <Check className="h-2.5 w-2.5" /> : index + 1}
                   </span>
                   <p className={cn("text-[10px]", isLight ? "text-[#5f4b3e]" : "text-slate-300")}>{step}</p>
                 </div>
@@ -589,6 +604,28 @@ function ModelSwitchScene({
       </div>
     </div>
   );
+}
+
+function resolveModelSwitchStepIndex(feedback: ModelSwitchFeedback) {
+  const message = feedback.message ?? "";
+
+  if (feedback.phase !== "saving") {
+    return 0;
+  }
+
+  if (/updating agentos snapshot|snapshot/i.test(message)) {
+    return 3;
+  }
+
+  if (/verifying selected provider|provider/i.test(message)) {
+    return 2;
+  }
+
+  if (/refreshing openclaw config|config/i.test(message)) {
+    return 1;
+  }
+
+  return 0;
 }
 
 function ModelSwitchLine({

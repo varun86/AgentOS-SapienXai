@@ -385,7 +385,12 @@ export async function POST(request: Request) {
         await send({
           type: "status",
           phase: "configuring-default",
-          message: `Setting ${modelId} as the default model...`
+          message: `Saving model route for ${modelId}...`
+        });
+        await send({
+          type: "status",
+          phase: "configuring-default",
+          message: "Refreshing OpenClaw config..."
         });
         try {
           const result = await runWithGatewayAuthSetupRecovery(() => setOpenClawDefaultModel(modelId, {
@@ -497,6 +502,16 @@ export async function POST(request: Request) {
           return;
         }
 
+        await send({
+          type: "status",
+          phase: "verifying",
+          message: "Verifying selected provider..."
+        });
+        await send({
+          type: "status",
+          phase: "refreshing",
+          message: "Updating AgentOS snapshot..."
+        });
         snapshot = await getMissionControlSnapshot({ force: true });
         await send({
           type: "done",
@@ -552,6 +567,11 @@ export async function POST(request: Request) {
           return;
         }
 
+        await send({
+          type: "status",
+          phase: "refreshing",
+          message: "Updating AgentOS snapshot..."
+        });
         snapshot = await getMissionControlSnapshot({ force: true });
       }
 
