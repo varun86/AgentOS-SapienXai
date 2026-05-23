@@ -269,8 +269,9 @@ test("system onboarding repairs Gateway auth before runtime state verification",
   assert.notEqual(repairIndex, -1);
   assert.notEqual(runtimeStateIndex, -1);
   assert.equal(repairIndex < runtimeStateIndex, true);
-  assert.match(source, /const readyTimeoutMs = 25_000/);
-  assert.match(source, /const postAuthRepairReadyTimeoutMs = 45_000/);
+  assert.match(source, /const readyTimeoutMs = 60_000/);
+  assert.match(source, /const postAuthRepairReadyTimeoutMs = 90_000/);
+  assert.match(source, /const readyStatusIntervalMs = 5_000/);
   assert.match(source, /waitForReadySnapshotAfterGatewayAuthRepair/);
   assert.match(source, /clearMissionControlCaches\(\);/);
   assert.match(source, /\["gateway", "restart", "--force", "--json"\]/);

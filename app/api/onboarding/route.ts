@@ -49,10 +49,11 @@ const onboardingSchema = z.object({
 const docsUrl = OPENCLAW_INSTALL_DOCS_URL;
 const commandTimeoutMs = 10 * 60 * 1000;
 const gatewayStatusTimeoutMs = 8_000;
-const readyTimeoutMs = 25_000;
-const postAuthRepairReadyTimeoutMs = 45_000;
+const readyTimeoutMs = 60_000;
+const postAuthRepairReadyTimeoutMs = 90_000;
 const readyPollIntervalMs = 250;
 const readySnapshotIntervalMs = 2_000;
+const readyStatusIntervalMs = 5_000;
 type CommandResult = {
   code: number | null;
   stdout: string;
@@ -420,7 +421,15 @@ export async function POST(request: Request) {
 
         try {
           const verificationGatewayStatus = await readGatewayStatus(openClawBin).catch(() => gatewayStatus);
-          snapshot = await waitForReadySnapshot(verificationGatewayStatus);
+          snapshot = await waitForReadySnapshot(verificationGatewayStatus, {
+            onWaiting: async (message) => {
+              await send({
+                type: "status",
+                phase: "verifying",
+                message
+              });
+            }
+          });
         } catch (error) {
           const gatewayStatusRetry = await readGatewayStatus(openClawBin);
           const gatewayModeBlocked = needsGatewayModeLocalRepair(gatewayStatusRetry);
@@ -613,7 +622,9 @@ async function runCommand(
         stdout,
         stderr,
         timedOut,
-        errorMessage: timedOut ? `Command exceeded ${Math.round(commandTimeoutMs / 1000)} seconds.` : undefined
+        errorMessage: timedOut
+          ? `Command exceeded ${Math.round((options.timeoutMs ?? commandTimeoutMs) / 1000)} seconds.`
+          : undefined
       });
     });
   });
@@ -701,13 +712,17 @@ async function resolveRuntimeAgentIdFromState() {
 
 async function waitForReadySnapshot(
   gatewayStatus?: GatewayStatusPayload | null,
-  options: { timeoutMs?: number } = {}
+  options: {
+    timeoutMs?: number;
+    onWaiting?: (message: string) => Promise<void> | void;
+  } = {}
 ) {
   const startedAt = Date.now();
   const timeoutMs = options.timeoutMs ?? readyTimeoutMs;
   const gatewayPort = gatewayStatus?.gateway?.port;
   let latestSnapshot: MissionControlSnapshot | null = null;
   let lastSnapshotAt = 0;
+  let lastStatusAt = 0;
 
   const loadReadinessSnapshot = async () => {
     latestSnapshot = await getMissionControlSnapshot({ force: true, loadProfile: "system" });
@@ -749,10 +764,36 @@ async function waitForReadySnapshot(
       }
     }
 
+    if (options.onWaiting && Date.now() - lastStatusAt >= readyStatusIntervalMs) {
+      lastStatusAt = Date.now();
+      await options.onWaiting(buildReadyWaitStatusMessage(latestSnapshot, localProbe));
+    }
+
     await delay(readyPollIntervalMs);
   }
 
   throw new Error(`Readiness check exceeded ${Math.round(timeoutMs / 1000)} seconds.`);
+}
+
+function buildReadyWaitStatusMessage(
+  snapshot: MissionControlSnapshot | null,
+  localProbe: GatewayStatusPayload | null
+) {
+  if (snapshot?.diagnostics.rpcOk) {
+    return "OpenClaw Gateway RPC is live. Verifying runtime state access...";
+  }
+
+  if (localProbe?.service?.loaded) {
+    return "OpenClaw Gateway port is open. Waiting for authenticated RPC readiness...";
+  }
+
+  const transportLabel = snapshot?.diagnostics.transport?.statusLabel;
+
+  if (transportLabel) {
+    return `Waiting for OpenClaw Gateway to become ready (${transportLabel})...`;
+  }
+
+  return "Waiting for OpenClaw Gateway to become ready...";
 }
 
 function isOpenClawReady(snapshot: MissionControlSnapshot) {
@@ -870,7 +911,14 @@ async function waitForReadySnapshotAfterGatewayAuthRepair(
 
   const gatewayStatus = await readGatewayStatus(openClawBin).catch(() => null);
   return waitForReadySnapshot(gatewayStatus, {
-    timeoutMs: postAuthRepairReadyTimeoutMs
+    timeoutMs: postAuthRepairReadyTimeoutMs,
+    onWaiting: async (message) => {
+      await send({
+        type: "status",
+        phase: "verifying",
+        message
+      });
+    }
   });
 }
 

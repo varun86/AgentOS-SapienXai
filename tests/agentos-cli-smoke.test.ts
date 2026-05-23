@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -36,8 +36,26 @@ test("agentos doctor prints deterministic package, install, node, platform, bund
   assert.match(result.stdout, /OK\s+Node\.js: v\d+\.\d+\.\d+ \(required >= 20\.9\.0\)/);
   assert.match(result.stdout, /OK\s+Platform:/);
   assert.match(result.stdout, /OK\s+Bundle: ready at /);
+  assert.match(result.stdout, /OK\s+Target URL: http:\/\/localhost:3000/);
   assert.match(result.stdout, /OK\s+Configured env: AGENTOS_HOST=127\.0\.0\.1, AGENTOS_PORT=3000, AGENTOS_OPEN=0/);
-  assert.match(result.stdout, /WARN\s+OpenClaw: not found on PATH/);
+  assert.match(result.stdout, /WARN\s+OpenClaw: not found in PATH or default local install paths/);
+});
+
+test("agentos doctor detects an explicit OpenClaw binary outside PATH", async () => {
+  const fixture = await createCliFixture();
+  const fakeOpenClaw = await writeFakeOpenClawBinary(fixture.installRoot);
+  const result = runCli(fixture.cliPath, ["doctor"], {
+    env: {
+      ...createSmokeEnv(fixture.installRoot),
+      OPENCLAW_BIN: fakeOpenClaw
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stdout,
+    new RegExp(`OK\\s+OpenClaw: OpenClaw 0\\.0\\.0-test at ${escapeRegExp(fakeOpenClaw)}`)
+  );
 });
 
 test("agentos start and stop maintain runtime state without real OpenClaw", async () => {
@@ -64,7 +82,7 @@ test("agentos start and stop maintain runtime state without real OpenClaw", asyn
     assert.equal(state.port, port);
     assert.equal(state.host, "127.0.0.1");
     assert.equal(typeof state.pid, "number");
-    await waitFor(() => /Starting AgentOS/.test(output()) ? true : null, 2_000);
+    await waitFor(() => new RegExp(`Starting AgentOS on http://localhost:${port}`).test(output()) ? true : null, 2_000);
 
     const stopResult = runCli(fixture.cliPath, ["stop", "--port", String(port)], { env });
 
@@ -196,6 +214,22 @@ function renderStubServer() {
     'process.on("SIGINT", shutdown);',
     '}'
   ].join("\n");
+}
+
+async function writeFakeOpenClawBinary(installRoot: string) {
+  const binDir = path.join(installRoot, "fake-openclaw");
+  const binPath = path.join(binDir, process.platform === "win32" ? "openclaw.cmd" : "openclaw");
+
+  await mkdir(binDir, { recursive: true });
+
+  if (process.platform === "win32") {
+    await writeFile(binPath, "@echo off\r\necho OpenClaw 0.0.0-test\r\n", "utf8");
+    return binPath;
+  }
+
+  await writeFile(binPath, "#!/bin/sh\necho OpenClaw 0.0.0-test\n", "utf8");
+  await chmod(binPath, 0o755);
+  return binPath;
 }
 
 function collectProcessOutput(child: ChildProcessWithoutNullStreams) {

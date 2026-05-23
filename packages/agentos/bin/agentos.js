@@ -135,7 +135,7 @@ async function startServer(rawArgs) {
   console.log(`Starting AgentOS on ${url}`);
 
   if (!openClawCheck.available) {
-    console.log("OpenClaw was not found on PATH. AgentOS will start and guide onboarding in the UI.");
+    console.log("OpenClaw was not found in PATH or the default local install paths. AgentOS will start and guide onboarding in the UI.");
   } else if (openClawCheck.version) {
     console.log(`OpenClaw detected: ${openClawCheck.version}`);
   }
@@ -302,7 +302,7 @@ function runDoctor() {
       label: "OpenClaw",
       detail: openClawCheck.available
         ? `${openClawCheck.version || "installed"}${openClawCheck.path ? ` at ${openClawCheck.path}` : ""}`
-        : "not found on PATH; install OpenClaw or continue with the AgentOS onboarding flow"
+        : "not found in PATH or default local install paths; install OpenClaw or continue with the AgentOS onboarding flow"
     },
     {
       ok: browserOpener.available,
@@ -591,24 +591,46 @@ function assertHost(value) {
 }
 
 function detectOpenClaw() {
-  const pathResult = resolveCommandPath("openclaw");
-  const result = spawnSync("openclaw", ["--version"], {
-    encoding: "utf8"
-  });
+  const candidates = getOpenClawCommandCandidates();
+  let lastPath = null;
 
-  if (result.error || result.status !== 0) {
-    return {
-      available: false,
-      version: null,
-      path: pathResult
-    };
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ["--version"], {
+      encoding: "utf8"
+    });
+
+    lastPath = candidate;
+
+    if (!result.error && result.status === 0) {
+      return {
+        available: true,
+        version: result.stdout.trim() || result.stderr.trim() || null,
+        path: candidate
+      };
+    }
   }
 
   return {
-    available: true,
-    version: result.stdout.trim() || result.stderr.trim() || null,
-    path: pathResult
+    available: false,
+    version: null,
+    path: lastPath || resolveCommandPath("openclaw")
   };
+}
+
+function getOpenClawCommandCandidates() {
+  const executableName = process.platform === "win32" ? "openclaw.cmd" : "openclaw";
+  const explicitBin = (process.env.OPENCLAW_BIN || process.env.AGENTOS_OPENCLAW_BIN || "").trim();
+  const pathBin = resolveCommandPath("openclaw");
+  const candidates = [
+    explicitBin,
+    path.join(os.homedir(), ".openclaw", "tools", "node", "bin", executableName),
+    path.join(os.homedir(), ".openclaw", "bin", executableName),
+    path.join(os.homedir(), ".local", "bin", executableName),
+    pathBin,
+    "openclaw"
+  ];
+
+  return Array.from(new Set(candidates.filter(Boolean)));
 }
 
 function detectBrowserOpener() {
@@ -743,7 +765,11 @@ function createAgentOsUrl(host, port) {
 }
 
 function displayHost(host) {
-  return host === "0.0.0.0" ? "127.0.0.1" : host;
+  if (host === "0.0.0.0" || host === "127.0.0.1" || host === "::1" || host === "[::1]") {
+    return "localhost";
+  }
+
+  return host;
 }
 
 function printHelp() {
