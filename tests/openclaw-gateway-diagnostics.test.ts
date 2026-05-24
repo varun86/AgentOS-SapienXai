@@ -97,3 +97,45 @@ test("gateway diagnostics carry fallback counts and recent fallback records", ()
   assert.equal(diagnostics.gatewayFallbackDiagnostics?.[0]?.operationLabel, "Models List");
   assert.match(diagnostics.gatewayFallbackReasons?.[0] ?? "", /Recovery: Update OpenClaw/);
 });
+
+test("gateway diagnostics surface pending device access instead of native timeout noise", () => {
+  const diagnostics = buildGatewayDiagnostics({
+    gatewayStatus: {
+      service: { loaded: true },
+      gateway: { port: 18789, probeUrl: "ws://127.0.0.1:18789" },
+      rpc: {
+        ok: false,
+        capability: "pairing_pending",
+        error: "scope upgrade pending approval (requestId: 90f256bb-2bb4-474e-90e5-6a3b95f79f92)",
+        auth: {
+          capability: "pairing_pending"
+        }
+      }
+    },
+    status: { version: "9.9.9" },
+    configuredWorkspaceRoot: null,
+    workspaceRoot: "/tmp/workspace",
+    configuredGatewayUrl: null,
+    hasOpenClawSignal: true,
+    securityWarnings: [],
+    runtimeDiagnostics,
+    openClawBinarySelection,
+    modelReadiness,
+    issues: [
+      'agents: Timed out waiting for OpenClaw Gateway method "agents.list". Gateway-native operation failed; CLI fallback disabled for this operation.',
+      "runtime state is writable"
+    ],
+    versionDiagnostics: {
+      currentVersion: "9.9.9",
+      latestVersion: undefined,
+      updateAvailable: undefined,
+      updateError: undefined,
+      updateInfo: "Up to date"
+    }
+  });
+
+  assert.match(diagnostics.issues[0] ?? "", /operator-scope approval/);
+  assert.match(diagnostics.issues[0] ?? "", /90f256bb-2bb4-474e-90e5-6a3b95f79f92/);
+  assert.equal(diagnostics.issues.some((issue) => /agents\.list/.test(issue)), false);
+  assert.equal(diagnostics.issues.includes("runtime state is writable"), true);
+});

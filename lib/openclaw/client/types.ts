@@ -90,6 +90,13 @@ export type GatewayStatusPayload = {
   };
   rpc?: {
     ok?: boolean;
+    capability?: string;
+    error?: string;
+    auth?: {
+      role?: string | null;
+      scopes?: string[];
+      capability?: string;
+    };
   };
 };
 

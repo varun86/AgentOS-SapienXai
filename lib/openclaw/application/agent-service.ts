@@ -44,6 +44,7 @@ import {
 } from "@/lib/openclaw/domains/workspace-manifest";
 import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import { normalizeOptionalValue } from "@/lib/openclaw/domains/control-plane-normalization";
+import { runWithGatewayAuthSetupRecovery } from "@/lib/openclaw/model-setup-recovery";
 import { writeTextFileEnsured } from "@/lib/openclaw/domains/workspace-bootstrap";
 import { workspaceIdFromPath, workspacePathMatchesId } from "@/lib/openclaw/domains/workspace-id";
 import { resolveAgentCreationReadinessError } from "@/lib/openclaw/readiness";
@@ -149,7 +150,7 @@ export async function createAgent(input: AgentCreateInput) {
     await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
-  await upsertAgentConfigEntry(
+  await upsertAgentConfigEntryWithRecovery(
     agentId,
     resolvedWorkspacePath,
     {
@@ -273,13 +274,15 @@ export async function updateAgent(input: AgentUpdateInput) {
     input.tools === undefined;
 
   if (onlyModelChanged) {
-    await getOpenClawAdapter().updateAgent({
-      id: agentId,
-      workspace: resolvedWorkspacePath,
-      model: nextModelId
-    }, { timeoutMs: 15_000 });
+    await runAgentGatewayMutation("updating the agent model", () =>
+      getOpenClawAdapter().updateAgent({
+        id: agentId,
+        workspace: resolvedWorkspacePath,
+        model: nextModelId
+      }, { timeoutMs: 15_000 })
+    );
 
-    await upsertAgentConfigEntry(
+    await upsertAgentConfigEntryWithRecovery(
       agentId,
       resolvedWorkspacePath,
       {
@@ -342,13 +345,15 @@ export async function updateAgent(input: AgentUpdateInput) {
     await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
-  await getOpenClawAdapter().updateAgent({
-    id: agentId,
-    workspace: resolvedWorkspacePath,
-    model: nextModelId
-  }, { timeoutMs: 15_000 });
+  await runAgentGatewayMutation("updating the agent", () =>
+    getOpenClawAdapter().updateAgent({
+      id: agentId,
+      workspace: resolvedWorkspacePath,
+      model: nextModelId
+    }, { timeoutMs: 15_000 })
+  );
 
-  const configEntry = await upsertAgentConfigEntry(
+  const configEntry = await upsertAgentConfigEntryWithRecovery(
     agentId,
     resolvedWorkspacePath,
     {
@@ -585,7 +590,7 @@ async function syncAgentPolicySkills(agentIds: string[], snapshot?: MissionContr
       snapshot: nextSnapshot
     });
 
-    await upsertAgentConfigEntry(
+    await upsertAgentConfigEntryWithRecovery(
       agent.id,
       agent.workspacePath,
       {
@@ -611,6 +616,18 @@ async function syncAgentPolicySkills(agentIds: string[], snapshot?: MissionContr
       nextSnapshot
     );
   }
+}
+
+async function upsertAgentConfigEntryWithRecovery(...args: Parameters<typeof upsertAgentConfigEntry>) {
+  return runAgentGatewayMutation("syncing the agent config", () => upsertAgentConfigEntry(...args));
+}
+
+async function runAgentGatewayMutation<T>(operationLabel: string, operation: () => Promise<T>) {
+  const result = await runWithGatewayAuthSetupRecovery(operation, {
+    operationLabel
+  });
+
+  return result.value;
 }
 
 async function syncWorkspaceAgentPolicySkills(workspacePath: string, snapshot?: MissionControlSnapshot) {

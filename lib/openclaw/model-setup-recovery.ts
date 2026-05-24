@@ -11,11 +11,12 @@ import {
   getGatewayNativeAuthStatus,
   repairGatewayNativeDeviceAccess
 } from "@/lib/openclaw/application/settings-service";
+import { DEFAULT_OPERATOR_SCOPES } from "@/lib/openclaw/client/native-ws-gateway-types";
 import { redactErrorMessage } from "@/lib/security/redaction";
 
 export type GatewayAuthSetupIssueKind = "gateway-token" | "device-access";
 
-type GatewayAuthSetupIssue = {
+export type GatewayAuthSetupIssue = {
   kind: GatewayAuthSetupIssueKind;
   detail: string;
 };
@@ -28,6 +29,7 @@ type GatewayAuthRepairResult = {
 type GatewayAuthSetupRecoveryOptions = {
   operationLabel: string;
   onStatus?: (message: string) => Promise<void> | void;
+  resolveGatewayAuthIssue?: (error: unknown) => Promise<GatewayAuthSetupIssue | null> | GatewayAuthSetupIssue | null;
   repairGatewayAuth?: (kind: GatewayAuthSetupIssueKind) => Promise<unknown>;
 };
 
@@ -55,7 +57,8 @@ export async function runWithGatewayAuthSetupRecovery<T>(
       repaired: null
     };
   } catch (error) {
-    const issue = resolveGatewayAuthSetupIssue(error);
+    const issue = resolveGatewayAuthSetupIssue(error) ??
+      await (options.resolveGatewayAuthIssue?.(error) ?? resolveGatewayAuthSetupIssueAfterGatewayFailure(error));
 
     if (!issue) {
       throw error;
@@ -168,6 +171,55 @@ export function resolveGatewayAuthSetupIssueFromSnapshot(snapshot: MissionContro
   return null;
 }
 
+export function resolveGatewayAuthSetupIssueFromGatewayStatus(
+  status: {
+    lastError?: unknown;
+    rpc?: {
+      ok?: unknown;
+      error?: unknown;
+      capability?: unknown;
+      auth?: {
+        role?: unknown;
+        scopes?: unknown;
+        capability?: unknown;
+      };
+    };
+  } | null | undefined
+): GatewayAuthSetupIssue | null {
+  const scopes = Array.isArray(status?.rpc?.auth?.scopes)
+    ? status.rpc.auth.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  const messages = [
+    status?.lastError,
+    status?.rpc?.error,
+    status?.rpc?.capability,
+    status?.rpc?.auth?.capability,
+    scopes.join(" ")
+  ];
+
+  for (const message of messages) {
+    const issue = resolveGatewayAuthSetupIssueFromText(typeof message === "string" ? message : null);
+
+    if (issue) {
+      return issue;
+    }
+  }
+
+  if (
+    status?.rpc?.ok === true &&
+    status.rpc.auth?.role === "operator" &&
+    scopes.length > 0 &&
+    !DEFAULT_OPERATOR_SCOPES.every((scope) => scopes.includes(scope))
+  ) {
+    return {
+      kind: "device-access",
+      detail: "Gateway device access needs operator scope."
+    };
+  }
+
+  return null;
+}
+
 export function buildGatewayAuthBlockedMessage(
   issue: GatewayAuthSetupIssue,
   operationLabel: string
@@ -203,10 +255,10 @@ function buildGatewayAuthRepairFailureMessage(
   const detail = readSafeGatewayAuthDetail(kind, error);
 
   if (kind === "gateway-token") {
-    return `AgentOS could not repair the local Gateway token before ${operationLabel}. Open Gateway settings, run Repair token, then retry setup. ${detail}`;
+    return `AgentOS could not repair the local Gateway token before ${operationLabel}. Open Gateway settings, run Repair token, then retry ${operationLabel}. ${detail}`;
   }
 
-  return `AgentOS could not repair local device access before ${operationLabel}. Open Gateway settings, run Repair access, then retry setup. ${detail}`;
+  return `AgentOS could not repair local device access before ${operationLabel}. Open Gateway settings, run Repair access, then retry ${operationLabel}. ${detail}`;
 }
 
 function buildGatewayAuthRetryFailureMessage(
@@ -217,10 +269,10 @@ function buildGatewayAuthRetryFailureMessage(
   const detail = readSafeGatewayAuthDetail(kind, error);
 
   if (kind === "gateway-token") {
-    return `Gateway token was repaired, but OpenClaw still rejected ${operationLabel}. Restart the OpenClaw Gateway, run agentos doctor, then retry setup. ${detail}`;
+    return `Gateway token was repaired, but OpenClaw still rejected ${operationLabel}. Restart the OpenClaw Gateway, run agentos doctor, then retry ${operationLabel}. ${detail}`;
   }
 
-  return `Gateway device access was repaired, but OpenClaw still rejected ${operationLabel}. Run agentos doctor, then retry setup. ${detail}`;
+  return `Gateway device access was repaired, but OpenClaw still rejected ${operationLabel}. Run agentos doctor, then retry ${operationLabel}. ${detail}`;
 }
 
 function resolveGatewayAuthSetupIssueFromText(message: string | null | undefined): GatewayAuthSetupIssue | null {
@@ -252,6 +304,20 @@ async function resolveGatewayAuthSetupIssueFromStatus(): Promise<GatewayAuthSetu
     status.native.issue,
     status.recommendation
   ].filter(Boolean).join("\n"));
+}
+
+async function resolveGatewayAuthSetupIssueAfterGatewayFailure(error: unknown): Promise<GatewayAuthSetupIssue | null> {
+  if (!shouldProbeGatewayAuthStatusAfterFailure(error)) {
+    return null;
+  }
+
+  return resolveGatewayAuthSetupIssueFromStatus();
+}
+
+function shouldProbeGatewayAuthStatusAfterFailure(error: unknown) {
+  const message = readErrorMessage(error);
+
+  return /Gateway-native operation failed|Timed out|timeout|unreachable|failed to connect|connection closed|gateway starting|retry shortly/i.test(message);
 }
 
 async function repairGatewayAuthForModelSetup(kind: GatewayAuthSetupIssueKind) {

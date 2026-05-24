@@ -5,6 +5,7 @@ import { createErrorSnapshot } from "@/lib/openclaw/fallback";
 import {
   buildGatewayAuthBlockedMessage,
   GatewayAuthSetupRecoveryError,
+  resolveGatewayAuthSetupIssueFromGatewayStatus,
   resolveGatewayAuthSetupIssueFromSnapshot,
   runWithGatewayAuthSetupRecovery
 } from "@/lib/openclaw/model-setup-recovery";
@@ -40,6 +41,53 @@ test("model setup recovery detects Gateway token mismatch from snapshot diagnost
   assert.equal(issue?.kind, "gateway-token");
   assert.ok(issue);
   assert.match(buildGatewayAuthBlockedMessage(issue, "model setup"), /local Gateway token no longer matches OpenClaw/);
+});
+
+test("model setup recovery detects missing operator scope from Gateway status", () => {
+  const issue = resolveGatewayAuthSetupIssueFromGatewayStatus({
+    rpc: {
+      ok: true,
+      capability: "connected_no_operator_scope",
+      auth: {
+        role: "operator",
+        scopes: [],
+        capability: "connected_no_operator_scope"
+      }
+    }
+  });
+
+  assert.equal(issue?.kind, "device-access");
+});
+
+test("model setup recovery detects read-only Gateway device access", () => {
+  const issue = resolveGatewayAuthSetupIssueFromGatewayStatus({
+    rpc: {
+      ok: true,
+      capability: "read_only",
+      auth: {
+        role: "operator",
+        scopes: [
+          "operator.pairing",
+          "operator.read"
+        ],
+        capability: "read_only"
+      }
+    }
+  });
+
+  assert.equal(issue?.kind, "device-access");
+});
+
+test("model setup recovery detects pending Gateway device pairing", () => {
+  const issue = resolveGatewayAuthSetupIssueFromGatewayStatus({
+    rpc: {
+      ok: false,
+      capability: "pairing_pending",
+      error: "scope upgrade pending approval"
+    }
+  });
+
+  assert.equal(issue?.kind, "device-access");
 });
 
 test("model setup recovery ignores stale Gateway token mismatch after reconnect", () => {
@@ -116,6 +164,37 @@ test("model setup recovery repairs Gateway auth and retries the model config mut
   assert.deepEqual(repairs, ["gateway-token"]);
   assert.match(statuses.join("\n"), /Repairing the local Gateway token/);
   assert.match(statuses.join("\n"), /Retrying setting the default model/);
+});
+
+test("Gateway auth recovery can classify native timeouts from current auth status", async () => {
+  const repairs: string[] = [];
+  let attempts = 0;
+
+  const result = await runWithGatewayAuthSetupRecovery(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('Timed out waiting for OpenClaw Gateway method "agents.list".');
+      }
+
+      return "synced";
+    },
+    {
+      operationLabel: "syncing the agent config",
+      resolveGatewayAuthIssue: () => ({
+        kind: "device-access",
+        detail: "Gateway device access needs operator scope."
+      }),
+      repairGatewayAuth: async (kind) => {
+        repairs.push(kind);
+      }
+    }
+  );
+
+  assert.equal(result.value, "synced");
+  assert.equal(result.repaired?.kind, "device-access");
+  assert.equal(attempts, 2);
+  assert.deepEqual(repairs, ["device-access"]);
 });
 
 test("model setup recovery returns a clean message when Gateway auth repair fails", async () => {

@@ -25,6 +25,14 @@ export function resolveWebSocketFactory(input?: WebSocketFactory): WebSocketFact
 }
 
 export function resolveDefaultWebSocketFactory(): WebSocketFactory | undefined {
+  if (
+    typeof process !== "undefined" &&
+    process.env.AGENTOS_PACKAGE_RUNTIME === "1" &&
+    typeof globalThis.WebSocket === "function"
+  ) {
+    return globalThis.WebSocket as unknown as WebSocketFactory;
+  }
+
   if (typeof process !== "undefined" && process.versions?.node) {
     return NodeWebSocket as unknown as WebSocketFactory;
   }

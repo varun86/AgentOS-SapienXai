@@ -33,14 +33,16 @@ test("agentos doctor prints deterministic package, install, node, platform, bund
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, new RegExp(`OK\\s+Package: ${escapeRegExp(packageJson.name)}@${escapeRegExp(packageJson.version)}`));
-  assert.match(result.stdout, /OK\s+Install: source checkout/);
-  assert.match(result.stdout, /OK\s+Node\.js: v\d+\.\d+\.\d+ \(required >= 20\.9\.0\)/);
-  assert.match(result.stdout, /OK\s+Platform:/);
-  assert.match(result.stdout, /OK\s+Bundle: ready at /);
-  assert.match(result.stdout, /OK\s+Target URL: http:\/\/localhost:3000/);
-  assert.match(result.stdout, /OK\s+Configured env: AGENTOS_HOST=127\.0\.0\.1, AGENTOS_PORT=3000, AGENTOS_OPEN=0/);
-  assert.match(result.stdout, /WARN\s+OpenClaw: not found in PATH or default local install paths/);
+  assert.match(result.stdout, /AGENTOS DOCTOR/);
+  assert.match(result.stdout, new RegExp(`Package\\s+✓ OK\\s+${escapeRegExp(packageJson.name)}@${escapeRegExp(packageJson.version)}`));
+  assert.match(result.stdout, /Install\s+✓ OK\s+source checkout/);
+  assert.match(result.stdout, /Node\.js\s+✓ OK\s+v\d+\.\d+\.\d+ \(required >= 20\.9\.0\)/);
+  assert.match(result.stdout, /Platform\s+✓ OK\s+/);
+  assert.match(result.stdout, /Bundle\s+✓ OK\s+ready at /);
+  assert.match(result.stdout, /Target URL\s+✓ OK\s+http:\/\/localhost:3000/);
+  assert.match(result.stdout, /Configured env\s+✓ OK\s+AGENTOS_HOST=127\.0\.0\.1, AGENTOS_PORT=3000/);
+  assert.match(result.stdout, /OpenClaw\s+⚠ WARNING\s+not found in PATH or default local instal/);
+  assert.match(result.stdout, /Gateway\s+– DISABLED\s+OpenClaw is required before Gateway RPC/);
 });
 
 test("agentos doctor detects an explicit OpenClaw binary outside PATH", async () => {
@@ -56,8 +58,23 @@ test("agentos doctor detects an explicit OpenClaw binary outside PATH", async ()
   assert.equal(result.status, 0, result.stderr);
   assert.match(
     result.stdout,
-    new RegExp(`OK\\s+OpenClaw: OpenClaw 0\\.0\\.0-test at ${escapeRegExp(fakeOpenClaw)}`)
+    /OpenClaw\s+✓ OK\s+OpenClaw 0\.0\.0-test at /
   );
+});
+
+test("agentos status prints a concise branded runtime dashboard", async () => {
+  const fixture = await createCliFixture();
+  const result = runCli(fixture.cliPath, ["status"], {
+    env: createSmokeEnv(fixture.installRoot)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /SYSTEM CHECK/);
+  assert.match(result.stdout, /OpenClaw Gateway\s+⚠ WARNING\s+OpenClaw not found/);
+  assert.match(result.stdout, /Native Gateway\s+– DISABLED\s+waiting for OpenClaw/);
+  assert.match(result.stdout, /Workspace Engine\s+✓ READY\s+bundle ready/);
+  assert.match(result.stdout, /Agent Runtime\s+– INACTIVE\s+server not running/);
+  assert.match(result.stdout, /Local Server\s+– PENDING\s+http:\/\/localhost:3000/);
 });
 
 test("agentos start and stop maintain runtime state without real OpenClaw", async () => {
@@ -175,12 +192,12 @@ test("agentos start scrubs package runtime env files before launching the bundle
   }
 });
 
-test("terminal boot renders a clean default header, opt-in large header, and compact fallback", async () => {
+test("terminal boot renders refined large, medium, compact, and complete frames", async () => {
   const terminalBoot = runTerminalBootEval(`{
     header: AGENTOS_BOOT_HEADER,
-    medium: renderBootFrame({ columns: 100, color: false, unicode: true, frameIndex: 0 }),
-    wideDefault: renderBootFrame({ columns: 160, color: false, unicode: true, frameIndex: 0 }),
-    large: renderBootFrame({ columns: 140, color: false, unicode: true, frameIndex: 0, env: { AGENTOS_LARGE_BOOT_HEADER: "1" } }),
+    medium: renderBootFrame({ columns: 72, color: false, unicode: true, frameIndex: 0 }),
+    wideDefault: renderBootFrame({ columns: 100, color: false, unicode: true, frameIndex: 0 }),
+    large: renderBootFrame({ columns: 140, color: false, unicode: true, frameIndex: 0 }),
     narrow: renderBootFrame({ columns: 32, color: false, unicode: true, frameIndex: 0 }),
     complete: renderBootFrame({ columns: 100, color: false, unicode: true, complete: true, finalInfo: "http://localhost:3000" })
   }`) as { header: string; medium: string; wideDefault: string; large: string; narrow: string; complete: string };
@@ -192,16 +209,16 @@ test("terminal boot renders a clean default header, opt-in large header, and com
 
   assert.match(medium, /^\n  ▄▀█ █▀▀ █▀▀/m);
   assert.match(medium, /Built on OpenClaw · Human operating layer for AI agents/);
-  assert.match(medium, /OpenClaw Gateway\s+checking/);
+  assert.match(medium, /OpenClaw Gateway\s+… CHECKING/);
   assert.match(medium, /Workspace .* Agent .* Channel/);
   assert.doesNotMatch(medium, /█████╗/);
-  assert.doesNotMatch(wideDefault, /█████╗/);
+  assert.match(wideDefault, /█████╗/);
   assert.match(large, /█████╗/);
   assert.ok(large.includes(terminalBoot.header.split("\n")[0]));
   assert.match(narrow, /AgentOS · Built on OpenClaw/);
   assert.doesNotMatch(narrow, /█████╗/);
-  assert.match(complete, /^\n  ▄▀█ █▀▀ █▀▀/m);
-  assert.match(complete, /OpenClaw Gateway\s+checking/);
+  assert.match(complete, /█████╗/);
+  assert.match(complete, /OpenClaw Gateway\s+… CHECKING/);
   assert.match(complete, /AgentOS ready · http:\/\/localhost:3000/);
   assert.doesNotMatch(complete, /Workspace .* Agent .* Channel/);
 });

@@ -9,7 +9,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { createTerminalBoot } from "./terminal-boot.js";
+import { createTerminalBoot, renderDoctorReport, renderStatusDashboard } from "./terminal-boot.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -68,6 +68,16 @@ async function main() {
 
   if (firstArg === "doctor") {
     runDoctor();
+    return;
+  }
+
+  if (firstArg === "status") {
+    if (args[1] === "--help" || args[1] === "-h" || args[1] === "help") {
+      printStatusHelp();
+      return;
+    }
+
+    runStatus(args.slice(1));
     return;
   }
 
@@ -332,55 +342,63 @@ async function startServer(rawArgs) {
 function runDoctor() {
   const options = parseStartArgs([]);
   const openClawCheck = detectOpenClaw();
+  const gatewayStatus = openClawCheck.available ? inspectOpenClawGatewayStatus(openClawCheck) : null;
   const browserOpener = detectBrowserOpener();
   const targetUrl = `http://${displayHost(options.host)}:${options.port}`;
   const checks = [
     {
-      ok: true,
+      state: "ok",
       label: "Package",
       detail: `${packageJson.name}@${packageJson.version}`
     },
     {
-      ok: true,
+      state: "ok",
       label: "Install",
       detail: formatInstallKind(inspectInstallation())
     },
     {
-      ok: isSupportedNodeVersion(process.versions.node),
+      state: isSupportedNodeVersion(process.versions.node) ? "ok" : "failed",
       label: "Node.js",
       detail: `${process.version} (required >= 20.9.0)`
     },
     {
-      ok: true,
+      state: "ok",
       label: "Platform",
       detail: `${os.platform()} ${os.release()}`
     },
     {
-      ok: existsSync(bundledServerPath),
+      state: existsSync(bundledServerPath) ? "ok" : "failed",
       label: "Bundle",
       detail: existsSync(bundledServerPath)
         ? `ready at ${bundledServerPath}`
         : `missing at ${bundledServerPath}`
     },
     {
-      ok: true,
+      state: "ok",
       label: "Target URL",
       detail: targetUrl
     },
     {
-      ok: true,
+      state: "ok",
       label: "Configured env",
       detail: formatConfiguredEnv(options)
     },
     {
-      ok: openClawCheck.available,
+      state: openClawCheck.available ? "ok" : "warning",
       label: "OpenClaw",
       detail: openClawCheck.available
         ? `${openClawCheck.version || "installed"}${openClawCheck.path ? ` at ${openClawCheck.path}` : ""}`
         : "not found in PATH or default local install paths; install OpenClaw or continue with the AgentOS onboarding flow"
     },
     {
-      ok: browserOpener.available,
+      state: !openClawCheck.available ? "disabled" : gatewayStatus?.ok ? "ok" : "warning",
+      label: "Gateway",
+      detail: !openClawCheck.available
+        ? "OpenClaw is required before Gateway RPC can be checked"
+        : gatewayStatus?.gatewayMessage || "Gateway status unavailable"
+    },
+    {
+      state: browserOpener.available ? "ok" : "warning",
       label: "Browser opener",
       detail: browserOpener.available
         ? `${browserOpener.command} is available`
@@ -388,11 +406,83 @@ function runDoctor() {
     }
   ];
 
-  for (const check of checks) {
-    console.log(`${check.ok ? "OK" : "WARN"}  ${check.label}: ${check.detail}`);
-  }
+  console.log(renderDoctorReport({
+    title: "AGENTOS DOCTOR",
+    rows: checks.map((check) => ({
+      label: check.label,
+      state: check.state,
+      message: check.detail
+    })),
+    footer: "Doctor shows install and runtime diagnostics. The in-app diagnostics panel has live Gateway/model detail."
+  }));
 
-  if (!checks.every((check) => check.ok || check.label === "OpenClaw" || check.label === "Browser opener")) {
+  if (checks.some((check) => check.state === "failed")) {
+    process.exitCode = 1;
+  }
+}
+
+function runStatus(rawArgs) {
+  const options = parseStatusArgs(rawArgs);
+  const runtimeStatePath = resolveRuntimeStatePath(options.port);
+  const trackedState = readRuntimeState(runtimeStatePath);
+  const listeningPid = findListeningPidForPort(options.port);
+  const trackedPid = trackedState?.pid && isProcessRunning(trackedState.pid) ? trackedState.pid : null;
+  const runningPid = listeningPid ?? trackedPid;
+  const host = trackedState?.host || options.host;
+  const url = createAgentOsUrl(host, options.port);
+  const openClawCheck = detectOpenClaw();
+  const gatewayStatus = openClawCheck.available ? inspectOpenClawGatewayStatus(openClawCheck) : null;
+  const bundleReady = existsSync(bundledServerPath);
+  const rows = [
+    {
+      label: "OpenClaw Gateway",
+      state: !openClawCheck.available ? "warning" : gatewayStatus?.ok ? "connected" : "degraded",
+      message: !openClawCheck.available
+        ? "OpenClaw not found; setup will guide installation"
+        : gatewayStatus?.gatewayMessage || "needs attention"
+    },
+    {
+      label: "Native Gateway",
+      state: !openClawCheck.available ? "disabled" : gatewayStatus?.nativeState || "warning",
+      message: !openClawCheck.available
+        ? "waiting for OpenClaw"
+        : gatewayStatus?.nativeMessage || "check Gateway diagnostics"
+    },
+    {
+      label: "Workspace Engine",
+      state: bundleReady ? "ready" : "failed",
+      message: bundleReady ? "bundle ready" : "bundle missing"
+    },
+    {
+      label: "Agent Runtime",
+      state: runningPid ? "ready" : "inactive",
+      message: runningPid ? `server running (PID ${runningPid})` : "server not running"
+    },
+    {
+      label: "Models",
+      state: runningPid ? "warning" : "pending",
+      message: runningPid ? "verify in setup or diagnostics" : "available after server start"
+    },
+    {
+      label: "Channels",
+      state: "disabled",
+      message: "no channel status loaded from CLI"
+    },
+    {
+      label: "Local Server",
+      state: runningPid ? "ready" : "pending",
+      message: url
+    }
+  ];
+
+  console.log(renderStatusDashboard({
+    title: "SYSTEM CHECK",
+    rows,
+    finalInfo: runningPid ? url : "",
+    footer: runningPid ? "" : "AgentOS is not running. Start it with agentos start --open."
+  }));
+
+  if (!bundleReady) {
     process.exitCode = 1;
   }
 }
@@ -795,6 +885,52 @@ function parseStartArgs(rawArgs) {
   return options;
 }
 
+function parseStatusArgs(rawArgs) {
+  const envPort = process.env.AGENTOS_PORT || process.env.PORT;
+  const options = {
+    host: process.env.AGENTOS_HOST || "127.0.0.1",
+    port: envPort && /^\d+$/.test(envPort) ? Number(envPort) : 3000
+  };
+
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const arg = rawArgs[index];
+
+    if (arg === "--port" || arg === "-p") {
+      const value = rawArgs[index + 1];
+      index += 1;
+      assertPort(value);
+      options.port = Number(value);
+      continue;
+    }
+
+    if (arg.startsWith("--port=")) {
+      const value = arg.slice("--port=".length);
+      assertPort(value);
+      options.port = Number(value);
+      continue;
+    }
+
+    if (arg === "--host" || arg === "-H") {
+      const value = rawArgs[index + 1];
+      index += 1;
+      assertHost(value);
+      options.host = value;
+      continue;
+    }
+
+    if (arg.startsWith("--host=")) {
+      const value = arg.slice("--host=".length);
+      assertHost(value);
+      options.host = value;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return options;
+}
+
 function parseStopArgs(rawArgs) {
   const envPort = process.env.AGENTOS_PORT || process.env.PORT;
   const options = {
@@ -1072,6 +1208,7 @@ Usage:
   agentos
   agentos start --port 3000 --host 127.0.0.1 --open
   agentos dev --plain
+  agentos status
   agentos update [--check]
   agentos stop --port 3000 [--force]
   agentos doctor
@@ -1084,8 +1221,23 @@ Options:
   start: --open, -o   Open AgentOS in the default browser after startup or reuse an existing instance
   start: --no-open    Disable browser auto-open even if AGENTOS_OPEN is set
   start: --plain      Disable the AgentOS boot splash and live startup UI
+  status: --port, -p  Port to inspect (default: 3000)
+  status: --host, -H  Host to display when no runtime state exists (default: 127.0.0.1)
   stop:  --port, -p   Port to stop (default: 3000)
   stop:  --force, -f  Send SIGKILL if SIGTERM does not stop the server
+`);
+}
+
+function printStatusHelp() {
+  console.log(`Show the local AgentOS runtime dashboard.
+
+Usage:
+  agentos status
+  agentos status --port 3000 --host 127.0.0.1
+
+Options:
+  --port, -p   Port to inspect (default: 3000)
+  --host, -H   Host to display when no runtime state exists (default: 127.0.0.1)
 `);
 }
 

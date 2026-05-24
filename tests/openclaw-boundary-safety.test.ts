@@ -263,7 +263,7 @@ test("settings device access repair stays behind the OpenClaw adapter", () => {
 
 test("system onboarding repairs Gateway auth before runtime state verification", () => {
   const source = readFileSync(path.join(rootDir, "app/api/onboarding/route.ts"), "utf8");
-  const repairIndex = source.indexOf("repairGatewayAuthForSystemSetup(snapshot, send)");
+  const repairIndex = source.indexOf("const repairedGatewayAuth = await repairGatewayAuthForSystemSetup");
   const runtimeStateIndex = source.indexOf("await touchOpenClawRuntimeStateAccess");
 
   assert.notEqual(repairIndex, -1);
@@ -275,13 +275,33 @@ test("system onboarding repairs Gateway auth before runtime state verification",
   assert.match(source, /waitForReadySnapshotAfterGatewayAuthRepair/);
   assert.match(source, /clearMissionControlCaches\(\);/);
   assert.match(source, /\["gateway", "restart", "--force", "--json"\]/);
-  assert.match(source, /repairGatewayAuthForSystemSetup\(latestSnapshot, send\)/);
+  assert.match(source, /repairGatewayAuthForSystemSetup\(\s*latestSnapshot,\s*send,\s*gatewayStatusRetry,\s*openClawBin\s*\)/);
+  assert.match(source, /resolveGatewayAuthSetupIssueFromGatewayStatus/);
   assert.match(source, /syncGatewayAuthTokenBeforeFirstStart/);
   assert.match(source, /gatewayInstallNeedsAgentOsTokenSync/);
   assert.match(source, /saveGatewayNativeAuthCredential/);
   assert.match(source, /Preparing Gateway auth for AgentOS before first start/);
+  assert.match(source, /needsGatewayBootstrapConfigRepair/);
+  assert.match(source, /\["config", "set", "gateway\.mode", "local"\]/);
   assert.match(source, /generateGatewayNativeAuthToken\(\{\s*verifyDelaysMs/);
   assert.match(source, /AgentOS repaired local Gateway token auth during system setup verification/);
+});
+
+test("system onboarding prepares local Gateway config before waiting on native readiness", () => {
+  const source = readFileSync(path.join(rootDir, "app/api/onboarding/route.ts"), "utf8");
+  const preStartRepairIndex = source.indexOf("if (needsGatewayBootstrapConfigRepair(gatewayStatus))");
+  const startIndex = source.indexOf('message: "Starting the local gateway service..."');
+  const postStartRepairIndex = source.indexOf("Gateway service started without usable local config");
+  const waitIndex = source.indexOf('message: "Waiting for AgentOS to detect a live OpenClaw gateway..."');
+
+  assert.notEqual(preStartRepairIndex, -1);
+  assert.notEqual(startIndex, -1);
+  assert.notEqual(postStartRepairIndex, -1);
+  assert.notEqual(waitIndex, -1);
+  assert.equal(preStartRepairIndex < startIndex, true);
+  assert.equal(postStartRepairIndex < waitIndex, true);
+  assert.match(source, /AgentOS prepared Gateway local mode and token auth before first Gateway start/);
+  assert.match(source, /AgentOS repaired missing Gateway local config after the first start attempt/);
 });
 
 test("planner provisioning writes stay behind the OpenClaw adapter", () => {
@@ -535,6 +555,19 @@ test("onboarding refreshes full model snapshot before entering model setup", () 
   assert.match(source, /const continueToModelSetup = \(\) => \{/);
   assert.match(source, /onContinueToModels=\{continueToModelSetup\}/);
   assert.doesNotMatch(source, /onContinueToModels=\{\(\) => setOnboardingStage\("models"\)\}/);
+});
+
+test("model onboarding verifies delayed default model writes before surfacing Gateway timeout", () => {
+  const source = readFileSync(path.join(rootDir, "app/api/onboarding/models/route.ts"), "utf8");
+  const timeoutCheckIndex = source.indexOf("Gateway response timed out. Checking whether OpenClaw applied the default model");
+  const failIndex = source.indexOf('await fail("configuring-default", gatewayError');
+
+  assert.notEqual(timeoutCheckIndex, -1);
+  assert.notEqual(failIndex, -1);
+  assert.equal(timeoutCheckIndex < failIndex, true);
+  assert.match(source, /waitForDefaultModelAfterGatewaySettle/);
+  assert.match(source, /Default model verified after a delayed OpenClaw Gateway response/);
+  assert.match(source, /isLikelyDelayedGatewaySettleError/);
 });
 
 test("full uninstall reset reopens onboarding at system setup", () => {

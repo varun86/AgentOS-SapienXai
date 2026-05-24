@@ -29,6 +29,7 @@ agentos update
 agentos update --check
 agentos stop
 agentos stop --port 3000 --force
+agentos status
 agentos doctor
 agentos uninstall
 ```
@@ -41,7 +42,9 @@ AGENTOS_PORT=3000
 AGENTOS_OPEN=1
 ```
 
-`agentos doctor` prints the effective URL, bundle status, Node.js compatibility, OpenClaw detection, and browser auto-open support.
+`agentos status` prints a concise local dashboard for Gateway, runtime, model, channel, and server readiness.
+
+`agentos doctor` prints deeper install diagnostics: effective URL, bundle status, Node.js compatibility, OpenClaw detection, Gateway reachability, and browser auto-open support.
 
 `agentos stop` sends `SIGTERM` to the AgentOS server listening on the selected port. If the runtime state is stale and no process is listening there, the CLI clears that stale state automatically.
 

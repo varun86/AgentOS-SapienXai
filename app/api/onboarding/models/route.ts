@@ -429,6 +429,25 @@ export async function POST(request: Request) {
           }
 
           const gatewayError = readErrorMessage(error);
+          if (isLikelyDelayedGatewaySettleError(gatewayError)) {
+            await send({
+              type: "status",
+              phase: "configuring-default",
+              message: "Gateway response timed out. Checking whether OpenClaw applied the default model..."
+            });
+
+            const delayedSnapshot = await waitForDefaultModelAfterGatewaySettle(modelId);
+
+            if (delayedSnapshot) {
+              snapshot = delayedSnapshot;
+              aggregatedStdout = appendLine(
+                aggregatedStdout,
+                `Default model verified after a delayed OpenClaw Gateway response: ${modelId}.`
+              );
+              return true;
+            }
+          }
+
           aggregatedStderr = appendLine(aggregatedStderr, gatewayError);
           await send({
             type: "log",
@@ -701,6 +720,37 @@ function isSystemReady(snapshot: MissionControlSnapshot) {
 
 function isModelReady(snapshot: MissionControlSnapshot) {
   return isSystemReady(snapshot) && snapshot.diagnostics.modelReadiness.ready;
+}
+
+async function waitForDefaultModelAfterGatewaySettle(modelId: string) {
+  for (const delayMs of [500, 1_500, 3_000, 5_000]) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, delayMs);
+    });
+
+    const snapshot = await getMissionControlSnapshot({ force: true });
+
+    if (isDefaultModelSelected(snapshot, modelId)) {
+      return snapshot;
+    }
+  }
+
+  return null;
+}
+
+function isDefaultModelSelected(snapshot: MissionControlSnapshot, modelId: string) {
+  const expected = modelId.trim();
+  const readiness = snapshot.diagnostics.modelReadiness;
+  const selected = [
+    readiness.resolvedDefaultModel,
+    readiness.defaultModel
+  ].filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
+
+  return selected.some((value) => value.trim() === expected);
+}
+
+function isLikelyDelayedGatewaySettleError(message: string) {
+  return /gateway was not reachable|gateway response timed out|timed out connecting|timed out waiting|gateway starting|retry shortly|failed to connect|ECONNREFUSED|ECONNRESET|socket hang up|connection closed|service restart/i.test(message);
 }
 
 function buildModelManualCommand(

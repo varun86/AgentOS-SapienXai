@@ -36,6 +36,7 @@ export function isGatewayDeviceAccessRepairIssue(message: string | null | undefi
 
   return (
     /scope upgrade pending approval/i.test(normalizedMessage) ||
+    /pairing_pending/i.test(normalizedMessage) ||
     /device token scope mismatch/i.test(normalizedMessage) ||
     /connected_no_operator_scope/i.test(normalizedMessage) ||
     /more scopes than currently approved/i.test(normalizedMessage) ||

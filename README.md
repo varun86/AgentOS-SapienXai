@@ -72,6 +72,7 @@ agentos start --open
 Verify the local runtime:
 
 ```bash
+agentos status
 agentos doctor
 ```
 

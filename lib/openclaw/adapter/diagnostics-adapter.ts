@@ -94,6 +94,13 @@ export function buildGatewayDiagnostics(input: {
     ...input.securityWarnings,
     ...buildLocalExposureWarnings(input.gatewayStatus, input.configuredGatewayUrl)
   ];
+  const deviceAccessIssue = buildGatewayDeviceAccessIssue(input.gatewayStatus);
+  const issues = deviceAccessIssue
+    ? [
+      deviceAccessIssue,
+      ...input.issues.filter((issue) => !isNativeTimeoutNoiseDuringDeviceAccessRepair(issue))
+    ]
+    : input.issues;
 
   return {
     installed: true,
@@ -133,8 +140,39 @@ export function buildGatewayDiagnostics(input: {
     commandHistory: input.commandHistory,
     transport: input.transport,
     securityWarnings,
-    issues: input.issues
+    issues
   };
+}
+
+function buildGatewayDeviceAccessIssue(gatewayStatus: GatewayStatusPayload | undefined) {
+  const messages = [
+    gatewayStatus?.rpc?.error,
+    gatewayStatus?.rpc?.capability,
+    gatewayStatus?.rpc?.auth?.capability
+  ].filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
+  const summary = messages.join("\n");
+
+  if (
+    !/scope upgrade pending approval|pairing_pending|device token scope mismatch|connected_no_operator_scope|missing operator/i.test(summary)
+  ) {
+    return null;
+  }
+
+  const requestId = readGatewayDeviceAccessRequestId(summary);
+
+  return requestId
+    ? `OpenClaw Gateway device access is waiting for operator-scope approval (${requestId}). Run Repair access in Gateway settings or approve that request with OpenClaw devices, then retry.`
+    : "OpenClaw Gateway device access is waiting for operator-scope approval. Run Repair access in Gateway settings or approve the pending OpenClaw device request, then retry.";
+}
+
+function readGatewayDeviceAccessRequestId(value: string) {
+  const match = /\brequestId:\s*([a-f0-9-]{12,})\b/i.exec(value);
+
+  return match?.[1] ?? null;
+}
+
+function isNativeTimeoutNoiseDuringDeviceAccessRepair(issue: string) {
+  return /Timed out waiting for OpenClaw Gateway method|Gateway-native operation failed; CLI fallback disabled|Native Gateway: Unreachable/i.test(issue);
 }
 
 function buildLocalExposureWarnings(
