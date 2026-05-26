@@ -139,20 +139,23 @@ export function CommandBar({
   const dynamicPlaceholder = selectedAgentLabel ? `Compose for ${selectedAgentLabel}...` : "Compose a mission...";
   const inlineSuggestions = buildInlineSuggestions();
   const showSuggestions = inlineSuggestions.length > 0;
-  const shouldForceCollapsedComposer =
-    isCompactAfterSubmit &&
+  const isComposerEmpty =
     !isComposerActive &&
     !isAdvancedOpen &&
     mission.trim().length === 0 &&
     composeSuggestion === null;
+  const shouldForceCollapsedComposer =
+    isCompactAfterSubmit &&
+    isComposerEmpty;
   const isDesktopCollapsed =
     isDesktopLayout &&
     (!isDockHovered || isSubmitting) &&
-    !isComposerActive &&
-    !isAdvancedOpen &&
-    mission.trim().length === 0 &&
-    composeSuggestion === null;
-  const shouldRenderCollapsedComposer = shouldForceCollapsedComposer || isDesktopCollapsed;
+    isComposerEmpty;
+  const isMobileCollapsed =
+    !isDesktopLayout &&
+    !isDockHovered &&
+    isComposerEmpty;
+  const shouldRenderCollapsedComposer = shouldForceCollapsedComposer || isDesktopCollapsed || isMobileCollapsed;
 
   useEffect(() => {
     const selectionScope = `${activeWorkspaceId ?? "all"}:${selectedNodeId ?? "none"}:${availableAgents.map((agent) => agent.id).join(",")}`;
@@ -459,7 +462,11 @@ export function CommandBar({
 
   return (
     <div
-      className={cn("mx-auto w-full transition-[width] duration-300", isDesktopCollapsed && "lg:w-[360px]")}
+      className={cn(
+        "mx-auto w-full transition-[width,max-width] duration-300",
+        shouldRenderCollapsedComposer && "max-w-[360px]",
+        isDesktopCollapsed && "lg:w-[360px]"
+      )}
       onMouseEnter={() => {
         if (isDesktopLayout && !isSubmitting) {
           setIsDockHovered(true);
@@ -576,6 +583,10 @@ export function CommandBar({
                 const nextTarget = event.relatedTarget;
                 if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
                   onComposerActiveChange?.(false);
+
+                  if (!isDesktopLayout && mission.trim().length === 0 && !isAdvancedOpen && composeSuggestion === null) {
+                    setIsDockHovered(false);
+                  }
                 }
               }}
             >

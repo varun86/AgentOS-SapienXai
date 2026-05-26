@@ -73,7 +73,27 @@ type SettingsSectionId =
   | "advanced"
   | "danger-zone";
 
-export function SettingsControlCenter(props: MissionControlShellSettingsPanelProps) {
+type SettingsSection = {
+  id: SettingsSectionId;
+  label: string;
+  icon: LucideIcon;
+  destructive?: boolean;
+};
+
+const settingsSections: SettingsSection[] = [
+  { id: "openclaw", label: "OpenClaw", icon: Activity },
+  { id: "gateway", label: "Gateway", icon: ShieldCheck },
+  { id: "models", label: "Models", icon: Box },
+  { id: "workspace", label: "Workspace", icon: Folder },
+  { id: "agents", label: "Agents", icon: Bot },
+  { id: "diagnostics", label: "Diagnostics", icon: TerminalSquare },
+  { id: "advanced", label: "Advanced", icon: Settings2 },
+  { id: "danger-zone", label: "Danger Zone", icon: AlertTriangle, destructive: true }
+];
+
+export function SettingsControlCenter(
+  props: MissionControlShellSettingsPanelProps & { sidebarOpen?: boolean }
+) {
   const {
     snapshot,
     surfaceTheme,
@@ -106,7 +126,8 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
     onOpenClawBinarySelectionModeChange,
     onOpenClawBinarySelectionPathChange,
     onSaveOpenClawBinarySettings,
-    installSummary
+    installSummary,
+    sidebarOpen = false
   } = props;
   const [gatewayAuthStatus, setGatewayAuthStatus] = useState<GatewayNativeAuthStatus | null>(null);
   const [gatewayAuthError, setGatewayAuthError] = useState<string | null>(null);
@@ -306,7 +327,12 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
         surfaceTheme === "light" ? "text-[#2c211a]" : "text-slate-100"
       )}
     >
-        <section className="min-w-0 px-4 pb-8 pt-[86px] sm:px-6 lg:ml-[384px] lg:mr-[84px] lg:px-7 xl:px-8">
+        <section
+          className={cn(
+            "min-w-0 px-4 pb-8 pt-[86px] sm:px-6 lg:mr-[84px] lg:px-7 xl:px-8",
+            sidebarOpen ? "lg:ml-[316px]" : "lg:ml-[80px]"
+          )}
+        >
           <div className="mx-auto max-w-[1160px] 2xl:max-w-[1240px]">
             <div className="flex flex-col">
               <Link
@@ -321,6 +347,42 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                 <ArrowLeft className="h-3.5 w-3.5" />
                 Mission Control
               </Link>
+              <nav
+                aria-label="Settings sections"
+                className={cn(
+                  "flex flex-wrap gap-2 rounded-[22px] border p-2 shadow-[0_18px_44px_rgba(0,0,0,0.16)] backdrop-blur-xl",
+                  surfaceTheme === "light"
+                    ? "border-[#dfd0c2]/90 bg-[#fffaf3]/80"
+                    : "border-white/[0.08] bg-[#0d1624]/88"
+                )}
+              >
+                {settingsSections.map((section) => {
+                  const active = activeSection === section.id;
+                  const Icon = section.icon;
+
+                  return (
+                    <Link
+                      key={section.id}
+                      href={`/settings#${section.id}`}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => setActiveSection(section.id)}
+                      className={cn(
+                        "inline-flex h-10 items-center gap-2 rounded-[14px] border px-3 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+                        active && !section.destructive
+                          ? "border-cyan-300/26 bg-cyan-300/[0.14] text-cyan-50 shadow-[0_10px_26px_rgba(34,211,238,0.12)]"
+                          : active && section.destructive
+                            ? "border-rose-300/28 bg-rose-300/[0.14] text-rose-50 shadow-[0_10px_26px_rgba(244,63,94,0.12)]"
+                            : surfaceTheme === "light"
+                              ? "border-[#e2d1c4] bg-white/72 text-[#6b5546] hover:bg-[#fffdf9] hover:text-[#2f251f]"
+                              : "border-white/[0.08] bg-white/[0.035] text-slate-300 hover:border-white/[0.14] hover:bg-white/[0.07] hover:text-white"
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      <span>{section.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
             </div>
 
             <div className="mt-5 flex flex-col gap-4">

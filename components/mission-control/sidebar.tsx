@@ -1,31 +1,34 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
-import { ChannelBindingPicker } from "@/components/mission-control/channel-binding-picker";
-import { ProviderLogo } from "@/components/mission-control/provider-logo";
 import {
   AlertTriangle,
   Bot,
+  CheckCircle2,
   ChevronDown,
-  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
   Cpu,
+  FileText,
   FolderKanban,
-  Home,
-  KeyRound,
-  LoaderCircle,
-  MoreHorizontal,
-  RefreshCw,
+  Gauge,
+  Inbox,
+  Plug,
+  Plus,
   Settings2,
+  TerminalSquare,
   Workflow
 } from "lucide-react";
 
-import { StatusDot } from "@/components/mission-control/status-dot";
+import { ChannelBindingPicker } from "@/components/mission-control/channel-binding-picker";
 import { RailTooltip } from "@/components/mission-control/rail-tooltip";
+import { StatusDot } from "@/components/mission-control/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,8 +52,6 @@ import {
   formatAgentInstallScopeLabel,
   formatAgentMissingToolBehaviorLabel,
   formatAgentNetworkAccessLabel,
-  formatCapabilityLabel,
-  formatAgentPresetLabel,
   getAgentPresetMeta,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
@@ -65,19 +66,13 @@ import {
   getWorkspaceChannelIdsForAgent,
   syncWorkspaceAgentChannelBindings
 } from "@/lib/openclaw/channel-bindings";
-import {
-  compactPath,
-  formatAgentDisplayName,
-  formatContextWindow,
-  formatModelLabel,
-  resolveAgentModelLabel,
-  toneForHealth
-} from "@/lib/openclaw/presenters";
-import {
-  resolveGatewayAuthRepairAction,
-  type GatewayAuthRepairAction
-} from "@/lib/openclaw/gateway-auth-actions";
-import type { AgentPolicy, AgentPreset, DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/agentos/contracts";
+import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
+import type {
+  AgentPolicy,
+  AgentPreset,
+  DiscoveredModelCandidate,
+  MissionControlSnapshot
+} from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type AgentDraft = {
@@ -93,62 +88,18 @@ type AgentDraft = {
   channelIds: string[];
 };
 
-type SidebarSectionId = "overview" | "workspaces" | "agents" | "models" | "settings";
+type SidebarSection = "navigation" | "resources" | "admin";
 
-type SettingsSidebarAnchorId =
-  | "openclaw"
-  | "gateway"
-  | "models"
-  | "workspace"
-  | "agents"
-  | "diagnostics"
-  | "advanced"
-  | "danger-zone";
-
-const settingsSidebarAnchors: Array<{
-  id: SettingsSidebarAnchorId;
+type SidebarItem = {
   label: string;
+  href?: string;
+  hash?: string;
   icon: LucideIcon;
-  danger?: boolean;
-}> = [
-  { id: "openclaw", label: "OpenClaw", icon: Workflow },
-  { id: "gateway", label: "Gateway", icon: Cpu },
-  { id: "models", label: "Models", icon: Cpu },
-  { id: "workspace", label: "Workspace", icon: FolderKanban },
-  { id: "agents", label: "Agents", icon: Bot },
-  { id: "diagnostics", label: "Diagnostics", icon: AlertTriangle },
-  { id: "advanced", label: "Advanced", icon: Settings2 },
-  { id: "danger-zone", label: "Danger Zone", icon: AlertTriangle, danger: true }
-];
+  badge?: number;
+  section: SidebarSection;
+};
 
-const sidebarOpenStorageKey = "mission-control-sidebar-open";
-
-function resolveInitialSidebarSection(settingsMode: boolean): SidebarSectionId {
-  return settingsMode ? "settings" : "workspaces";
-}
-
-export function MissionSidebar({
-  snapshot,
-  surfaceTheme,
-  activeWorkspaceId,
-  requestedAgentAction,
-  connectionState,
-  collapsed: isPanelCollapsed,
-  modelManager,
-  onToggleCollapsed,
-  onSelectWorkspace,
-  onRefresh,
-  onRunModelRefresh,
-  onRunModelDiscover,
-  onRunModelSetDefault,
-  onConnectModelProvider,
-  onOpenModelSetup,
-  onOpenAddModels,
-  onEditWorkspace,
-  onSnapshotChange,
-  onAgentCreatedVisible,
-  settingsMode = false
-}: {
+type MissionSidebarProps = {
   snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
   activeWorkspaceId: string | null;
@@ -178,288 +129,83 @@ export function MissionSidebar({
   onConnectModelProvider: (provider: string) => void;
   onOpenModelSetup: () => void;
   onOpenAddModels: () => void;
+  onOpenWorkspaceCreate: () => void;
   onEditWorkspace: (workspaceId: string) => void;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
   onAgentCreatedVisible?: (agentId: string) => void;
   settingsMode?: boolean;
-}) {
-  const router = useRouter();
-  const [isRailCollapsed, setIsRailCollapsed] = useState(false);
-  const healthTone = toneForHealth(snapshot.diagnostics.health);
-  const statusDot =
-    snapshot.diagnostics.health === "healthy"
-      ? "bg-emerald-300"
-      : snapshot.diagnostics.health === "degraded"
-        ? "bg-amber-200"
-        : "bg-rose-300";
-  const gatewayAddress = snapshot.diagnostics.gatewayUrl
-    .replace(/^wss?:\/\//, "")
-    .replace(/\/$/, "");
-  const visibleDiagnosticIssue = resolveSidebarDiagnosticIssue(snapshot.diagnostics.issues);
-  const gatewayRepairAction = resolveGatewayAuthRepairAction(visibleDiagnosticIssue);
+};
+
+const sidebarSections: Array<{ id: SidebarSection; label: string }> = [
+  { id: "navigation", label: "Navigation" },
+  { id: "resources", label: "Resources" },
+  { id: "admin", label: "Admin" }
+];
+
+const sidebarItems: SidebarItem[] = [
+  { label: "Mission Control", href: "/", icon: Gauge, section: "navigation" },
+  { label: "Agents", href: "/#agents", hash: "agents", icon: Bot, section: "navigation" },
+  { label: "Tasks", href: "/#tasks", hash: "tasks", icon: ClipboardList, section: "navigation" },
+  { label: "Inbox", href: "/#inbox", hash: "inbox", icon: Inbox, badge: 8, section: "navigation" },
+  { label: "Automations", href: "/#automations", hash: "automations", icon: Workflow, section: "navigation" },
+  { label: "Approvals", href: "/#approvals", hash: "approvals", icon: CheckCircle2, badge: 3, section: "navigation" },
+  { label: "Files", href: "/#files", hash: "files", icon: FileText, section: "resources" },
+  { label: "Models", href: "/#models", hash: "models", icon: Cpu, section: "resources" },
+  { label: "Integrations", href: "/#integrations", hash: "integrations", icon: Plug, section: "resources" },
+  { label: "Settings", href: "/settings", icon: Settings2, section: "admin" },
+  { label: "Diagnostics", href: "/settings#diagnostics", hash: "diagnostics", icon: TerminalSquare, section: "admin" }
+];
+
+export function MissionSidebar({
+  snapshot,
+  surfaceTheme,
+  activeWorkspaceId,
+  requestedAgentAction,
+  connectionState,
+  collapsed,
+  onToggleCollapsed,
+  onSelectWorkspace,
+  onRefresh,
+  onOpenWorkspaceCreate,
+  onSnapshotChange
+}: MissionSidebarProps) {
+  const pathname = usePathname();
+  const [activeHash, setActiveHash] = useState("");
   const [isEditAgentOpen, setIsEditAgentOpen] = useState(false);
   const [isEditAgentAdvancedOpen, setIsEditAgentAdvancedOpen] = useState(false);
   const [isSavingAgent, setIsSavingAgent] = useState(false);
-  const [isDeleteWorkspaceOpen, setIsDeleteWorkspaceOpen] = useState(false);
-  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
-  const [isRepairingGatewayAccess, setIsRepairingGatewayAccess] = useState(false);
   const [isDeleteAgentOpen, setIsDeleteAgentOpen] = useState(false);
   const [isDeletingAgent, setIsDeletingAgent] = useState(false);
   const [editDraft, setEditDraft] = useState<AgentDraft | null>(null);
   const [editChannelIdsBaseline, setEditChannelIdsBaseline] = useState<string[]>([]);
-  const [workspaceDeleteTarget, setWorkspaceDeleteTarget] = useState<MissionControlSnapshot["workspaces"][number] | null>(null);
-  const [workspaceDeleteConfirmText, setWorkspaceDeleteConfirmText] = useState("");
   const [agentDeleteTarget, setAgentDeleteTarget] = useState<MissionControlSnapshot["agents"][number] | null>(null);
   const [agentDeleteConfirmText, setAgentDeleteConfirmText] = useState("");
-  const [activeSection, setActiveSection] = useState<SidebarSectionId>(() =>
-    resolveInitialSidebarSection(settingsMode)
-  );
-  const [modelSelectionDraft, setModelSelectionDraft] = useState("");
   const handledRequestedAgentActionIdRef = useRef<string | null>(null);
 
-  const visibleAgents = useMemo(
-    () =>
-      snapshot.agents
-        .filter((agent) => (activeWorkspaceId ? agent.workspaceId === activeWorkspaceId : true))
-        .sort((left, right) => {
-          if (left.workspaceId !== right.workspaceId) {
-            return left.workspaceId.localeCompare(right.workspaceId);
-          }
-
-          return formatAgentDisplayName(left).localeCompare(formatAgentDisplayName(right));
-        }),
-    [snapshot.agents, activeWorkspaceId]
-  );
-  const selectedWorkspace = activeWorkspaceId
-    ? snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null
-    : null;
-  const availableModels = useMemo(
-    () => snapshot.models.filter((model) => model.available !== false && !model.missing),
-    [snapshot.models]
-  );
-  const discoveredModels = useMemo(
-    () =>
-      modelManager.discoveredModels.filter(
-        (model) => !snapshot.models.some((availableModel) => availableModel.id === model.modelId)
-      ),
-    [modelManager.discoveredModels, snapshot.models]
-  );
-  const selectedModelId =
-    modelSelectionDraft &&
-    (availableModels.some((model) => model.id === modelSelectionDraft) ||
-      discoveredModels.some((model) => model.modelId === modelSelectionDraft))
-      ? modelSelectionDraft
-      : resolveSidebarModelSelection(snapshot);
-  const showEditAgentHeartbeatControls = editDraft
-    ? isEditAgentAdvancedOpen || editDraft.policy.preset === "monitoring"
-    : false;
-  const openPanelFromRail = () => {
-    if (isRailCollapsed) {
-      setIsRailCollapsed(false);
-    }
-
-    if (isPanelCollapsed) {
-      onToggleCollapsed();
-    }
-  };
-  const togglePanelFromRail = () => {
-    if (isPanelCollapsed) {
-      openPanelFromRail();
-      return;
-    }
-
-    onToggleCollapsed();
-  };
-  const repairGatewayAccess = async (action: GatewayAuthRepairAction) => {
-    setIsRepairingGatewayAccess(true);
-
-    try {
-      const response = await fetch("/api/settings/gateway", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ action: action.apiAction })
-      });
-      const result = (await response.json().catch(() => null)) as {
-        authStatus?: {
-          native?: {
-            ok?: boolean;
-            issue?: string | null;
-          };
-        };
-        error?: string;
-      } | null;
-
-      if (!response.ok) {
-        throw new Error(result?.error || "Gateway access could not be repaired.");
-      }
-
-      if (result?.authStatus?.native && result.authStatus.native.ok === false) {
-        throw new Error(result.authStatus.native.issue || "Gateway access still needs attention.");
-      }
-
-      toast.success(`${action.label} repaired.`, {
-        description: "Refreshing OpenClaw status."
-      });
-      await onRefresh().catch(() => undefined);
-    } catch (error) {
-      toast.error("Gateway repair failed.", {
-        description: error instanceof Error ? error.message : "Unable to repair Gateway access."
-      });
-    } finally {
-      setIsRepairingGatewayAccess(false);
-    }
-  };
-  const handleSectionNavigation = useCallback(
-    (sectionId: SidebarSectionId) => {
-      if (settingsMode && sectionId !== "settings") {
-        globalThis.localStorage?.setItem(sidebarOpenStorageKey, "true");
-        router.push(`/#${sectionId}`);
-        return;
-      }
-
-      if (sectionId === "settings" && !settingsMode) {
-        router.push("/settings");
-        return;
-      }
-
-      setActiveSection(sectionId);
-    },
-    [router, settingsMode]
-  );
   useEffect(() => {
-    if (settingsMode || typeof window === "undefined") {
-      return;
-    }
+    const syncHash = () => setActiveHash(window.location.hash.replace(/^#/, ""));
 
-    const syncSectionFromHash = () => {
-      const nextSection = resolveInitialSidebarSection(false);
-      setActiveSection((current) => (current === nextSection ? current : nextSection));
-    };
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
 
-    window.addEventListener("hashchange", syncSectionFromHash);
-    syncSectionFromHash();
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
 
-    return () => {
-      window.removeEventListener("hashchange", syncSectionFromHash);
-    };
-  }, [settingsMode]);
-
-  useEffect(() => {
-    if (settingsMode || typeof window === "undefined") {
-      return;
-    }
-
-    const syncSectionFromHash = () => {
-      switch (window.location.hash.replace(/^#/, "")) {
-        case "overview":
-          setActiveSection("overview");
-          return;
-        case "workspaces":
-          setActiveSection("workspaces");
-          return;
-        case "agents":
-          setActiveSection("agents");
-          return;
-        case "models":
-          setActiveSection("models");
-          return;
-        case "settings":
-          setActiveSection("settings");
-          return;
-        default:
-          setActiveSection("workspaces");
-      }
-    };
-
-    syncSectionFromHash();
-  }, [settingsMode]);
-  const navItems: Array<{
-    id: SidebarSectionId;
-    label: string;
-    icon: LucideIcon;
-    badge?: string;
-  }> = [
-    {
-      id: "overview",
-      label: "Overview",
-      icon: Home
-    },
-    {
-      id: "workspaces",
-      label: "Workspaces",
-      icon: FolderKanban,
-      badge: String(snapshot.workspaces.length)
-    },
-    {
-      id: "agents",
-      label: "Agents",
-      icon: Bot,
-      badge: String(visibleAgents.length)
-    },
-    {
-      id: "models",
-      label: "Models",
-      icon: Cpu,
-      badge: String(snapshot.models.length)
-    },
-    {
-      id: "settings",
-      label: "Settings",
-      icon: Settings2
-    }
-  ];
-
-  const workspaceDeleteAgents = useMemo(() => {
-    if (!workspaceDeleteTarget) {
-      return [];
-    }
-
-    return snapshot.agents.filter((agent) => agent.workspaceId === workspaceDeleteTarget.id);
-  }, [workspaceDeleteTarget, snapshot.agents]);
-
-  const workspaceDeleteLiveAgents = useMemo(
-    () =>
-      workspaceDeleteAgents.filter(
-        (agent) => agent.status === "engaged" || agent.status === "monitoring" || agent.status === "ready"
-      ),
-    [workspaceDeleteAgents]
-  );
-
-  const workspaceDeleteRuntimes = useMemo(() => {
-    if (!workspaceDeleteTarget) {
-      return [];
-    }
-
-    return snapshot.runtimes.filter((runtime) => runtime.workspaceId === workspaceDeleteTarget.id);
-  }, [workspaceDeleteTarget, snapshot.runtimes]);
-  const agentDeleteRuntimes = useMemo(() => {
-    if (!agentDeleteTarget) {
-      return [];
-    }
-
-    return snapshot.runtimes.filter((runtime) => runtime.agentId === agentDeleteTarget.id);
-  }, [agentDeleteTarget, snapshot.runtimes]);
-  const agentDeleteWorkspace = agentDeleteTarget
-    ? snapshot.workspaces.find((workspace) => workspace.id === agentDeleteTarget.workspaceId) ?? null
-    : null;
-  const agentDeleteIsLive = agentDeleteTarget
-    ? agentDeleteTarget.status === "engaged" ||
-      agentDeleteTarget.status === "monitoring" ||
-      agentDeleteTarget.status === "ready"
-    : false;
-
-  const openDeleteWorkspace = (workspace: MissionControlSnapshot["workspaces"][number]) => {
-    setWorkspaceDeleteTarget(workspace);
-    setWorkspaceDeleteConfirmText("");
-    setIsDeleteWorkspaceOpen(true);
-  };
-
-  const openDeleteAgent = useCallback((agent: MissionControlSnapshot["agents"][number]) => {
-    setAgentDeleteTarget(agent);
-    setAgentDeleteConfirmText("");
-    setIsDeleteAgentOpen(true);
+  const activeWorkspace =
+    (activeWorkspaceId
+      ? snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
+      : null) ??
+    snapshot.workspaces[0] ??
+    null;
+  const statusTone = resolveStatusTone(snapshot.diagnostics.health, connectionState);
+  const statusLabel =
+    connectionState === "live"
+      ? "Online"
+      : connectionState === "retrying"
+        ? "Retrying"
+        : "Connecting";
+  const handleNavigate = useCallback((item: SidebarItem) => {
+    setActiveHash(item.hash ?? "");
   }, []);
 
   const handleEditAgentOpenChange = (nextOpen: boolean) => {
@@ -495,6 +241,12 @@ export function MissionSidebar({
     setIsEditAgentAdvancedOpen(false);
     setIsEditAgentOpen(true);
   }, [snapshot]);
+
+  const openDeleteAgent = useCallback((agent: MissionControlSnapshot["agents"][number]) => {
+    setAgentDeleteTarget(agent);
+    setAgentDeleteConfirmText("");
+    setIsDeleteAgentOpen(true);
+  }, []);
 
   useEffect(() => {
     if (!requestedAgentAction || handledRequestedAgentActionIdRef.current === requestedAgentAction.requestId) {
@@ -570,64 +322,6 @@ export function MissionSidebar({
     }
   };
 
-  const submitDeleteWorkspace = async () => {
-    if (!workspaceDeleteTarget) {
-      return;
-    }
-
-    setIsSavingWorkspace(true);
-    let succeeded = false;
-    let deletedWorkspacePath = workspaceDeleteTarget.path;
-
-    try {
-      const response = await fetch("/api/workspaces", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          workspaceId: workspaceDeleteTarget.id
-        })
-      });
-
-      const result = (await response.json()) as {
-        workspacePath?: string;
-        deletedAgentIds?: string[];
-        deletedRuntimeCount?: number;
-        error?: string;
-      };
-
-      if (!response.ok || result.error) {
-        throw new Error(result.error || "OpenClaw could not delete the workspace.");
-      }
-
-      setIsDeleteWorkspaceOpen(false);
-      setWorkspaceDeleteTarget(null);
-      setWorkspaceDeleteConfirmText("");
-      const nextWorkspaceId =
-        activeWorkspaceId === workspaceDeleteTarget.id
-          ? snapshot.workspaces.find((workspace) => workspace.id !== workspaceDeleteTarget.id)?.id ?? null
-          : activeWorkspaceId;
-
-      onSelectWorkspace(nextWorkspaceId);
-      deletedWorkspacePath = result.workspacePath || workspaceDeleteTarget.path;
-      succeeded = true;
-    } catch (error) {
-      toast.error("Workspace deletion failed.", {
-        description: error instanceof Error ? error.message : "Unknown workspace error."
-      });
-    } finally {
-      setIsSavingWorkspace(false);
-    }
-
-    if (succeeded) {
-      void onRefresh().catch(() => {});
-      toast.success("Workspace deleted from OpenClaw.", {
-        description: deletedWorkspacePath
-      });
-    }
-  };
-
   const submitDeleteAgent = async () => {
     if (!agentDeleteTarget) {
       return;
@@ -683,855 +377,62 @@ export function MissionSidebar({
     }
   };
 
+  const showEditAgentHeartbeatControls = editDraft
+    ? isEditAgentAdvancedOpen || editDraft.policy.preset === "monitoring"
+    : false;
+
   return (
     <>
-      <div className="relative flex h-full items-start overflow-visible">
-        <div
-          className={cn(
-            "panel-surface panel-glow mission-ease-smooth relative flex h-full shrink-0 self-stretch flex-col items-center overflow-hidden px-1.5 py-2 transition-[max-height] duration-500",
-            isPanelCollapsed ? "w-full" : "w-[60px] border-r border-white/[0.08]",
-            isRailCollapsed
-              ? "max-h-[164px]"
-              : "max-h-full"
-          )}
-        >
-          <RailTooltip
-            label="AgentOS"
-            side="right"
-            surfaceTheme={surfaceTheme}
-            panelCollapsed={isPanelCollapsed}
-          >
-            <button
-              type="button"
-              aria-label={isPanelCollapsed ? "Open AgentOS" : "Collapse AgentOS"}
-              onClick={togglePanelFromRail}
-              className="flex h-9 w-9 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-[8px] border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)]"
-            >
-              <Image
-                src="/assets/logo.webp"
-                alt=""
-                width={32}
-                height={32}
-                aria-hidden="true"
-                className="pointer-events-none h-full w-full select-none object-cover"
-                priority
-              />
-            </button>
-          </RailTooltip>
-
+      {collapsed ? (
+        <CollapsedSidebar
+          activeHash={activeHash}
+          pathname={pathname}
+          statusTone={statusTone}
+          surfaceTheme={surfaceTheme}
+          onNavigate={() => {
+            onToggleCollapsed();
+          }}
+          onItemNavigate={handleNavigate}
+          onToggleCollapsed={onToggleCollapsed}
+        />
+      ) : (
+        <aside className="relative flex h-full w-full flex-col overflow-hidden border-r border-white/[0.08] bg-[radial-gradient(circle_at_18%_0%,rgba(56,102,170,0.20),transparent_34%),linear-gradient(180deg,rgba(18,26,41,0.98)_0%,rgba(10,16,27,0.98)_48%,rgba(5,10,18,0.99)_100%)] text-slate-100 shadow-[18px_0_60px_rgba(0,0,0,0.34)]">
           <div
-            className={cn(
-              "mission-ease-smooth mt-3.5 flex w-full flex-1 flex-col items-center gap-1 overflow-hidden transition-[max-height,opacity,transform] duration-500",
-              isRailCollapsed
-                ? "max-h-0 -translate-y-3 opacity-0 pointer-events-none"
-                : "max-h-[420px] translate-y-0 opacity-100"
-            )}
-          >
-            {navItems.map((item) => (
-              <RailNavButton
-                key={item.id}
-                icon={item.icon}
-                label={item.label}
-                active={activeSection === item.id}
-                surfaceTheme={surfaceTheme}
-                panelCollapsed={isPanelCollapsed}
-                tooltipSide="right"
-                onClick={() => {
-                  handleSectionNavigation(item.id);
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.055),transparent_38%),radial-gradient(circle_at_55%_0%,rgba(59,130,246,0.10),transparent_30%)]"
+          />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/[0.08]" />
 
-                  if (isPanelCollapsed) {
-                    openPanelFromRail();
-                    return;
-                  }
+          <div className="relative flex h-full min-h-0 flex-col px-4 py-5">
+            <SidebarBrand onToggleCollapsed={onToggleCollapsed} />
 
-                  if (activeSection === item.id) {
-                    onToggleCollapsed();
-                  }
-                }}
-              />
-            ))}
+            <WorkspaceSwitcher
+              activeWorkspaceId={activeWorkspaceId}
+              snapshot={snapshot}
+              workspace={activeWorkspace}
+              statusLabel={statusLabel}
+              statusTone={statusTone}
+              onSelectWorkspace={onSelectWorkspace}
+              onOpenWorkspaceCreate={onOpenWorkspaceCreate}
+            />
+
+            <nav aria-label="Primary" className="sidebar-scroll mt-6 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+              <div className="flex flex-col gap-5">
+                {sidebarSections.map((section) => (
+                  <SidebarSectionGroup
+                    key={section.id}
+                    activeHash={activeHash}
+                    pathname={pathname}
+                    section={section}
+                    onNavigate={handleNavigate}
+                  />
+                ))}
+              </div>
+            </nav>
+
           </div>
-
-          <div className="mt-auto flex w-full flex-col items-center gap-1 pb-1">
-            <div className="flex flex-col items-center gap-1">
-              <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
-              {isPanelCollapsed ? (
-                <p className="text-[8px] uppercase tracking-[0.16em] text-slate-500">{snapshot.mode}</p>
-              ) : null}
-            </div>
-
-            <RailTooltip
-              label={isRailCollapsed ? "Expand rail" : "Collapse rail"}
-              side="right"
-              surfaceTheme={surfaceTheme}
-              panelCollapsed={isPanelCollapsed}
-            >
-              <button
-                type="button"
-                aria-label={isRailCollapsed ? "Expand rail" : "Collapse rail"}
-                onClick={() => {
-                  if (!isPanelCollapsed) {
-                    onToggleCollapsed();
-                  }
-
-                  setIsRailCollapsed((current) => !current);
-                }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
-              >
-                {isRailCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-              </button>
-            </RailTooltip>
-          </div>
-
-      </div>
-
-      <div
-        className={cn(
-          "panel-surface panel-glow mission-ease-smooth h-full min-w-0 flex-1 overflow-hidden rounded-none border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500",
-          isPanelCollapsed
-            ? "-translate-x-4 opacity-0 pointer-events-none"
-              : "translate-x-0 opacity-100",
-            !isPanelCollapsed && "border-l-0"
-          )}
-        >
-          <div className="mission-scroll flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-            <div className="shrink-0 px-4 pb-3 pt-4">
-              <div className="flex w-full items-baseline justify-center gap-2 whitespace-nowrap text-center">
-                <span className="font-display text-[14px] font-semibold tracking-[0.18em] text-slate-100">
-                  AgentOS
-                </span>
-                <span className="text-[11px] font-medium text-slate-600">|</span>
-                <span className="font-display text-[10px] font-normal tracking-[0.18em] text-slate-500">
-                  Control Plane
-                </span>
-              </div>
-
-              <div className="mt-3 h-px w-full bg-white/[0.08]" />
-
-                <div className="mt-3 rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(13,20,34,0.98),rgba(6,10,18,0.96))] p-3">
-                  <div className="flex items-center gap-3">
-                    <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
-                    <div className="min-w-0">
-                      <p className={cn("text-[12px] font-medium capitalize", healthTone)}>
-                        {snapshot.diagnostics.health}
-                      </p>
-                      <p className="truncate text-[9px] uppercase tracking-[0.18em] text-slate-500">
-                        {connectionState === "live" ? "online" : connectionState}
-                        <span className="mx-2 text-slate-600">·</span>
-                        {gatewayAddress}
-                      </p>
-                    </div>
-                  </div>
-
-                {visibleDiagnosticIssue ? (
-                  <div className="mt-2.5 rounded-[14px] border border-amber-400/15 bg-amber-400/[0.08] px-2.5 py-2 text-[11px] text-amber-100">
-                    <p>{visibleDiagnosticIssue}</p>
-                    {gatewayRepairAction ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => void repairGatewayAccess(gatewayRepairAction)}
-                        disabled={isRepairingGatewayAccess}
-                        title={gatewayRepairAction.detail}
-                        className="mt-2 h-7 w-full justify-center rounded-none border-emerald-300/20 bg-emerald-300/10 px-3 text-[10px] text-emerald-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300/30 hover:bg-emerald-300/16 hover:text-emerald-50"
-                      >
-                        {isRepairingGatewayAccess ? (
-                          <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
-                        ) : (
-                          <KeyRound className="mr-1.5 h-3 w-3" />
-                        )}
-                        {gatewayRepairAction.cta}
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {snapshot.diagnostics.health === "offline" ? (
-                  <div className="mt-2.5">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={onOpenModelSetup}
-                      className="h-8 w-full justify-center rounded-none border-amber-300/20 bg-amber-300/10 px-3 text-[10px] text-amber-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300/30 hover:bg-amber-300/16 hover:text-amber-50"
-                    >
-                      <Workflow className="mr-1.5 h-3 w-3" />
-                      Open setup
-                    </Button>
-                  </div>
-                ) : null}
-                </div>
-              </div>
-
-            <div className="flex-1 space-y-6 p-4">
-                {activeSection === "overview" ? (
-                  <>
-                    <SidebarSectionHeader
-                      eyebrow="Overview"
-                      title="System summary"
-                      detail="Current health, active focus, and runtime inventory."
-                    />
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <OverviewTile label="Workspaces" value={String(snapshot.workspaces.length)} />
-                      <OverviewTile label="Agents" value={String(snapshot.agents.length)} />
-                      <OverviewTile label="Models" value={String(snapshot.models.length)} />
-                      <OverviewTile label="Runs" value={String(snapshot.runtimes.length)} />
-                    </div>
-
-                    {selectedWorkspace ? (
-                      <div className="rounded-[22px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(6,10,18,0.88))] p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate font-display text-[15px] text-white">{selectedWorkspace.name}</p>
-                            <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                              {selectedWorkspace.slug}
-                            </p>
-                          </div>
-                          <Badge variant="muted">{selectedWorkspace.health}</Badge>
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                          <span>{selectedWorkspace.agentIds.length} agents</span>
-                          <span>{selectedWorkspace.modelIds.length} models</span>
-                          <span>{selectedWorkspace.activeRuntimeIds.length} runs</span>
-                        </div>
-
-                        <p className="mt-3 text-[12px] text-slate-400">{sidebarPathLabel(selectedWorkspace.path)}</p>
-                      </div>
-                    ) : (
-                      <div className="rounded-[22px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(6,10,18,0.88))] p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate font-display text-[15px] text-white">All workspaces</p>
-                            <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                              {snapshot.workspaces.length} workspaces
-                            </p>
-                          </div>
-                          <Badge variant="muted">{snapshot.agents.length} agents</Badge>
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                          <span>{snapshot.workspaces.length} workspaces</span>
-                          <span>{snapshot.agents.length} agents</span>
-                          <span>{snapshot.runtimes.length} runs</span>
-                        </div>
-
-                        <p className="mt-3 text-[12px] text-slate-400">
-                          Showing every workspace in its own canvas area.
-                        </p>
-                      </div>
-                    )}
-                  </>
-                ) : null}
-
-                {activeSection === "workspaces" ? (
-                  <>
-                    <SidebarSectionHeader
-                      eyebrow="Home"
-                      title="Workspaces"
-                      detail="Select, rename, or remove real OpenClaw workspaces."
-                      action={
-                        <Button
-                          variant={activeWorkspaceId === null ? "secondary" : "ghost"}
-                          size="sm"
-                          className="h-8 rounded-full px-3 text-[11px]"
-                          onClick={() => onSelectWorkspace(null)}
-                          aria-pressed={activeWorkspaceId === null}
-                        >
-                          All
-                        </Button>
-                      }
-                    />
-
-                    <div className="space-y-3">
-                      {snapshot.workspaces.map((workspace) => {
-                        const selected = workspace.id === activeWorkspaceId;
-
-                        return (
-                          <div
-                            key={workspace.id}
-                            className={cn(
-                              "rounded-[20px] border p-3.5 transition-all",
-                              selected
-                                ? "border-cyan-300/[0.35] bg-cyan-400/[0.08] shadow-[0_14px_40px_rgba(34,211,238,0.12)]"
-                                : "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.05]"
-                            )}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => onSelectWorkspace(workspace.id)}
-                              className="w-full text-left"
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="truncate font-display text-[15px] text-white">{workspace.name}</p>
-                                  <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                                    {workspace.slug}
-                                  </p>
-                                </div>
-                                <Badge variant={selected ? "default" : "muted"}>{workspace.health}</Badge>
-                              </div>
-                            </button>
-
-                            <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                              <span>{workspace.agentIds.length} agents</span>
-                              <span>{workspace.modelIds.length} models</span>
-                              <span>{workspace.activeRuntimeIds.length} runs</span>
-                            </div>
-
-                            <div className="mt-3 flex items-center gap-2">
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                className="h-8 rounded-full px-3 text-[11px]"
-                                onClick={() => onEditWorkspace(workspace.id)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 rounded-full px-3 text-[11px] text-rose-200 hover:bg-rose-400/10 hover:text-rose-100"
-                                onClick={() => openDeleteWorkspace(workspace)}
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : null}
-
-                {activeSection === "agents" ? (
-                  <>
-                    <SidebarSectionHeader
-                      eyebrow="Apps"
-                      title="Agents"
-                      detail="Create and tune live isolated OpenClaw operators."
-                      action={
-                        <CreateAgentDialog
-                          snapshot={snapshot}
-                          defaultWorkspaceId={activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? null}
-                          onRefresh={onRefresh}
-                          onSnapshotChange={onSnapshotChange}
-                          onAgentCreatedVisible={onAgentCreatedVisible}
-                          surfaceTheme={surfaceTheme}
-                          trigger={
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="h-8 rounded-full px-3 text-[11px]"
-                              disabled={snapshot.workspaces.length === 0}
-                            >
-                              Add
-                            </Button>
-                          }
-                        />
-                      }
-                    />
-
-                    <div className="space-y-3">
-                      {visibleAgents.length === 0 ? (
-                        <div className="rounded-[18px] border border-white/[0.08] bg-white/[0.03] px-3.5 py-3 text-[12px] text-slate-400">
-                          {activeWorkspaceId
-                            ? "No agents are attached to this workspace yet."
-                            : "No agents are attached to any workspace yet."}
-                        </div>
-                      ) : null}
-
-                      {visibleAgents.map((agent) => {
-                        const agentLabel = formatAgentDisplayName(agent);
-                        const presetMeta = getAgentPresetMeta(agent.policy.preset);
-                        const declaredSkills = agent.skills;
-                        const declaredTools = agent.tools.filter((tool) => tool !== "fs.workspaceOnly");
-                        const actualSkills = declaredSkills.length > 0 ? declaredSkills : presetMeta.skillIds;
-                        const actualTools = declaredTools.length > 0 ? declaredTools : presetMeta.tools;
-                        const heartbeatLabel = agent.heartbeat.enabled
-                          ? agent.heartbeat.every ??
-                            (typeof agent.heartbeat.everyMs === "number"
-                              ? `${Math.round(agent.heartbeat.everyMs / 1000)}s`
-                              : null)
-                          : null;
-                        const visibleSkillLabels = actualSkills.slice(0, 2);
-                        const visibleToolLabels = actualTools.slice(0, 2);
-                        const remainingSkillCount = Math.max(actualSkills.length - visibleSkillLabels.length, 0);
-                        const remainingToolCount = Math.max(actualTools.length - visibleToolLabels.length, 0);
-                        const badgeVariant = presetMeta.badgeVariant;
-
-                        return (
-                          <div
-                            key={agent.id}
-                            className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-3.5"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate text-[13px] font-medium text-white">
-                                  {agent.identity.emoji ? `${agent.identity.emoji} ` : ""}
-                                  {agentLabel}
-                                </p>
-                                <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                                  {agent.id}
-                                </p>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <Badge variant={badgeVariant}>{formatAgentPresetLabel(agent.policy.preset)}</Badge>
-                                  <Badge variant={agent.status === "engaged" ? "default" : "muted"}>
-                                    {agent.status}
-                                  </Badge>
-                                </div>
-                              </div>
-                              <AgentActionMenu
-                                agentName={agentLabel}
-                                onEdit={() => openEditAgent(agent)}
-                                onDelete={() => openDeleteAgent(agent)}
-                              />
-                            </div>
-
-                            <div className="mt-3 flex items-center gap-2">
-                              <div className="min-w-0 flex-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                                <span className="truncate">
-                                  {resolveAgentModelLabel(agent.modelId, snapshot.models)}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="mt-3 space-y-2 rounded-[16px] border border-white/[0.06] bg-white/[0.03] p-3">
-                              <div className="flex flex-wrap gap-1.5">
-                                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                  Skills {actualSkills.length}
-                                </Badge>
-                                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                  Tools {actualTools.length}
-                                </Badge>
-                                <Badge variant={badgeVariant} className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                  {formatAgentPresetLabel(agent.policy.preset)}
-                                </Badge>
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <p className="text-[8px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
-                                <div className="flex flex-wrap gap-1">
-                                  {visibleSkillLabels.length > 0 ? (
-                                    <>
-                                      {visibleSkillLabels.map((skill) => (
-                                        <Badge
-                                          key={skill}
-                                          variant="muted"
-                                          className="max-w-full truncate px-2 py-1 text-[10px] normal-case tracking-normal"
-                                        >
-                                          {formatCapabilityLabel(skill)}
-                                        </Badge>
-                                      ))}
-                                      {remainingSkillCount > 0 ? (
-                                        <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
-                                          +{remainingSkillCount}
-                                        </Badge>
-                                      ) : null}
-                                    </>
-                                  ) : (
-                                    <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
-                                      No explicit skills
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <p className="text-[8px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
-                                <div className="flex flex-wrap gap-1">
-                                  {visibleToolLabels.length > 0 ? (
-                                    visibleToolLabels.map((tool) => (
-                                      <Badge
-                                        key={tool}
-                                        variant="warning"
-                                        className="max-w-full truncate px-2 py-1 text-[10px] normal-case tracking-normal"
-                                      >
-                                        {formatCapabilityLabel(tool)}
-                                      </Badge>
-                                    ))
-                                  ) : (
-                                    <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
-                                      No explicit tools
-                                    </Badge>
-                                  )}
-                                  {remainingToolCount > 0 ? (
-                                    <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
-                                      +{remainingToolCount}
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <p className="text-[8px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                    Missing {formatAgentMissingToolBehaviorLabel(agent.policy.missingToolBehavior)}
-                                  </Badge>
-                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                    Install {formatAgentInstallScopeLabel(agent.policy.installScope)}
-                                  </Badge>
-                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                    File {formatAgentFileAccessLabel(agent.policy.fileAccess)}
-                                  </Badge>
-                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                    Network {formatAgentNetworkAccessLabel(agent.policy.networkAccess)}
-                                  </Badge>
-                                </div>
-                              </div>
-
-                              <div className="flex flex-wrap gap-1.5">
-                                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                  Heartbeat {agent.heartbeat.enabled ? (heartbeatLabel ? `On · ${heartbeatLabel}` : "On") : "Off"}
-                                </Badge>
-                              </div>
-                            </div>
-
-                            {!activeWorkspaceId ? (
-                              <p className="mt-2 truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                                {snapshot.workspaces.find((workspace) => workspace.id === agent.workspaceId)?.name ||
-                                  "Workspace"}
-                              </p>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : null}
-
-                {activeSection === "models" ? (
-                  <>
-                    <SidebarSectionHeader
-                      eyebrow="Models"
-                      title="Models & providers"
-                      detail="Connect providers, choose a default route, and manage live model readiness."
-                    />
-
-                    <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
-                      <div className="space-y-1.5">
-                        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Default</p>
-                        <p className="font-display text-[15px] text-white">
-                          {snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
-                            snapshot.diagnostics.modelReadiness.defaultModel ||
-                            "Not set"}
-                        </p>
-                        <p className="text-[12px] leading-5 text-slate-400">
-                          Connect providers, choose a default route, and keep live model readiness visible.
-                        </p>
-                      </div>
-
-                      <div className="mt-4 grid gap-3 border-t border-white/[0.06] pt-4 sm:grid-cols-2">
-                        <div className="rounded-[16px] border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
-                          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Providers</p>
-                          <p className="mt-1.5 text-[13px] leading-5 text-white">
-                            {
-                              snapshot.diagnostics.modelReadiness.authProviders.filter((provider) => provider.connected)
-                                .length
-                            }{" "}
-                            connected
-                          </p>
-                        </div>
-                        <div className="rounded-[16px] border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
-                          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Routes</p>
-                          <p className="mt-1.5 text-[13px] leading-5 text-white">
-                            {snapshot.diagnostics.modelReadiness.availableModelCount}/
-                            {snapshot.diagnostics.modelReadiness.totalModelCount} available
-                          </p>
-                        </div>
-                      </div>
-
-                      {!modelManager.systemReady ? (
-                        <div className="mt-4 rounded-[16px] border border-amber-400/15 bg-amber-400/[0.08] px-3 py-2.5">
-                          <p className="text-[13px] font-medium text-amber-50">Finish system setup first</p>
-                          <p className="mt-1.5 text-[12px] leading-5 text-amber-100/80">
-                            Provider auth and model verification need a live OpenClaw gateway and writable runtime
-                            state.
-                          </p>
-                          <div className="mt-3">
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="h-8 rounded-full px-3 text-[11px]"
-                              onClick={onOpenModelSetup}
-                            >
-                              Open setup
-                            </Button>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <label className="mt-4 block space-y-1 border-t border-white/[0.06] pt-4">
-                        <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Default model</span>
-                        <select
-                          value={selectedModelId}
-                          onChange={(event) => setModelSelectionDraft(event.target.value)}
-                          className="h-10 w-full rounded-[14px] border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-100 outline-none"
-                        >
-                          <option value="">Auto choose</option>
-                          {availableModels.map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.name} · {model.provider}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <div className="mt-4 grid gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
-                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
-                          onClick={() => onRunModelSetDefault(selectedModelId || undefined)}
-                        >
-                          {modelManager.runState === "running" ? "Working..." : "Use selected model"}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
-                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
-                          onClick={onRunModelDiscover}
-                        >
-                          Discover routes
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
-                        onClick={onOpenAddModels}
-                      >
-                        Add models
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
-                        disabled={modelManager.runState === "running"}
-                        onClick={onRunModelRefresh}
-                      >
-                        {modelManager.runState === "running" ? (
-                          <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                        )}
-                        Refresh
-                      </Button>
-                    </div>
-
-                    <div className="space-y-3">
-                      {snapshot.diagnostics.modelReadiness.authProviders.map((provider) => (
-                        <ProviderCard
-                          key={provider.provider}
-                          provider={provider}
-                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
-                          onConnect={() => onConnectModelProvider(provider.provider)}
-                        />
-                      ))}
-                    </div>
-
-                    {discoveredModels.length > 0 ? (
-                      <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="font-display text-[15px] text-white">Discovered routes</p>
-                            <p className="mt-1 text-[12px] leading-5 text-slate-400">
-                              Newly detected remote routes that are not configured in the current model deck yet.
-                            </p>
-                          </div>
-                          <Badge variant="muted">{discoveredModels.length}</Badge>
-                        </div>
-
-                        <div className="mt-3 space-y-2">
-                          {discoveredModels.slice(0, 6).map((model) => (
-                            <div
-                              key={model.modelId}
-                              className="flex items-center justify-between gap-3 rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate text-[13px] font-medium text-white">{model.name}</p>
-                                <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                                  {formatProviderLabel(model.provider)}
-                                  {model.isFree ? " · free" : ""}
-                                  {model.supportsTools ? " · tools" : ""}
-                                </p>
-                              </div>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                className="h-8 rounded-full px-3 text-[11px]"
-                                disabled={!modelManager.systemReady || modelManager.runState === "running"}
-                                onClick={() => onRunModelSetDefault(model.modelId)}
-                              >
-                                Use
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="space-y-3">
-                      {snapshot.models.slice(0, 8).map((model) => (
-                        <div
-                          key={model.id}
-                          className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] px-3.5 py-3"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-[13px] font-medium text-white">
-                                {formatModelLabel(model.id)}
-                              </p>
-                              <p className="mt-1 text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                                {model.provider}
-                              </p>
-                            </div>
-                            <Badge variant={model.local ? "success" : model.missing ? "danger" : "muted"}>
-                              {model.local ? "local" : model.missing ? "missing" : "remote"}
-                            </Badge>
-                          </div>
-
-                          <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
-                            <span>{formatContextWindow(model.contextWindow)} ctx</span>
-                            <span>{model.usageCount} agents</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                  </>
-                ) : null}
-
-                {activeSection === "settings" ? (
-                  <>
-                    <SidebarSectionHeader
-                      eyebrow="Settings"
-                      title="Control Center"
-                      detail="Open system, gateway, model, workspace, and diagnostics controls."
-                    />
-
-                    <div className="space-y-2">
-                      {settingsSidebarAnchors.map((item) => (
-                        <SettingsSidebarAnchor key={item.id} item={item} />
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-                </div>
-
-                <div className="shrink-0 border-t border-white/[0.08] p-4">
-                  <div className="rounded-[22px] border border-cyan-300/10 bg-[linear-gradient(180deg,rgba(7,22,31,0.95),rgba(5,13,22,0.95))] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/[0.12] text-cyan-200">
-                        <Workflow className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate font-display text-[15px] text-white">
-                          {selectedWorkspace?.name || "All workspaces"}
-                        </p>
-                        <p className="mt-1 text-[12px] text-slate-400">
-                          {selectedWorkspace
-                            ? `${selectedWorkspace.agentIds.length} agents · ${selectedWorkspace.activeRuntimeIds.length} runs`
-                            : `${snapshot.workspaces.length} workspaces · ${snapshot.agents.length} agents · ${snapshot.runtimes.length} runs`}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-      <Dialog open={isDeleteWorkspaceOpen} onOpenChange={setIsDeleteWorkspaceOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete OpenClaw workspace</DialogTitle>
-            <DialogDescription>
-              This permanently removes the workspace directory and all OpenClaw agents bound to it.
-            </DialogDescription>
-          </DialogHeader>
-
-          {workspaceDeleteTarget ? (
-            <div className="space-y-4">
-              <div className="rounded-[20px] border border-rose-400/20 bg-rose-500/[0.08] px-4 py-3.5">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 rounded-full border border-rose-300/20 bg-rose-400/10 p-2 text-rose-200">
-                    <AlertTriangle className="h-4 w-4" />
-                  </div>
-                  <div className="space-y-1.5 text-sm text-rose-50">
-                    <p className="font-medium">This action cannot be undone.</p>
-                    <p className="text-rose-100/80">
-                      OpenClaw will remove the workspace folder from disk and prune the attached agents/state.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <DeleteMetric label="Agents" value={String(workspaceDeleteAgents.length)} />
-                <DeleteMetric label="Runs" value={String(workspaceDeleteRuntimes.length)} />
-                <DeleteMetric label="Live agents" value={String(workspaceDeleteLiveAgents.length)} danger={workspaceDeleteLiveAgents.length > 0} />
-              </div>
-
-              <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-3.5 py-3">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Workspace path</p>
-                <p className="mt-1.5 break-all font-mono text-xs text-slate-300">{workspaceDeleteTarget.path}</p>
-              </div>
-
-              {workspaceDeleteLiveAgents.length > 0 || workspaceDeleteRuntimes.length > 0 ? (
-                <div className="rounded-[18px] border border-amber-400/15 bg-amber-400/[0.08] px-3.5 py-3 text-sm text-amber-100">
-                  {workspaceDeleteLiveAgents.length > 0
-                    ? `${workspaceDeleteLiveAgents.length} active or recently engaged agents are still attached to this workspace.`
-                    : `${workspaceDeleteRuntimes.length} runtime records are still associated with this workspace.`}
-                </div>
-              ) : null}
-
-              <FormField
-                label={`Type ${workspaceDeleteTarget.slug} to confirm`}
-                htmlFor="delete-workspace-confirm"
-              >
-                <Input
-                  id="delete-workspace-confirm"
-                  value={workspaceDeleteConfirmText}
-                  onChange={(event) => setWorkspaceDeleteConfirmText(event.target.value)}
-                  placeholder={workspaceDeleteTarget.slug}
-                />
-              </FormField>
-            </div>
-          ) : null}
-
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setIsDeleteWorkspaceOpen(false);
-                setWorkspaceDeleteTarget(null);
-                setWorkspaceDeleteConfirmText("");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={submitDeleteWorkspace}
-              disabled={
-                isSavingWorkspace ||
-                !workspaceDeleteTarget ||
-                workspaceDeleteConfirmText.trim() !== workspaceDeleteTarget.slug
-              }
-            >
-              {isSavingWorkspace ? "Deleting…" : "Delete workspace"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </aside>
+      )}
 
       <Dialog open={isDeleteAgentOpen} onOpenChange={setIsDeleteAgentOpen}>
         <DialogContent>
@@ -1543,39 +444,45 @@ export function MissionSidebar({
           </DialogHeader>
 
           {agentDeleteTarget ? (
-            <div className="space-y-4">
+            <div className="flex flex-col gap-4">
               <div className="rounded-[20px] border border-rose-400/20 bg-rose-500/[0.08] px-4 py-3.5">
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 rounded-full border border-rose-300/20 bg-rose-400/10 p-2 text-rose-200">
                     <AlertTriangle className="h-4 w-4" />
                   </div>
-                  <div className="space-y-1.5 text-sm text-rose-50">
+                  <div className="flex flex-col gap-1.5 text-sm text-rose-50">
                     <p className="font-medium">This action cannot be undone.</p>
                     <p className="text-rose-100/80">
-                      OpenClaw will delete this agent, remove its config entry, remove its manifest record, and clean up agent-specific policy/state files. Shared workspace docs and files will remain.
+                      OpenClaw will delete this agent, remove its config entry, remove its manifest record, and clean
+                      up agent-specific policy/state files. Shared workspace docs and files will remain.
                     </p>
                   </div>
                 </div>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
-                <DeleteMetric label="Status" value={agentDeleteTarget.status} danger={agentDeleteIsLive} />
-                <DeleteMetric label="Runs" value={String(agentDeleteRuntimes.length)} />
-                <DeleteMetric label="Workspace" value={agentDeleteWorkspace?.name ?? "Unknown"} />
+                <DeleteMetric
+                  label="Status"
+                  value={agentDeleteTarget.status}
+                  danger={isLiveAgent(agentDeleteTarget)}
+                />
+                <DeleteMetric
+                  label="Runs"
+                  value={String(snapshot.runtimes.filter((runtime) => runtime.agentId === agentDeleteTarget.id).length)}
+                />
+                <DeleteMetric
+                  label="Workspace"
+                  value={
+                    snapshot.workspaces.find((workspace) => workspace.id === agentDeleteTarget.workspaceId)?.name ??
+                    "Unknown"
+                  }
+                />
               </div>
 
               <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-3.5 py-3">
                 <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Agent id</p>
                 <p className="mt-1.5 break-all font-mono text-xs text-slate-300">{agentDeleteTarget.id}</p>
               </div>
-
-              {agentDeleteIsLive || agentDeleteRuntimes.length > 0 ? (
-                <div className="rounded-[18px] border border-amber-400/15 bg-amber-400/[0.08] px-3.5 py-3 text-sm text-amber-100">
-                  {agentDeleteIsLive
-                    ? "This agent is still active or recently engaged. Delete it only if you want to stop using it entirely."
-                    : `${agentDeleteRuntimes.length} runtime records are still associated with this agent.`}
-                </div>
-              ) : null}
 
               <FormField
                 label={`Type ${agentDeleteTarget.id} to confirm`}
@@ -1611,7 +518,7 @@ export function MissionSidebar({
                 agentDeleteConfirmText.trim() !== agentDeleteTarget.id
               }
             >
-              {isDeletingAgent ? "Deleting…" : "Delete agent"}
+              {isDeletingAgent ? "Deleting..." : "Delete agent"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1627,8 +534,8 @@ export function MissionSidebar({
           </DialogHeader>
 
           {editDraft ? (
-            <div className="space-y-5">
-              <div className="space-y-3">
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-col gap-3">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Agent preset</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {AGENT_PRESET_OPTIONS.map((option) => (
@@ -1695,7 +602,7 @@ export function MissionSidebar({
                         : current
                     )
                   }
-                  className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+                  className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
                 >
                   <option value="">Use OpenClaw default</option>
                   {snapshot.models.map((model) => (
@@ -1767,7 +674,7 @@ export function MissionSidebar({
                 channelIds={editDraft.channelIds}
                 agentId={editDraft.id}
                 isSaving={isSavingAgent}
-                surfaceTheme={surfaceTheme}
+                surfaceTheme="dark"
                 onChange={(channelIds) =>
                   setEditDraft((current) =>
                     current
@@ -1855,7 +762,7 @@ export function MissionSidebar({
                                   : current
                               )
                             }
-                            className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+                            className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
                           >
                             {AGENT_HEARTBEAT_INTERVAL_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -1958,7 +865,7 @@ export function MissionSidebar({
               Cancel
             </Button>
             <Button onClick={submitEditAgent} disabled={isSavingAgent || !editDraft}>
-              {isSavingAgent ? "Saving…" : "Save changes"}
+              {isSavingAgent ? "Saving..." : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1967,250 +874,409 @@ export function MissionSidebar({
   );
 }
 
-function RailNavButton({
-  icon: Icon,
-  label,
-  active,
-  surfaceTheme,
-  panelCollapsed,
-  tooltipSide,
-  onClick
-}: {
-  icon: LucideIcon;
-  label: string;
-  active: boolean;
-  surfaceTheme: "dark" | "light";
-  panelCollapsed: boolean;
-  tooltipSide: "left" | "right";
-  onClick: () => void;
-}) {
+function SidebarBrand({ onToggleCollapsed }: { onToggleCollapsed: () => void }) {
   return (
-    <RailTooltip
-      label={label}
-      side={tooltipSide}
-      surfaceTheme={surfaceTheme}
-      panelCollapsed={panelCollapsed}
-    >
+    <div className="flex items-center justify-between gap-3">
+      <Link
+        href="/"
+        className="group flex min-w-0 items-center gap-3 rounded-[16px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-cyan-300/40"
+        aria-label="AgentOS Mission Control"
+      >
+        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[11px] border border-cyan-200/18 bg-white/[0.06] shadow-[0_12px_28px_rgba(0,0,0,0.24)]">
+          <Image
+            src="/assets/logo.webp"
+            alt=""
+            width={36}
+            height={36}
+            aria-hidden="true"
+            className="h-full w-full object-cover"
+            priority
+          />
+        </span>
+        <span className="truncate py-0.5 font-display text-[1.15rem] font-semibold leading-[1.25] text-white">
+          AgentOS
+        </span>
+      </Link>
+
       <button
         type="button"
-        onClick={onClick}
-        aria-label={label}
-        className={cn(
-          "inline-flex h-8 w-8 items-center justify-center rounded-[8px] border transition-all",
-          active
-            ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_12px_28px_rgba(96,165,250,0.35)]"
-            : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white"
-        )}
+        onClick={onToggleCollapsed}
+        aria-label="Collapse sidebar"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-white/[0.08] bg-white/[0.04] text-slate-400 transition-all hover:border-cyan-300/24 hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
       >
-        <Icon className="h-3.5 w-3.5" />
+        <ChevronLeft className="h-4 w-4" />
       </button>
-    </RailTooltip>
+    </div>
   );
 }
 
-function SettingsSidebarAnchor({
-  item
+function WorkspaceSwitcher({
+  activeWorkspaceId,
+  snapshot,
+  workspace,
+  statusLabel,
+  statusTone,
+  onSelectWorkspace,
+  onOpenWorkspaceCreate
 }: {
-  item: {
-    id: SettingsSidebarAnchorId;
-    label: string;
-    icon: LucideIcon;
-    danger?: boolean;
-  };
+  activeWorkspaceId: string | null;
+  snapshot: MissionControlSnapshot;
+  workspace: MissionControlSnapshot["workspaces"][number] | null;
+  statusLabel: string;
+  statusTone: string;
+  onSelectWorkspace: (workspaceId: string | null) => void;
+  onOpenWorkspaceCreate: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative mt-5" ref={menuRef}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((current) => !current)}
+        className="group flex w-full items-center gap-3 rounded-[16px] border border-white/[0.09] bg-[linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.035))] px-3 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_14px_30px_rgba(0,0,0,0.20)] transition-all hover:border-cyan-200/20 hover:bg-white/[0.075] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border border-cyan-200/16 bg-cyan-300/[0.10] text-cyan-200">
+          <FolderKanban className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[0.95rem] font-semibold leading-5 text-white">
+            {workspace?.name || "No workspace"}
+          </span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-[0.63rem] font-semibold uppercase leading-none tracking-[0.22em] text-slate-500">
+            <StatusDot tone={statusTone} pulse={statusTone === "bg-emerald-400"} className="h-2 w-2" />
+            Workspace
+          </span>
+        </span>
+        <span className="flex flex-col items-end gap-1">
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 text-slate-400 transition-transform group-hover:text-slate-200",
+              open && "rotate-180"
+            )}
+          />
+          <span className="text-[0.6rem] font-medium text-slate-500">{statusLabel}</span>
+        </span>
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 rounded-[16px] border border-white/[0.10] bg-slate-950/96 p-1.5 shadow-[0_24px_56px_rgba(0,0,0,0.42)] backdrop-blur-xl"
+        >
+          <WorkspaceMenuButton
+            label="All workspaces"
+            detail={`${snapshot.workspaces.length} total`}
+            selected={activeWorkspaceId === null}
+            onClick={() => {
+              onSelectWorkspace(null);
+              setOpen(false);
+            }}
+          />
+          {snapshot.workspaces.map((entry) => (
+            <WorkspaceMenuButton
+              key={entry.id}
+              label={entry.name}
+              detail={`${entry.agentIds.length} agents`}
+              selected={entry.id === activeWorkspaceId}
+              onClick={() => {
+                onSelectWorkspace(entry.id);
+                setOpen(false);
+              }}
+            />
+          ))}
+          <div className="mt-1 border-t border-white/[0.08] pt-1">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onOpenWorkspaceCreate();
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left text-cyan-100 transition-colors hover:bg-cyan-300/[0.10] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
+            >
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border border-cyan-300/20 bg-cyan-300/[0.12] text-cyan-200">
+                <Plus className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[0.82rem] font-medium">Create Workspace</span>
+                <span className="mt-0.5 block text-[0.67rem] text-slate-500">Start a new workspace</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function WorkspaceMenuButton({
+  label,
+  detail,
+  selected,
+  onClick
+}: {
+  label: string;
+  detail: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center justify-between gap-3 rounded-[12px] px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        selected
+          ? "bg-cyan-400/[0.12] text-cyan-50"
+          : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
+      )}
+    >
+      <span className="min-w-0">
+        <span className="block truncate text-[0.82rem] font-medium">{label}</span>
+        <span className="mt-0.5 block text-[0.67rem] text-slate-500">{detail}</span>
+      </span>
+      {selected ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-cyan-300" /> : null}
+    </button>
+  );
+}
+
+function SidebarSectionGroup({
+  activeHash,
+  onNavigate,
+  pathname,
+  section
+}: {
+  activeHash: string;
+  onNavigate: (item: SidebarItem) => void;
+  pathname: string;
+  section: { id: SidebarSection; label: string };
+}) {
+  return (
+    <section className="flex flex-col gap-2" aria-labelledby={`sidebar-${section.id}`}>
+      <h2
+        id={`sidebar-${section.id}`}
+        className="px-2 text-[0.64rem] font-semibold uppercase leading-none tracking-[0.22em] text-slate-500"
+      >
+        {section.label}
+      </h2>
+      <div className="flex flex-col gap-1">
+        {sidebarItems
+          .filter((item) => item.section === section.id)
+          .map((item) => (
+            <SidebarNavItem
+              key={item.label}
+              item={item}
+              active={isSidebarItemActive(item, pathname, activeHash)}
+              onNavigate={() => onNavigate(item)}
+            />
+          ))}
+      </div>
+    </section>
+  );
+}
+
+function SidebarNavItem({
+  item,
+  active,
+  onNavigate
+}: {
+  item: SidebarItem;
+  active: boolean;
+  onNavigate: () => void;
 }) {
   const Icon = item.icon;
 
   return (
-    <a
-      href={`/settings#${item.id}`}
+    <Link
+      href={item.href ?? "#"}
+      aria-current={active ? "page" : undefined}
+      onClick={onNavigate}
       className={cn(
-        "flex h-10 items-center gap-3 rounded-[16px] border px-3 text-[12px] transition-all",
-        item.danger
-          ? "border-transparent text-rose-200/86 hover:border-rose-300/16 hover:bg-rose-300/10 hover:text-rose-100"
-          : "border-white/[0.06] bg-white/[0.03] text-slate-300 hover:border-cyan-300/[0.18] hover:bg-cyan-300/[0.06] hover:text-cyan-100"
+        "group relative flex h-10 items-center gap-3 rounded-[12px] border px-3 text-[0.84rem] font-medium outline-none transition-all focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        active
+          ? "border-blue-300/28 bg-[linear-gradient(90deg,rgba(37,99,235,0.34),rgba(14,165,233,0.16))] text-cyan-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_28px_rgba(37,99,235,0.16)]"
+          : "border-transparent text-slate-300 hover:border-white/[0.08] hover:bg-white/[0.055] hover:text-white"
       )}
     >
-      <Icon className={cn("h-3.5 w-3.5", item.danger ? "text-rose-300" : "text-slate-500")} />
-      <span className="truncate">{item.label}</span>
-    </a>
+      {active ? (
+        <span className="absolute left-0 top-2 h-6 w-1 rounded-r-full bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.36)]" />
+      ) : null}
+      <Icon className={cn("h-[1.05rem] w-[1.05rem] shrink-0", active ? "text-cyan-200" : "text-slate-400 group-hover:text-slate-200")} />
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+      {typeof item.badge === "number" ? (
+        <Badge className="ml-auto flex h-5 min-w-5 justify-center border-white/[0.08] bg-white/[0.08] px-1.5 py-0 text-[0.64rem] tracking-normal text-slate-200">
+          {item.badge}
+        </Badge>
+      ) : null}
+    </Link>
   );
 }
 
-function SidebarSectionHeader({
-  eyebrow,
-  title,
-  detail,
-  action
+function CollapsedSidebar({
+  activeHash,
+  pathname,
+  statusTone,
+  surfaceTheme,
+  onNavigate,
+  onItemNavigate,
+  onToggleCollapsed
 }: {
-  eyebrow: string;
-  title: string;
-  detail: string;
-  action?: ReactNode;
+  activeHash: string;
+  pathname: string;
+  statusTone: string;
+  surfaceTheme: "dark" | "light";
+  onNavigate: () => void;
+  onItemNavigate: (item: SidebarItem) => void;
+  onToggleCollapsed: () => void;
 }) {
   return (
-    <div className="flex items-end justify-between gap-4">
-      <div className="min-w-0">
-        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{eyebrow}</p>
-        <h2 className="mt-1.5 font-display text-[1.02rem] text-white">{title}</h2>
-        <p className="mt-1.5 text-[12px] leading-5 text-slate-400">{detail}</p>
-      </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
-    </div>
-  );
-}
+    <aside className="relative flex h-full w-full flex-col items-center overflow-hidden border-r border-white/[0.08] bg-[linear-gradient(180deg,rgba(15,23,38,0.98),rgba(6,10,18,0.99))] px-1 py-4 text-slate-100 shadow-[14px_0_44px_rgba(0,0,0,0.32)]">
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-label="Expand sidebar"
+        className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-[13px] border border-cyan-200/18 bg-white/[0.06] shadow-[0_12px_26px_rgba(0,0,0,0.26)] transition-colors hover:border-cyan-200/28 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
+      >
+        <Image
+          src="/assets/logo.webp"
+          alt=""
+          width={40}
+          height={40}
+          aria-hidden="true"
+          className="h-full w-full object-cover"
+          priority
+        />
+      </button>
 
-function OverviewTile({
-  label,
-  value
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.88),rgba(7,12,22,0.82))] px-3.5 py-3">
-      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      <p className="mt-1.5 font-display text-[1.2rem] text-white">{value}</p>
-    </div>
-  );
-}
+      <nav aria-label="Primary" className="sidebar-scroll mt-5 flex min-h-0 w-12 flex-1 flex-col items-center gap-4 overflow-y-auto overscroll-contain">
+        {sidebarSections.map((section) => (
+          <div key={section.id} className="flex flex-col items-center gap-1.5">
+            {sidebarItems
+              .filter((item) => item.section === section.id)
+              .map((item) => {
+                const active = isSidebarItemActive(item, pathname, activeHash);
+                const Icon = item.icon;
 
-function ProviderCard({
-  provider,
-  disabled,
-  onConnect
-}: {
-  provider: MissionControlSnapshot["diagnostics"]["modelReadiness"]["authProviders"][number];
-  disabled: boolean;
-  onConnect: () => void;
-}) {
-  const connectLabel =
-    provider.provider === "openai-codex"
-      ? "Connect ChatGPT"
-      : provider.provider === "openrouter"
-        ? "Add API key"
-        : "Connect";
-
-  return (
-    <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
-      <div className="flex items-start gap-3">
-        <ProviderLogo className="h-8 w-8" provider={provider.provider} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="truncate font-display text-[15px] text-white">{formatProviderLabel(provider.provider)}</p>
-            <Badge variant={provider.connected ? "success" : provider.canLogin ? "warning" : "muted"}>
-              {provider.connected ? "connected" : provider.canLogin ? "needs auth" : "local"}
-            </Badge>
+                return (
+                  <RailTooltip
+                    key={item.label}
+                    label={item.label}
+                    side="right"
+                    surfaceTheme={surfaceTheme}
+                    panelCollapsed
+                  >
+                    <Link
+                      href={item.href ?? "#"}
+                      aria-label={item.label}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => {
+                        onItemNavigate(item);
+                        onNavigate();
+                      }}
+                      className={cn(
+                        "relative inline-flex h-10 w-10 items-center justify-center rounded-[12px] border outline-none transition-all focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+                        active
+                          ? "border-blue-300/28 bg-cyan-300 text-slate-950 shadow-[0_14px_30px_rgba(56,189,248,0.24)]"
+                          : "border-white/[0.08] bg-white/[0.035] text-slate-400 hover:border-white/[0.14] hover:bg-white/[0.08] hover:text-white"
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {typeof item.badge === "number" ? (
+                        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-slate-950 bg-slate-200 px-1 text-[0.58rem] font-bold leading-none text-slate-950 shadow-[0_4px_10px_rgba(0,0,0,0.24)]">
+                          {item.badge}
+                        </span>
+                      ) : null}
+                    </Link>
+                  </RailTooltip>
+                );
+              })}
           </div>
-          <p className="mt-1 text-[12px] leading-5 text-slate-400">
-            {provider.detail || resolveProviderSidebarDetail(provider.provider)}
-          </p>
-        </div>
-      </div>
+        ))}
+      </nav>
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        {provider.canLogin ? (
-          <Button
-            variant={provider.connected ? "ghost" : "secondary"}
-            size="sm"
-            className="h-8 rounded-full px-3 text-[11px]"
-            disabled={disabled}
-            onClick={onConnect}
-          >
-            {connectLabel}
-          </Button>
-        ) : null}
-        {provider.provider === "openai-codex" ? <Badge variant="muted">ChatGPT/Codex route</Badge> : null}
+      <div className="mt-4 flex flex-col items-center gap-3">
+        <StatusDot tone={statusTone} pulse={statusTone === "bg-emerald-400"} />
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-label="Expand sidebar"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-[11px] border border-white/[0.08] bg-white/[0.04] text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
-    </div>
+    </aside>
   );
 }
 
-function resolveSidebarModelSelection(snapshot: MissionControlSnapshot) {
-  return (
-    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
-    snapshot.diagnostics.modelReadiness.defaultModel ||
-    snapshot.models.find((model) => model.available !== false && !model.missing)?.id ||
-    ""
-  );
+function isSidebarItemActive(item: SidebarItem, pathname: string, activeHash: string) {
+  if (item.label === "Mission Control") {
+    return pathname === "/" && (!activeHash || activeHash === "mission-control");
+  }
+
+  if (item.href?.startsWith("/settings")) {
+    if (pathname !== "/settings") {
+      return false;
+    }
+
+    if (item.hash) {
+      return activeHash === item.hash;
+    }
+
+    return !activeHash || activeHash === "settings";
+  }
+
+  return pathname === "/" && Boolean(item.hash) && activeHash === item.hash;
 }
 
-function formatProviderLabel(provider: string) {
-  const normalized = provider.trim().toLowerCase();
-
-  if (normalized === "openrouter") {
-    return "OpenRouter";
+function resolveStatusTone(
+  health: MissionControlSnapshot["diagnostics"]["health"],
+  connectionState: "connecting" | "live" | "retrying"
+) {
+  if (connectionState === "live" && health === "healthy") {
+    return "bg-emerald-400";
   }
 
-  if (normalized === "openai-codex") {
-    return "OpenAI Codex";
+  if (connectionState === "retrying" || health === "degraded") {
+    return "bg-amber-300";
   }
 
-  if (normalized === "openai") {
-    return "OpenAI";
-  }
-
-  if (normalized === "anthropic") {
-    return "Anthropic";
-  }
-
-  if (normalized === "ollama") {
-    return "Ollama";
-  }
-
-  if (normalized === "xai") {
-    return "xAI";
-  }
-
-  if (normalized === "google" || normalized === "gemini") {
-    return "Gemini";
-  }
-
-  if (normalized === "deepseek") {
-    return "DeepSeek";
-  }
-
-  if (normalized === "mistral") {
-    return "Mistral";
-  }
-
-  return provider
-    .split("-")
-    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(" ");
+  return "bg-rose-300";
 }
 
-function resolveProviderSidebarDetail(provider: string) {
-  const normalized = provider.trim().toLowerCase();
-
-  if (normalized === "openai-codex") {
-    return "Use the OpenClaw OpenAI Codex route. If your ChatGPT plan includes Codex access, connect that account here.";
-  }
-
-  if (normalized === "openrouter") {
-    return "Paste an API key to unlock OpenRouter-hosted routes.";
-  }
-
-  if (normalized === "google" || normalized === "gemini") {
-    return "Paste a Gemini API key to unlock Gemini-hosted routes.";
-  }
-
-  if (normalized === "deepseek") {
-    return "Paste a DeepSeek API key to unlock DeepSeek-hosted routes.";
-  }
-
-  if (normalized === "mistral") {
-    return "Paste a Mistral API key to unlock Mistral and Codestral routes.";
-  }
-
-  if (normalized === "xai") {
-    return "Paste an xAI API key to unlock Grok routes.";
-  }
-
-  if (normalized === "ollama") {
-    return "Local model provider. Pull models locally to make new routes available.";
-  }
-
-  return "Connect this provider to make its remote routes available inside AgentOS.";
+function isLiveAgent(agent: MissionControlSnapshot["agents"][number]) {
+  return agent.status === "engaged" || agent.status === "monitoring" || agent.status === "ready";
 }
 
 function FormField({
@@ -2223,7 +1289,7 @@ function FormField({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Label htmlFor={htmlFor} className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
         {label}
       </Label>
@@ -2250,12 +1316,12 @@ function AgentPresetCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-[20px] border p-4 text-left transition-colors",
+        "rounded-[20px] border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
         active ? "border-cyan-300/30 bg-cyan-400/10" : "border-white/10 bg-white/[0.03]"
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <p className="text-sm font-medium text-white">{label}</p>
           <p className="text-xs leading-5 text-slate-400">{description}</p>
         </div>
@@ -2306,7 +1372,7 @@ function AgentPolicySelect<T extends string>({
         id={htmlFor}
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+        className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -2315,6 +1381,28 @@ function AgentPolicySelect<T extends string>({
         ))}
       </select>
     </FormField>
+  );
+}
+
+function DeleteMetric({
+  label,
+  value,
+  danger = false
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-[18px] border px-3.5 py-3",
+        danger ? "border-amber-300/20 bg-amber-400/[0.08]" : "border-white/10 bg-white/[0.03]"
+      )}
+    >
+      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{label}</p>
+      <p className={cn("mt-1.5 font-display text-lg", danger ? "text-amber-100" : "text-white")}>{value}</p>
+    </div>
   );
 }
 
@@ -2354,142 +1442,4 @@ function applyAgentPreset(draft: AgentDraft, preset: AgentPreset): AgentDraft {
     policy: nextPolicy,
     heartbeat: applyPresetHeartbeat(draft.heartbeat, draft.policy.preset, preset)
   };
-}
-
-function sidebarPathLabel(value: string) {
-  const compact = compactPath(value);
-  const parts = compact.split("/").filter(Boolean);
-  const visibleParts = parts.filter((part) => !isUuidSegment(part));
-
-  if (visibleParts.length <= 3) {
-    return compact;
-  }
-
-  const root = visibleParts[0] === "~" ? "~/" : "/";
-  return `${root}…/${visibleParts.slice(-2).join("/")}`;
-}
-
-function isUuidSegment(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
-
-function resolveSidebarDiagnosticIssue(issues: string[]) {
-  return issues.find((issue) => !isLowPrioritySidebarDiagnosticIssue(issue)) ?? null;
-}
-
-function isLowPrioritySidebarDiagnosticIssue(issue: string) {
-  return (
-    /Reusing the last successful payload while a slow OpenClaw command refreshes in the background\./.test(issue) ||
-    /Reusing the last successful gateway status after a transient OpenClaw check failure\./.test(issue) ||
-    /^gateway\.[^:]+: Gateway-first request fell back to CLI \(unsupported\):/.test(issue) ||
-    /^gateway\.(?:agents\.list|models\.list|sessions\.list|status|health): Gateway-first request fell back to CLI \(timeout\):/i.test(issue) ||
-    /^gateway\.config\.(?:get|patch|apply|set|unset): Gateway-first request fell back to CLI \(timeout\):/i.test(issue) ||
-    /^gateway\.[^:]+: Gateway-first request fell back to CLI \([^)]*\): .*unknown method:/i.test(issue)
-  );
-}
-
-function AgentActionMenu({
-  agentName,
-  onEdit,
-  onDelete
-}: {
-  agentName: string;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-
-    window.addEventListener("pointerdown", handlePointerDown);
-    return () => window.removeEventListener("pointerdown", handlePointerDown);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        type="button"
-        aria-label={`${agentName} actions`}
-        onClick={() => setOpen((current) => !current)}
-        className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
-      >
-        <MoreHorizontal className="h-3.5 w-3.5" />
-      </button>
-
-      {open ? (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-30 min-w-[136px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl">
-          <AgentMenuButton
-            label="Edit"
-            onClick={() => {
-              setOpen(false);
-              onEdit();
-            }}
-          />
-          <AgentMenuButton
-            label="Delete"
-            danger
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function AgentMenuButton({
-  label,
-  onClick,
-  danger = false
-}: {
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "flex w-full items-center rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
-        danger ? "text-rose-200 hover:bg-rose-400/10 hover:text-rose-100" : "text-slate-200 hover:bg-white/[0.06] hover:text-white"
-      )}
-      onClick={onClick}
-    >
-      <span>{label}</span>
-    </button>
-  );
-}
-
-function DeleteMetric({
-  label,
-  value,
-  danger = false
-}: {
-  label: string;
-  value: string;
-  danger?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-[18px] border px-3.5 py-3",
-        danger ? "border-amber-300/20 bg-amber-400/[0.08]" : "border-white/10 bg-white/[0.03]"
-      )}
-    >
-      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      <p className={cn("mt-1.5 font-display text-lg", danger ? "text-amber-100" : "text-white")}>{value}</p>
-    </div>
-  );
 }

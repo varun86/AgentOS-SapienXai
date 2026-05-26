@@ -442,24 +442,33 @@ test("OpenClaw local module imports do not introduce cycles", () => {
   assert.deepEqual(cycles, []);
 });
 
-test("settings mode sidebar routes non-settings sections back to mission control", () => {
+test("sidebar exposes config-driven mission and admin navigation routes", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
 
-  assert.match(source, /const sidebarOpenStorageKey = "mission-control-sidebar-open";/);
-  assert.match(
-    source,
-    /if \(settingsMode && sectionId !== "settings"\) \{[\s\S]*?globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, "true"\);[\s\S]*?router\.push\(`\/#\$\{sectionId\}`\);/
-  );
-  assert.match(source, /globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, "true"\);/);
-  assert.match(source, /if \(sectionId === "settings" && !settingsMode\) \{\s*router\.push\("\/settings"\);/);
+  assert.match(source, /type SidebarSection = "navigation" \| "resources" \| "admin";/);
+  assert.match(source, /type SidebarItem = \{[\s\S]*?href\?: string;[\s\S]*?icon: LucideIcon;[\s\S]*?section: SidebarSection;/);
+  assert.match(source, /const sidebarItems: SidebarItem\[] = \[/);
+  assert.match(source, /\{ label: "Mission Control", href: "\/", icon: Gauge, section: "navigation" \}/);
+  assert.match(source, /\{ label: "Agents", href: "\/#agents", hash: "agents", icon: Bot, section: "navigation" \}/);
+  assert.match(source, /\{ label: "Settings", href: "\/settings", icon: Settings2, section: "admin" \}/);
+  assert.match(source, /\{ label: "Diagnostics", href: "\/settings#diagnostics", hash: "diagnostics", icon: TerminalSquare, section: "admin" \}/);
+  assert.match(source, /onOpenWorkspaceCreate: \(\) => void;/);
+  assert.match(source, /<span className="block truncate text-\[0\.82rem\] font-medium">Create Workspace<\/span>/);
+  assert.match(source, /onOpenWorkspaceCreate\(\);[\s\S]*?setOpen\(false\);/);
+  assert.doesNotMatch(source, /label: "Sessions"/);
+  assert.doesNotMatch(source, /label: "Billing"/);
+  assert.doesNotMatch(source, /label: "Audit Logs"/);
 });
 
-test("root sidebar resolves active section from hash on mount", () => {
+test("sidebar resolves active nav items from path and hash", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
 
-  assert.match(source, /resolveInitialSidebarSection\(settingsMode\)/);
-  assert.match(source, /return settingsMode \? "settings" : "workspaces";/);
-  assert.match(source, /window\.addEventListener\("hashchange", syncSectionFromHash\)/);
+  assert.match(source, /const \[activeHash, setActiveHash\] = useState\(""\);/);
+  assert.match(source, /const syncHash = \(\) => setActiveHash\(window\.location\.hash\.replace/);
+  assert.match(source, /window\.addEventListener\("hashchange", syncHash\)/);
+  assert.match(source, /function isSidebarItemActive\(item: SidebarItem, pathname: string, activeHash: string\)/);
+  assert.match(source, /item\.label === "Mission Control"/);
+  assert.match(source, /pathname === "\/" && Boolean\(item\.hash\) && activeHash === item\.hash/);
 });
 
 test("settings shell no longer hardcodes a light-only wrapper", () => {
@@ -469,28 +478,58 @@ test("settings shell no longer hardcodes a light-only wrapper", () => {
     source,
     /className=\{cn\([\s\S]*?"mission-shell relative min-h-screen overflow-hidden"[\s\S]*?surfaceTheme === "light" && "mission-shell--light"/
   );
+  assert.match(source, /<SettingsControlCenter \{\.\.\.settingsPanelProps\} sidebarOpen=\{isSidebarOpen\} \/>/);
+  assert.match(source, /collapsed=\{!isSidebarOpen\}[\s\S]*?settingsMode/);
+  assert.match(source, /isSidebarOpen \? "lg:left-\[316px\]" : "lg:left-\[80px\]"/);
 });
 
-test("mission shell persists sidebar open state across navigation", () => {
+test("mission shell opens the sidebar on hover and closes it on exit", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
 
-  assert.match(source, /const sidebarOpenStorageKey = "mission-control-sidebar-open";/);
   assert.match(source, /const \[isSidebarOpen, setIsSidebarOpen\] = useState\(false\);/);
-  assert.match(source, /const storedSidebarOpen = globalThis\.localStorage\?\.getItem\(sidebarOpenStorageKey\);/);
-  assert.match(source, /if \(storedSidebarOpen === "true"\) \{\s*setIsSidebarOpen\(true\);/);
-  assert.match(source, /globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, String\(isSidebarOpen\)\);/);
+  assert.match(source, /onMouseEnter=\{\(\) => setIsSidebarOpen\(true\)\}/);
+  assert.match(source, /onMouseLeave=\{\(\) => setIsSidebarOpen\(false\)\}/);
+  assert.match(source, /onFocusCapture=\{\(\) => setIsSidebarOpen\(true\)\}/);
+  assert.match(
+    source,
+    /onBlurCapture=\{\(event\) => \{\s*if \(!event\.currentTarget\.contains\(event\.relatedTarget as Node \| null\)\) \{\s*setIsSidebarOpen\(false\);/
+  );
+  assert.doesNotMatch(source, /sidebarOpenStorageKey/);
 });
 
-test("sidebar keeps transient compatibility diagnostics out of the health card", () => {
+test("command bar collapses when empty on mobile and desktop", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/command-bar.tsx"), "utf8");
+
+  assert.match(source, /const isComposerEmpty =\s*!isComposerActive[\s\S]*?composeSuggestion === null;/);
+  assert.match(source, /const isDesktopCollapsed =[\s\S]*?isDesktopLayout[\s\S]*?isComposerEmpty;/);
+  assert.match(source, /const isMobileCollapsed =[\s\S]*?!isDesktopLayout[\s\S]*?!isDockHovered[\s\S]*?isComposerEmpty;/);
+  assert.match(source, /shouldForceCollapsedComposer \|\| isDesktopCollapsed \|\| isMobileCollapsed/);
+  assert.match(source, /shouldRenderCollapsedComposer && "max-w-\[360px\]"/);
+});
+
+test("settings control center exposes hash navigation for subpages", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/settings-control-center.tsx"), "utf8");
+
+  assert.match(source, /type SettingsSectionId =[\s\S]*?\| "diagnostics"[\s\S]*?\| "advanced"/);
+  assert.match(source, /const settingsSections: SettingsSection\[] = \[/);
+  assert.match(source, /\{ id: "gateway", label: "Gateway", icon: ShieldCheck \}/);
+  assert.match(source, /\{ id: "diagnostics", label: "Diagnostics", icon: TerminalSquare \}/);
+  assert.match(source, /aria-label="Settings sections"/);
+  assert.match(source, /href=\{`\/settings#\$\{section\.id\}`\}/);
+  assert.match(source, /onClick=\{\(\) => setActiveSection\(section\.id\)\}/);
+  assert.match(source, /case "diagnostics":\s*return "diagnostics";/);
+  assert.doesNotMatch(source, /id: "billing"/);
+  assert.doesNotMatch(source, /id: "audit-logs"/);
+});
+
+test("sidebar keeps diagnostics out of the premium navigation surface", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
 
-  assert.match(source, /const visibleDiagnosticIssue = resolveSidebarDiagnosticIssue\(snapshot\.diagnostics\.issues\);/);
-  assert.match(source, /Reusing the last successful payload while a slow OpenClaw command refreshes in the background/);
-  assert.match(source, /Gateway-first request fell back to CLI/);
-  assert.match(source, /unsupported/);
-  assert.match(source, /sessions\\.list\|status\|health/);
-  assert.match(source, /gateway\\.config\\.\(\?:get\|patch\|apply\|set\|unset\)/);
-  assert.match(source, /unknown method:/);
+  assert.match(source, /function resolveStatusTone\(/);
+  assert.doesNotMatch(source, /snapshot\.diagnostics\.issues/);
+  assert.doesNotMatch(source, /resolveSidebarDiagnosticIssue/);
+  assert.doesNotMatch(source, /Gateway-first request fell back to CLI/);
+  assert.doesNotMatch(source, /visibleDiagnosticIssue/);
 });
 
 test("mission control snapshot does not call Gateway config.get for remote url", () => {

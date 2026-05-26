@@ -158,7 +158,6 @@ const surfaceThemeStorageKey = "mission-control-surface-theme";
 const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
 const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
 const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
-const sidebarOpenStorageKey = "mission-control-sidebar-open";
 const modelAuthTerminalAutoOpenCooldownMs = 2 * 60 * 1000;
 const modelAuthStatusPollDelaysMs = [4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
 const useIsomorphicLayoutEffect = typeof globalThis.window === "undefined" ? useEffect : useLayoutEffect;
@@ -887,7 +886,6 @@ export function MissionControlShell({
 
   useEffect(() => {
     const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
-    const storedSidebarOpen = globalThis.localStorage?.getItem(sidebarOpenStorageKey);
     const storedHiddenRuntimeIds = globalThis.localStorage?.getItem(hiddenRuntimeIdsStorageKey);
     const storedHiddenTaskKeys = globalThis.localStorage?.getItem(hiddenTaskKeysStorageKey);
     const storedLockedTaskKeys = globalThis.localStorage?.getItem(lockedTaskKeysStorageKey);
@@ -895,10 +893,6 @@ export function MissionControlShell({
 
     if (storedTheme === "dark" || storedTheme === "light") {
       setSurfaceTheme(storedTheme);
-    }
-
-    if (storedSidebarOpen === "true") {
-      setIsSidebarOpen(true);
     }
 
     if (storedHiddenRuntimeIds) {
@@ -935,10 +929,6 @@ export function MissionControlShell({
   useEffect(() => {
     globalThis.localStorage?.setItem(surfaceThemeStorageKey, surfaceTheme);
   }, [surfaceTheme]);
-
-  useEffect(() => {
-    globalThis.localStorage?.setItem(sidebarOpenStorageKey, String(isSidebarOpen));
-  }, [isSidebarOpen]);
 
   useEffect(() => {
     globalThis.localStorage?.setItem(hiddenRuntimeIdsStorageKey, JSON.stringify(hiddenRuntimeIds));
@@ -3261,14 +3251,29 @@ export function MissionControlShell({
           <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
         </div>
 
-        <div className="pointer-events-auto fixed left-0 top-0 z-30 hidden h-[100dvh] w-[360px] overflow-visible lg:block">
+        <div
+          className={cn(
+            "pointer-events-auto fixed left-0 top-0 z-30 hidden h-[100dvh] overflow-visible mission-ease-smooth transition-[width] duration-500 lg:block",
+            isSidebarOpen
+              ? "w-[calc(100vw-96px)] max-w-[292px] lg:w-[292px] lg:max-w-none"
+              : "w-[56px]"
+          )}
+          onMouseEnter={() => setIsSidebarOpen(true)}
+          onMouseLeave={() => setIsSidebarOpen(false)}
+          onFocusCapture={() => setIsSidebarOpen(true)}
+          onBlurCapture={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setIsSidebarOpen(false);
+            }
+          }}
+        >
           <MissionSidebar
             snapshot={uiSnapshot}
             surfaceTheme={surfaceTheme}
             activeWorkspaceId={activeWorkspaceId}
             requestedAgentAction={agentActionRequest}
             connectionState={connectionState}
-            collapsed={false}
+            collapsed={!isSidebarOpen}
             settingsMode
             modelManager={{
               runState: modelOnboardingRunState,
@@ -3291,14 +3296,21 @@ export function MissionControlShell({
             onConnectModelProvider={runModelProviderLogin}
             onOpenModelSetup={() => openSetupWizard()}
             onOpenAddModels={openAddModelsDialog}
+            onOpenWorkspaceCreate={() => openWorkspaceWizard("basic")}
             onEditWorkspace={openWorkspaceWizardForEdit}
             onSnapshotChange={setSnapshot}
             onAgentCreatedVisible={handleCreatedAgentVisible}
           />
         </div>
 
-        <SettingsControlCenter {...settingsPanelProps} />
-        <div className="pointer-events-none fixed top-0 z-40 hidden lg:left-[384px] lg:right-[84px] lg:block">
+        <SettingsControlCenter {...settingsPanelProps} sidebarOpen={isSidebarOpen} />
+        <div
+          className={cn(
+            "pointer-events-none fixed top-0 z-40 hidden lg:block",
+            isSidebarOpen ? "lg:left-[316px]" : "lg:left-[80px]",
+            "lg:right-[84px]"
+          )}
+        >
           <MissionControlCanvasTopBar
             settingsRef={settingsRef}
             isSettingsOpen={isSettingsOpen}
@@ -3459,7 +3471,7 @@ export function MissionControlShell({
       <div
         className={cn(
           "pointer-events-none absolute top-0 z-40 hidden lg:block",
-          isSidebarOpen ? "lg:left-[384px]" : "lg:left-[84px]",
+          isSidebarOpen ? "lg:left-[316px]" : "lg:left-[80px]",
           isInspectorOpen ? "lg:right-[426px]" : "lg:right-[84px]"
         )}
       >
@@ -3479,7 +3491,7 @@ export function MissionControlShell({
           <MissionControlCanvasTitlePill surfaceTheme={surfaceTheme} />
         </div>
 
-        <div className="pointer-events-none absolute left-[84px] top-6 z-10 hidden lg:block">
+        <div className="pointer-events-none absolute left-[80px] top-6 z-10 hidden lg:block">
           <MissionControlCanvasTitlePill surfaceTheme={surfaceTheme} />
         </div>
 
@@ -3487,18 +3499,26 @@ export function MissionControlShell({
           className={cn(
             "pointer-events-auto absolute left-0 top-0 z-30 h-[100dvh] overflow-visible mission-ease-smooth transition-[width] duration-500",
             isSidebarOpen
-              ? "w-[calc(100vw-96px)] max-w-[280px] lg:w-[360px] lg:max-w-none"
-              : "w-[60px]"
+              ? "w-[calc(100vw-96px)] max-w-[292px] lg:w-[292px] lg:max-w-none"
+              : "w-[56px]"
           )}
+          onMouseEnter={() => setIsSidebarOpen(true)}
+          onMouseLeave={() => setIsSidebarOpen(false)}
+          onFocusCapture={() => setIsSidebarOpen(true)}
+          onBlurCapture={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setIsSidebarOpen(false);
+            }
+          }}
         >
-        <MissionSidebar
-          snapshot={uiSnapshot}
-          surfaceTheme={surfaceTheme}
-          activeWorkspaceId={activeWorkspaceId}
-          requestedAgentAction={agentActionRequest}
-          connectionState={connectionState}
-          collapsed={!isSidebarOpen}
-          modelManager={{
+          <MissionSidebar
+            snapshot={uiSnapshot}
+            surfaceTheme={surfaceTheme}
+            activeWorkspaceId={activeWorkspaceId}
+            requestedAgentAction={agentActionRequest}
+            connectionState={connectionState}
+            collapsed={!isSidebarOpen}
+            modelManager={{
               runState: modelOnboardingRunState,
               statusMessage: modelOnboardingStatusMessage,
               resultMessage: modelOnboardingResultMessage,
@@ -3519,6 +3539,7 @@ export function MissionControlShell({
             onConnectModelProvider={runModelProviderLogin}
             onOpenModelSetup={() => openSetupWizard()}
             onOpenAddModels={openAddModelsDialog}
+            onOpenWorkspaceCreate={() => openWorkspaceWizard("basic")}
             onEditWorkspace={openWorkspaceWizardForEdit}
             onSnapshotChange={setSnapshot}
             onAgentCreatedVisible={handleCreatedAgentVisible}
