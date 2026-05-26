@@ -53,6 +53,8 @@ const STATE_META = {
 const VALID_STATES = new Set(Object.keys(STATE_META));
 
 const STATUS_ROWS = [
+  ["agentosVersion", "AgentOS", "ready", ""],
+  ["update", "Update", "pending", ""],
   ["openclawGateway", "OpenClaw Gateway", "checking", ""],
   ["nativeGateway", "Native Gateway", "waiting", ""],
   ["workspaceEngine", "Workspace Engine", "loading", ""],

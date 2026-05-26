@@ -70,6 +70,8 @@ test("agentos status prints a concise branded runtime dashboard", async () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /SYSTEM CHECK/);
+  assert.match(result.stdout, new RegExp(`AgentOS\\s+✓ READY\\s+${escapeRegExp(packageJson.version)}`));
+  assert.match(result.stdout, /Update\s+– DISABLED\s+source checkout/);
   assert.match(result.stdout, /OpenClaw Gateway\s+⚠ WARNING\s+OpenClaw not found/);
   assert.match(result.stdout, /Native Gateway\s+– DISABLED\s+waiting for OpenClaw/);
   assert.match(result.stdout, /Workspace Engine\s+✓ READY\s+bundle ready/);
@@ -101,7 +103,7 @@ test("agentos start and stop maintain runtime state without real OpenClaw", asyn
     assert.equal(state.port, port);
     assert.equal(state.host, "127.0.0.1");
     assert.equal(typeof state.pid, "number");
-    await waitFor(() => new RegExp(`Starting AgentOS on http://localhost:${port}`).test(output()) ? true : null, 2_000);
+    await waitFor(() => new RegExp(`Starting AgentOS ${escapeRegExp(packageJson.version)} on http://localhost:${port}`).test(output()) ? true : null, 2_000);
 
     const stopResult = runCli(fixture.cliPath, ["stop", "--port", String(port)], { env });
 
@@ -137,7 +139,7 @@ test("agentos dev --plain starts with normal logs and no boot splash", async () 
 
     const output = collectProcessOutput(startProcess);
     await waitForRuntimeState(path.join(fixture.installRoot, "run", `agentos-${port}.json`));
-    await waitFor(() => new RegExp(`Starting AgentOS on http://localhost:${port}`).test(output()) ? true : null, 2_000);
+    await waitFor(() => new RegExp(`Starting AgentOS ${escapeRegExp(packageJson.version)} on http://localhost:${port}`).test(output()) ? true : null, 2_000);
     await waitFor(() => /Ready in 1ms/.test(output()) ? true : null, 2_000);
 
     assert.doesNotMatch(output(), /█████╗/);
@@ -209,6 +211,8 @@ test("terminal boot renders refined large, medium, compact, and complete frames"
 
   assert.match(medium, /^\n  ▄▀█ █▀▀ █▀▀/m);
   assert.match(medium, /Built on OpenClaw · Human operating layer for AI agents/);
+  assert.match(medium, /AgentOS\s+✓ READY/);
+  assert.match(medium, /Update\s+– PENDING/);
   assert.match(medium, /OpenClaw Gateway\s+… CHECKING/);
   assert.match(medium, /Workspace .* Agent .* Channel/);
   assert.doesNotMatch(medium, /█████╗/);

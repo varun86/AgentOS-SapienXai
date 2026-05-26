@@ -163,7 +163,7 @@ async function startServer(rawArgs) {
   });
 
   if (boot.isPlain()) {
-    console.log(`Starting AgentOS on ${url}`);
+    console.log(`Starting AgentOS ${packageJson.version} on ${url}`);
 
     if (!openClawCheck.available) {
       console.log("OpenClaw was not found in PATH or the default local install paths. AgentOS will start and guide onboarding in the UI.");
@@ -171,6 +171,7 @@ async function startServer(rawArgs) {
       console.log(`OpenClaw detected: ${openClawCheck.version}`);
     }
   } else {
+    initializeBootVersionStatus(boot);
     boot.start();
     boot.updateStatus("workspaceEngine", "loading", "bundle ready");
     applyOpenClawBootStatus(boot, openClawCheck);
@@ -433,7 +434,14 @@ function runStatus(rawArgs) {
   const openClawCheck = detectOpenClaw();
   const gatewayStatus = openClawCheck.available ? inspectOpenClawGatewayStatus(openClawCheck) : null;
   const bundleReady = existsSync(bundledServerPath);
+  const install = inspectInstallation();
   const rows = [
+    {
+      label: "AgentOS",
+      state: "ready",
+      message: packageJson.version
+    },
+    buildUpdateDashboardRow(install),
     {
       label: "OpenClaw Gateway",
       state: !openClawCheck.available ? "warning" : gatewayStatus?.ok ? "connected" : "degraded",
@@ -638,6 +646,102 @@ function applyOpenClawBootStatus(boot, openClawCheck) {
   boot.updateStatus("nativeGateway", "disabled", gatewayStatus.nativeMessage);
 }
 
+function initializeBootVersionStatus(boot) {
+  boot.updateStatus("agentosVersion", "ready", packageJson.version);
+
+  const install = inspectInstallation();
+  const cached = readCachedUpdateStatus(install);
+
+  if (install.kind === "source") {
+    boot.updateStatus("update", "disabled", "source checkout");
+    return;
+  }
+
+  if (cached) {
+    updateBootUpdateStatus(boot, buildUpdateStatusFromCache(cached, install));
+  } else {
+    boot.updateStatus("update", "checking", "checking latest version");
+  }
+
+  if (cached && isUpdateCacheFresh(cached)) {
+    return;
+  }
+
+  void getUpdateStatus({
+    install,
+    forceRefresh: false,
+    timeoutMs: 1_500,
+    fallbackToCache: true
+  })
+    .then((status) => {
+      if (!status.ok) {
+        boot.updateStatus("update", "disabled", "check unavailable");
+        return;
+      }
+
+      updateBootUpdateStatus(boot, status);
+    })
+    .catch(() => {
+      boot.updateStatus("update", "disabled", "check unavailable");
+    });
+}
+
+function updateBootUpdateStatus(boot, status) {
+  const row = buildUpdateRowFromStatus(status);
+  boot.updateStatus("update", row.state, row.message);
+}
+
+function buildUpdateDashboardRow(install) {
+  if (install.kind === "source") {
+    return {
+      label: "Update",
+      state: "disabled",
+      message: "source checkout"
+    };
+  }
+
+  const cached = readCachedUpdateStatus(install);
+
+  if (!cached) {
+    return {
+      label: "Update",
+      state: "pending",
+      message: 'run "agentos update --check"'
+    };
+  }
+
+  return {
+    label: "Update",
+    ...buildUpdateRowFromStatus(buildUpdateStatusFromCache(cached, install))
+  };
+}
+
+function buildUpdateRowFromStatus(status) {
+  if (status.updateAvailable) {
+    return {
+      state: "warning",
+      message: `${status.latestVersion} available · ${formatBootUpdateAction(status.install)}`
+    };
+  }
+
+  return {
+    state: "ready",
+    message: "up to date"
+  };
+}
+
+function formatBootUpdateAction(install) {
+  if (install.kind === "release") {
+    return "run agentos update";
+  }
+
+  if (install.kind === "package-manager") {
+    return "update package";
+  }
+
+  return 'run "agentos update --check"';
+}
+
 function inspectOpenClawGatewayStatus(openClawCheck) {
   const command = openClawCheck.path || "openclaw";
   const result = spawnSync(command, ["gateway", "status", "--json"], {
@@ -699,7 +803,6 @@ async function completeBootAfterServerReady(boot, startupState, url) {
   boot.complete(url);
   startupState.bufferedLogs = [];
   startupState.completed = true;
-  schedulePassiveUpdateNotice();
 }
 
 async function readStartupReadiness(url) {
