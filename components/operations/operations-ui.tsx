@@ -65,12 +65,12 @@ export function OperationsTopBar({
   const label = online ? "Online" : connectionState === "retrying" ? "Retrying" : "Connecting";
 
   return (
-    <div className="flex items-center justify-end gap-3 text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-slate-400">
+    <div className="flex items-center justify-end gap-2 text-[0.58rem] font-semibold uppercase tracking-[0.22em] text-slate-400">
       <span className="hidden sm:inline">OpenClaw</span>
       <span className="hidden font-mono text-slate-500 sm:inline">v{version}</span>
       <span
         className={cn(
-          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 tracking-[0.18em]",
+          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 tracking-[0.16em]",
           online
             ? "border-emerald-300/18 bg-emerald-400/10 text-emerald-200"
             : "border-amber-300/18 bg-amber-400/10 text-amber-100"
@@ -103,28 +103,28 @@ export function PageHeader({
   const SecondaryIcon = secondaryAction?.icon;
 
   return (
-    <header className="border-b border-white/[0.07] pb-5">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+    <header className="border-b border-white/[0.07] pb-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
         <div className="min-w-0">
-          <h1 className="font-display text-[1.85rem] font-semibold leading-tight tracking-normal text-white">
+          <h1 className="font-display text-[1.48rem] font-semibold leading-tight tracking-normal text-white">
             {title}
           </h1>
-          <p className="mt-2 max-w-3xl text-[0.95rem] leading-6 text-slate-300">{subtitle}</p>
+          <p className="mt-1.5 max-w-3xl text-[0.78rem] leading-5 text-slate-300">{subtitle}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {secondaryAction ? (
-            <Button variant="secondary" className="h-10 rounded-[12px]" onClick={secondaryAction.onClick}>
-              {SecondaryIcon ? <SecondaryIcon className="mr-2 h-4 w-4" /> : null}
+            <Button variant="secondary" size="sm" className="h-8 rounded-[10px] px-3 text-xs" onClick={secondaryAction.onClick}>
+              {SecondaryIcon ? <SecondaryIcon className="mr-1.5 h-3.5 w-3.5" /> : null}
               {secondaryAction.label}
             </Button>
           ) : null}
-          <Button className="h-10 rounded-[12px] bg-blue-500 text-white shadow-blue-500/20 hover:bg-blue-400" onClick={primaryAction.onClick}>
-            {PrimaryIcon ? <PrimaryIcon className="mr-2 h-4 w-4" /> : null}
+          <Button size="sm" className="h-8 rounded-[10px] bg-blue-500 px-3 text-xs text-white shadow-blue-500/20 hover:bg-blue-400" onClick={primaryAction.onClick}>
+            {PrimaryIcon ? <PrimaryIcon className="mr-1.5 h-3.5 w-3.5" /> : null}
             {primaryAction.label}
           </Button>
         </div>
       </div>
-      {children ? <div className="mt-5">{children}</div> : null}
+      {children ? <div className="mt-4">{children}</div> : null}
     </header>
   );
 }
@@ -143,16 +143,16 @@ export function StatCard({
   tone?: StatusTone;
 }) {
   return (
-    <div className={cn("flex min-h-[92px] items-center gap-4 rounded-[14px] p-4", pageSurface)}>
-      <span className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] border shadow-lg", iconToneStyles[tone])}>
-        <Icon className="h-6 w-6" />
+    <div className={cn("flex min-h-[72px] items-center gap-3 rounded-[12px] p-3", pageSurface)}>
+      <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] border shadow-lg", iconToneStyles[tone])}>
+        <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0">
-        <span className="block text-[0.66rem] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <span className="block text-[0.55rem] font-semibold uppercase tracking-[0.16em] text-slate-500">
           {label}
         </span>
-        <span className="mt-1 block truncate text-[1.35rem] font-semibold leading-none text-white">{value}</span>
-        <span className="mt-1.5 block truncate text-[0.75rem] text-slate-400">{detail}</span>
+        <span className="mt-1 block truncate text-[1.05rem] font-semibold leading-none text-white">{value}</span>
+        <span className="mt-1 block truncate text-[0.63rem] text-slate-400">{detail}</span>
       </span>
     </div>
   );
@@ -166,7 +166,7 @@ export function StatGrid({ children, columns = 5 }: { children: ReactNode; colum
         ? "xl:grid-cols-4"
         : "xl:grid-cols-5";
 
-  return <div className={cn("grid gap-3 sm:grid-cols-2 lg:grid-cols-3", columnsClass)}>{children}</div>;
+  return <div className={cn("grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3", columnsClass)}>{children}</div>;
 }
 
 export function SearchToolbar({
@@ -183,17 +183,17 @@ export function SearchToolbar({
   right?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative min-w-[260px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
           <Input
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={searchPlaceholder}
-            className="h-10 rounded-[12px] border-white/[0.09] bg-slate-950/42 pl-9 pr-12 text-[0.82rem]"
+            className="h-8 rounded-[10px] border-white/[0.09] bg-slate-950/42 pl-8 pr-11 text-[0.74rem]"
           />
-          <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 font-mono text-[0.62rem] text-slate-500 sm:flex">
+          <span className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 font-mono text-[0.56rem] text-slate-500 sm:flex">
             <Command className="h-2.5 w-2.5" /> K
           </span>
         </div>
@@ -222,15 +222,15 @@ export function ToolbarButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-10 shrink-0 items-center gap-2 rounded-[12px] border px-3 text-[0.82rem] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[10px] border px-2.5 text-[0.74rem] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
         active
           ? "border-sky-300/30 bg-sky-400/14 text-sky-100"
           : "border-white/[0.09] bg-white/[0.045] text-slate-300 hover:border-white/[0.14] hover:bg-white/[0.075] hover:text-white"
       )}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-3.5 w-3.5" />
       {label}
-      {chevron ? <ChevronDown className="h-3.5 w-3.5 text-slate-500" /> : null}
+      {chevron ? <ChevronDown className="h-3 w-3 text-slate-500" /> : null}
     </button>
   );
 }
@@ -245,28 +245,28 @@ export function ViewToggle({
   labels?: [string, string];
 }) {
   return (
-    <div className="inline-flex h-10 items-center rounded-[12px] border border-white/[0.09] bg-white/[0.045] p-1">
+    <div className="inline-flex h-8 items-center rounded-[10px] border border-white/[0.09] bg-white/[0.045] p-0.5">
       <button
         type="button"
         aria-label={labels[0]}
         onClick={() => onChange("grid")}
         className={cn(
-          "inline-flex h-8 w-8 items-center justify-center rounded-[9px] text-slate-400 transition-colors hover:text-white",
+          "inline-flex h-6 w-6 items-center justify-center rounded-[8px] text-slate-400 transition-colors hover:text-white",
           (value === "grid" || value === "board") && "bg-sky-400/14 text-sky-200"
         )}
       >
-        <LayoutGrid className="h-4 w-4" />
+        <LayoutGrid className="h-3.5 w-3.5" />
       </button>
       <button
         type="button"
         aria-label={labels[1]}
         onClick={() => onChange("list")}
         className={cn(
-          "inline-flex h-8 w-8 items-center justify-center rounded-[9px] text-slate-400 transition-colors hover:text-white",
+          "inline-flex h-6 w-6 items-center justify-center rounded-[8px] text-slate-400 transition-colors hover:text-white",
           value === "list" && "bg-sky-400/14 text-sky-200"
         )}
       >
-        <List className="h-4 w-4" />
+        <List className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -290,7 +290,7 @@ export function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-[11px] border px-3 text-[0.8rem] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        "inline-flex h-7 items-center gap-1.5 rounded-[9px] border px-2.5 text-[0.72rem] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
         active
           ? toneStyles[tone]
           : "border-white/[0.08] bg-white/[0.035] text-slate-300 hover:bg-white/[0.07] hover:text-white"
@@ -298,7 +298,7 @@ export function FilterChip({
     >
       {label}
       {typeof count === "number" ? (
-        <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-[0.68rem] text-slate-300">{count}</span>
+        <span className="rounded-full bg-white/[0.08] px-1.5 py-0.5 text-[0.58rem] text-slate-300">{count}</span>
       ) : null}
     </button>
   );
@@ -316,10 +316,10 @@ export function SectionCard({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-[14px]", pageSurface, className)}>
+    <section className={cn("rounded-[12px]", pageSurface, className)}>
       {title || action ? (
-        <div className="flex min-h-12 items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
-          {title ? <h2 className="text-[0.95rem] font-semibold text-white">{title}</h2> : <span />}
+        <div className="flex min-h-10 items-center justify-between gap-2 border-b border-white/[0.07] px-3 py-2">
+          {title ? <h2 className="text-[0.82rem] font-semibold text-white">{title}</h2> : <span />}
           {action}
         </div>
       ) : null}
@@ -342,18 +342,18 @@ export function InspectorPanelFrame({
   return (
     <aside
       className={cn(
-        "sticky top-5 hidden max-h-[calc(100dvh-40px)] min-h-[calc(100dvh-40px)] overflow-hidden rounded-[14px] xl:block",
+        "sticky top-4 hidden max-h-[calc(100dvh-32px)] min-h-[calc(100dvh-32px)] overflow-hidden rounded-[12px] xl:block",
         pageSurface,
         className
       )}
     >
       {title ? (
-        <div className="flex h-12 items-center justify-between border-b border-white/[0.08] px-4">
-          <h2 className="text-sm font-semibold text-white">{title}</h2>
+        <div className="flex h-10 items-center justify-between border-b border-white/[0.08] px-3">
+          <h2 className="text-xs font-semibold text-white">{title}</h2>
           {onClose ? <IconButton ariaLabel="Close details" icon={MoreHorizontal} onClick={onClose} /> : null}
         </div>
       ) : null}
-      <div className="h-full overflow-y-auto p-4">{children}</div>
+      <div className="h-full overflow-y-auto p-3">{children}</div>
     </aside>
   );
 }
@@ -372,7 +372,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[0.64rem] font-semibold uppercase tracking-[0.12em]",
+        "inline-flex items-center gap-1.5 rounded-full border px-1.5 py-0.5 text-[0.56rem] font-semibold uppercase tracking-[0.11em]",
         toneStyles[tone],
         className
       )}
@@ -394,8 +394,8 @@ export function EntityIcon({
   tone?: StatusTone;
   size?: "sm" | "md" | "lg";
 }) {
-  const sizeClass = size === "lg" ? "h-16 w-16 rounded-[18px]" : size === "sm" ? "h-9 w-9 rounded-[11px]" : "h-12 w-12 rounded-[14px]";
-  const textClass = size === "lg" ? "text-2xl" : size === "sm" ? "text-sm" : "text-lg";
+  const sizeClass = size === "lg" ? "h-12 w-12 rounded-[14px]" : size === "sm" ? "h-7 w-7 rounded-[9px]" : "h-10 w-10 rounded-[12px]";
+  const textClass = size === "lg" ? "text-lg" : size === "sm" ? "text-xs" : "text-base";
 
   return (
     <span
@@ -405,7 +405,7 @@ export function EntityIcon({
         iconToneStyles[tone]
       )}
     >
-      {Icon ? <Icon className={cn(size === "lg" ? "h-8 w-8" : size === "sm" ? "h-4 w-4" : "h-6 w-6")} /> : (
+      {Icon ? <Icon className={cn(size === "lg" ? "h-6 w-6" : size === "sm" ? "h-3.5 w-3.5" : "h-5 w-5")} /> : (
         <span className={cn("font-semibold uppercase", textClass)}>{label.slice(0, 1)}</span>
       )}
     </span>
@@ -414,9 +414,9 @@ export function EntityIcon({
 
 export function KeyValue({ label, value, action }: { label: string; value: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-white/[0.07] py-3 last:border-b-0">
-      <span className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</span>
-      <span className="min-w-0 text-right text-[0.82rem] font-medium text-slate-100">
+    <div className="flex items-start justify-between gap-2 border-b border-white/[0.07] py-2 last:border-b-0">
+      <span className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      <span className="min-w-0 text-right text-[0.74rem] font-medium text-slate-100">
         {value}
         {action ? <span className="ml-2">{action}</span> : null}
       </span>
@@ -468,13 +468,13 @@ export function IconButton({
       aria-label={ariaLabel}
       onClick={onClick}
       className={cn(
-        "relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        "relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
         active
           ? "border-sky-300/30 bg-sky-400/14 text-sky-200"
           : "border-white/[0.08] bg-white/[0.035] text-slate-400 hover:border-white/[0.14] hover:bg-white/[0.07] hover:text-white"
       )}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-3.5 w-3.5" />
       {dot ? <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400" /> : null}
     </button>
   );
@@ -492,13 +492,13 @@ export function EmptyState({
   description: string;
 }) {
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[14px] border border-dashed border-white/[0.10] bg-white/[0.025] p-8 text-center">
-      <p className="text-sm font-semibold text-white">{title}</p>
-      <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">{description}</p>
+    <div className="flex min-h-[170px] flex-col items-center justify-center rounded-[12px] border border-dashed border-white/[0.10] bg-white/[0.025] p-6 text-center">
+      <p className="text-xs font-semibold text-white">{title}</p>
+      <p className="mt-2 max-w-md text-xs leading-5 text-slate-400">{description}</p>
     </div>
   );
 }
 
 export function MiniBadge({ children }: { children: ReactNode }) {
-  return <Badge variant="muted" className="border-white/[0.08] bg-white/[0.055] text-[0.63rem] tracking-normal text-slate-300">{children}</Badge>;
+  return <Badge variant="muted" className="border-white/[0.08] bg-white/[0.055] px-1.5 py-0 text-[0.56rem] tracking-normal text-slate-300">{children}</Badge>;
 }

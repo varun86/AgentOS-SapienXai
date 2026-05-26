@@ -205,7 +205,7 @@ function AgentsPageContent({ snapshot }: { snapshot: MissionControlSnapshot }) {
           </div>
 
           {filteredAgents.length > 0 ? (
-            <div className={cn(view === "grid" ? "grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" : "flex flex-col gap-3")}>
+            <div className={cn(view === "grid" ? "grid gap-2.5 lg:grid-cols-2 min-[1400px]:grid-cols-3" : "flex flex-col gap-2.5")}>
               {filteredAgents.map((agent) => (
                 <AgentCard
                   key={agent.id}
@@ -263,39 +263,39 @@ function AgentCard({
         }
       }}
       className={cn(
-        "group rounded-[14px] border p-4 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        "group rounded-[12px] border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
         pageSurface,
         selected && "border-blue-400/70 bg-blue-500/[0.08] shadow-[0_0_0_1px_rgba(59,130,246,0.22),0_22px_64px_rgba(37,99,235,0.16)]"
       )}
     >
-      <div className={cn("flex gap-4", list ? "items-center" : "items-start")}>
+      <div className={cn("flex gap-3", list ? "items-center" : "items-start")}>
         <EntityIcon icon={agent.icon} label={agent.name} tone={agent.iconTone} size="lg" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <StatusBadge label={agent.statusLabel} tone={agent.statusTone} />
-              <h3 className="mt-2 truncate text-[1rem] font-semibold text-white">{agent.name}</h3>
-              <p className="mt-1 line-clamp-2 text-[0.8rem] leading-5 text-slate-300">{agent.purpose}</p>
+              <h3 className="mt-1.5 truncate text-[0.88rem] font-semibold text-white">{agent.name}</h3>
+              <p className="mt-1 line-clamp-2 text-[0.72rem] leading-4 text-slate-300">{agent.purpose}</p>
             </div>
-            {selected ? <CircleCheck className="h-5 w-5 shrink-0 text-blue-300" /> : null}
+            {selected ? <CircleCheck className="h-4 w-4 shrink-0 text-blue-300" /> : null}
           </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
             <MiniBadge>{agent.modelLabel}</MiniBadge>
             <MiniBadge>Policy: {agent.policyLabel}</MiniBadge>
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-3 border-t border-white/[0.07] pt-3 text-[0.68rem] uppercase tracking-[0.12em] text-slate-500">
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/[0.07] pt-2.5 text-[0.58rem] uppercase tracking-[0.11em] text-slate-500">
             <span>Tools <b className="ml-1 text-slate-200">{agent.toolsCount}</b></span>
             <span>Sessions <b className="ml-1 text-slate-200">{agent.sessionsCount}</b></span>
             <span>Last active <b className="ml-1 normal-case tracking-normal text-slate-200">{agent.lastActiveLabel}</b></span>
           </div>
-          <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
-            <Button variant="secondary" size="sm" className="rounded-[10px]" onClick={(event) => { event.stopPropagation(); toast.message(`Messaging ${agent.name} opens from Mission Control chat.`); }}>
-              <MessageSquare className="mr-2 h-3.5 w-3.5" /> Message
+          <div className="mt-2.5 grid grid-cols-[1fr_1fr_auto] gap-2">
+            <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={(event) => { event.stopPropagation(); toast.message(`Messaging ${agent.name} opens from Mission Control chat.`); }}>
+              <MessageSquare className="mr-1.5 h-3.5 w-3.5" /> Message
             </Button>
-            <Button variant="secondary" size="sm" className="rounded-[10px]" onClick={(event) => { event.stopPropagation(); toast.message(`Task creation for ${agent.name} is ready for a Mission Control handoff.`); }}>
-              <Play className="mr-2 h-3.5 w-3.5" /> Run Task
+            <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={(event) => { event.stopPropagation(); toast.message(`Task creation for ${agent.name} is ready for a Mission Control handoff.`); }}>
+              <Play className="mr-1.5 h-3.5 w-3.5" /> Run Task
             </Button>
-            <Button variant={followed ? "default" : "secondary"} size="sm" className="rounded-[10px] px-3" onClick={(event) => { event.stopPropagation(); onFollow(); }}>
+            <Button variant={followed ? "default" : "secondary"} size="sm" className="h-8 rounded-[9px] px-2.5" onClick={(event) => { event.stopPropagation(); onFollow(); }}>
               <Star className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -308,31 +308,31 @@ function AgentCard({
 function AgentInspector({ agent, followed }: { agent: AgentView; followed: boolean }) {
   return (
     <InspectorPanelFrame>
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-3">
         <EntityIcon icon={agent.icon} label={agent.name} tone={agent.iconTone} size="lg" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <h2 className="text-lg font-semibold leading-tight text-white">{agent.name}</h2>
+          <div className="flex items-start justify-between gap-2">
+            <h2 className="text-base font-semibold leading-tight text-white">{agent.name}</h2>
             <MoreButton />
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <StatusBadge label={agent.statusLabel} tone={agent.statusTone} />
             <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
               <span className={cn("h-1.5 w-1.5 rounded-full", agent.online ? "bg-emerald-400" : "bg-slate-500")} />
               {agent.online ? "Online" : "Offline"}
             </span>
           </div>
-          <p className="mt-3 text-sm leading-6 text-slate-300">{agent.purpose}</p>
+          <p className="mt-2.5 text-xs leading-5 text-slate-300">{agent.purpose}</p>
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <Button variant="secondary" size="sm" className="rounded-[10px]" onClick={() => toast.message(`Messaging ${agent.name} opens from Mission Control chat.`)}>Message</Button>
-        <Button variant="secondary" size="sm" className="rounded-[10px]" onClick={() => toast.message("Run Task will use the existing mission dispatch flow once a task brief is supplied.")}>Run Task</Button>
-        <Button size="sm" className="rounded-[10px] bg-amber-400 text-slate-950 hover:bg-amber-300" onClick={() => toast.message(followed ? "Agent already followed." : "Follow state is local to this page.")}>Follow</Button>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message(`Messaging ${agent.name} opens from Mission Control chat.`)}>Message</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Run Task will use the existing mission dispatch flow once a task brief is supplied.")}>Run Task</Button>
+        <Button size="sm" className="h-8 rounded-[9px] bg-amber-400 px-2 text-xs text-slate-950 hover:bg-amber-300" onClick={() => toast.message(followed ? "Agent already followed." : "Follow state is local to this page.")}>Follow</Button>
       </div>
 
-      <div className="mt-5 rounded-[12px] border border-white/[0.08] bg-white/[0.03] px-4">
+      <div className="mt-4 rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3">
         <KeyValue label="Role" value={agent.policyLabel === "Browser" ? "Browser Operations Agent" : "Strategic Operations Agent"} />
         <KeyValue label="Policy Mode" value={agent.policyLabel} action={<button className="text-blue-300">Manage</button>} />
         <KeyValue label="Workspace Scope" value={`${agent.workspaceName} (Full Access)`} />
@@ -340,8 +340,8 @@ function AgentInspector({ agent, followed }: { agent: AgentView; followed: boole
         <KeyValue label="Tools Enabled" value={`${agent.toolsCount} tools`} action={<button className="text-blue-300">Manage</button>} />
       </div>
 
-      <SectionCard title="Runtime Summary" className="mt-4">
-        <div className="px-4 py-3 text-sm">
+      <SectionCard title="Runtime Summary" className="mt-3">
+        <div className="px-3 py-2 text-xs">
           <KeyValue label="Sessions (7D)" value={<span>{agent.sessionsCount} <span className="ml-2 text-emerald-300">+12%</span></span>} />
           <KeyValue label="Tasks Completed (7D)" value={<span>{Math.max(1, Math.round(agent.sessionsCount * 0.72))} <span className="ml-2 text-emerald-300">+9%</span></span>} />
           <KeyValue label="Success Rate" value="98.3%" />
@@ -350,12 +350,12 @@ function AgentInspector({ agent, followed }: { agent: AgentView; followed: boole
         </div>
       </SectionCard>
 
-      <SectionCard title="Recent Sessions" className="mt-4" action={<button className="text-xs text-blue-300">View all</button>}>
-        <div className="divide-y divide-white/[0.07] px-4">
+      <SectionCard title="Recent Sessions" className="mt-3" action={<button className="text-[0.68rem] text-blue-300">View all</button>}>
+        <div className="divide-y divide-white/[0.07] px-3">
           {["Market Outlook - May 2025", "Liquid Staking Report", "DeFi Risk Assessment"].map((title, index) => (
-            <div key={title} className="flex items-center justify-between gap-3 py-3 text-sm">
+            <div key={title} className="flex items-center justify-between gap-2 py-2.5 text-xs">
               <span className="truncate text-slate-100">{title}</span>
-              <span className="shrink-0 text-xs text-slate-500">{index === 0 ? "2m ago" : index === 1 ? "18m ago" : "1h ago"}</span>
+              <span className="shrink-0 text-[0.68rem] text-slate-500">{index === 0 ? "2m ago" : index === 1 ? "18m ago" : "1h ago"}</span>
             </div>
           ))}
         </div>
@@ -385,24 +385,24 @@ function RecentAgentActivity({ snapshot, agents }: { snapshot: MissionControlSna
   return (
     <SectionCard title="Recent Activity" action={<button className="text-xs text-blue-300">View all activity</button>}>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-left text-sm">
-          <thead className="border-b border-white/[0.07] text-[0.68rem] uppercase tracking-[0.16em] text-slate-500">
+        <table className="w-full min-w-[680px] text-left text-xs">
+          <thead className="border-b border-white/[0.07] text-[0.58rem] uppercase tracking-[0.14em] text-slate-500">
             <tr>
-              <th className="px-4 py-3 font-semibold">Agent</th>
-              <th className="px-4 py-3 font-semibold">Event</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">Task</th>
-              <th className="px-4 py-3 font-semibold">Time</th>
+              <th className="px-3 py-2.5 font-semibold">Agent</th>
+              <th className="px-3 py-2.5 font-semibold">Event</th>
+              <th className="px-3 py-2.5 font-semibold">Status</th>
+              <th className="px-3 py-2.5 font-semibold">Task</th>
+              <th className="px-3 py-2.5 font-semibold">Time</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.06] text-slate-300">
             {displayRows.map((row, index) => (
               <tr key={`${row.agent}-${row.task}-${index}`} className="hover:bg-white/[0.025]">
-                <td className="px-4 py-3 text-white">{row.agent}</td>
-                <td className="px-4 py-3">{row.event}</td>
-                <td className="px-4 py-3"><StatusBadge label={row.status} tone={row.status === "completed" ? "success" : row.status === "running" ? "info" : "warning"} /></td>
-                <td className="px-4 py-3">{row.task}</td>
-                <td className="px-4 py-3">{row.time}</td>
+                <td className="px-3 py-2.5 text-white">{row.agent}</td>
+                <td className="px-3 py-2.5">{row.event}</td>
+                <td className="px-3 py-2.5"><StatusBadge label={row.status} tone={row.status === "completed" ? "success" : row.status === "running" ? "info" : "warning"} /></td>
+                <td className="px-3 py-2.5">{row.task}</td>
+                <td className="px-3 py-2.5">{row.time}</td>
               </tr>
             ))}
           </tbody>
@@ -521,7 +521,7 @@ function TasksPageContent({
           </div>
 
           {view === "board" ? (
-            <div className="grid gap-3 xl:grid-cols-4">
+            <div className="grid gap-2.5 xl:grid-cols-4">
               {(["queue", "running", "approval", "completed"] as TaskView["status"][]).map((status) => (
                 <TaskColumn
                   key={status}
@@ -543,7 +543,7 @@ function TasksPageContent({
             </SectionCard>
           )}
 
-          <div className="grid gap-3 xl:grid-cols-3">
+          <div className="grid gap-2.5 xl:grid-cols-3">
             <RecentTasksPanel tasks={tasks.slice(0, 5)} />
             <ScheduledTasksPanel tasks={tasks.slice(0, 4)} />
             <AutomationsPanel state={automationState} onChange={setAutomationState} />
@@ -570,29 +570,29 @@ function TaskColumn({
 }) {
   const Icon = taskStatusIcons[status];
   return (
-    <section className={cn("rounded-[14px] p-3", pageSurface)}>
-      <div className="flex items-center justify-between gap-2 px-1 pb-3">
+    <section className={cn("rounded-[12px] p-2.5", pageSurface)}>
+      <div className="flex items-center justify-between gap-2 px-1 pb-2.5">
         <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-blue-300" />
-          <h2 className="text-[0.78rem] font-bold uppercase tracking-[0.14em] text-blue-200">
+          <Icon className="h-3.5 w-3.5 text-blue-300" />
+          <h2 className="text-[0.66rem] font-bold uppercase tracking-[0.13em] text-blue-200">
             {status === "queue" ? "Queue" : status === "approval" ? "Awaiting Approval" : toTitleCase(status)}
           </h2>
-          <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-xs text-slate-400">{tasks.length}</span>
+          <span className="rounded-full bg-white/[0.08] px-1.5 py-0.5 text-[0.62rem] text-slate-400">{tasks.length}</span>
         </div>
         <button className="text-slate-500 hover:text-white" type="button" onClick={() => toast.message("Add Task opens Mission Control dispatch.")}>
-          <Plus className="h-4 w-4" />
+          <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2.5">
         {tasks.map((task) => (
           <TaskCard key={task.id} task={task} selected={task.id === selectedId} onSelect={() => onSelect(task.id)} onAbort={() => onAbort(task)} />
         ))}
         <button
           type="button"
           onClick={() => toast.message("Add Task opens Mission Control dispatch.")}
-          className="rounded-[12px] border border-white/[0.08] bg-white/[0.03] px-3 py-3 text-sm text-blue-300 hover:bg-white/[0.06]"
+          className="rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-xs text-blue-300 hover:bg-white/[0.06]"
         >
-          <Plus className="mr-2 inline h-4 w-4" /> Add Task
+          <Plus className="mr-1.5 inline h-3.5 w-3.5" /> Add Task
         </button>
       </div>
     </section>
@@ -622,51 +622,51 @@ function TaskCard({
         }
       }}
       className={cn(
-        "rounded-[12px] border bg-white/[0.035] p-3 text-left transition-all hover:bg-white/[0.055] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        "rounded-[10px] border bg-white/[0.035] p-2.5 text-left transition-all hover:bg-white/[0.055] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
         selected ? "border-blue-400/70 shadow-[0_0_0_1px_rgba(59,130,246,0.18)]" : "border-white/[0.08]"
       )}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="line-clamp-2 text-sm font-semibold text-white">{task.title}</h3>
-          <p className="mt-1 truncate text-xs text-slate-400">{task.agentName}</p>
+          <h3 className="line-clamp-2 text-xs font-semibold text-white">{task.title}</h3>
+          <p className="mt-1 truncate text-[0.68rem] text-slate-400">{task.agentName}</p>
         </div>
         <MoreButton />
       </div>
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
         <MiniBadge>{task.category}</MiniBadge>
         <StatusBadge label={task.priority} tone={task.priority === "High" ? "danger" : task.priority === "Medium" ? "warning" : "success"} dot={false} />
       </div>
       {task.status === "running" ? (
-        <div className="mt-3">
-          <div className="mb-1 flex justify-between text-xs text-slate-400">
+        <div className="mt-2.5">
+          <div className="mb-1 flex justify-between text-[0.68rem] text-slate-400">
             <span>{task.progress}%</span>
             <span>{task.tokenLabel}</span>
           </div>
           <ProgressBar value={task.progress} />
         </div>
       ) : null}
-      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-400">
+      <div className="mt-2.5 flex items-center justify-between gap-2 text-[0.68rem] text-slate-400">
         <span>{task.dueLabel}</span>
         <span>{task.status === "approval" ? `Est. cost ${task.tokenLabel}` : task.tokenLabel}</span>
       </div>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-2.5 flex gap-2">
         {task.status === "approval" ? (
           <>
-            <Button variant="secondary" size="sm" className="h-8 flex-1 rounded-[9px]" onClick={(event) => { event.stopPropagation(); toast.message("Review state is local until approvals are exposed here."); }}>Review</Button>
-            <Button variant="secondary" size="sm" className="h-8 flex-1 rounded-[9px] border-rose-400/20 text-rose-200" onClick={(event) => { event.stopPropagation(); toast.message("Reject state is local until approvals are exposed here."); }}>Reject</Button>
+            <Button variant="secondary" size="sm" className="h-7 flex-1 rounded-[8px] px-2 text-[0.7rem]" onClick={(event) => { event.stopPropagation(); toast.message("Review state is local until approvals are exposed here."); }}>Review</Button>
+            <Button variant="secondary" size="sm" className="h-7 flex-1 rounded-[8px] border-rose-400/20 px-2 text-[0.7rem] text-rose-200" onClick={(event) => { event.stopPropagation(); toast.message("Reject state is local until approvals are exposed here."); }}>Reject</Button>
           </>
         ) : task.status === "running" ? (
-          <Button variant="secondary" size="sm" className="h-8 flex-1 rounded-[9px]" onClick={(event) => { event.stopPropagation(); toast.message("Pause is not exposed by the current task API."); }}>
-            <Pause className="mr-2 h-3.5 w-3.5" /> Pause
+          <Button variant="secondary" size="sm" className="h-7 flex-1 rounded-[8px] px-2 text-[0.7rem]" onClick={(event) => { event.stopPropagation(); toast.message("Pause is not exposed by the current task API."); }}>
+            <Pause className="mr-1.5 h-3 w-3" /> Pause
           </Button>
         ) : (
-          <Button variant="secondary" size="sm" className="h-8 flex-1 rounded-[9px]" onClick={(event) => { event.stopPropagation(); toast.message("Open task in the inspector."); }}>
-            <Play className="mr-2 h-3.5 w-3.5" /> Open
+          <Button variant="secondary" size="sm" className="h-7 flex-1 rounded-[8px] px-2 text-[0.7rem]" onClick={(event) => { event.stopPropagation(); toast.message("Open task in the inspector."); }}>
+            <Play className="mr-1.5 h-3 w-3" /> Open
           </Button>
         )}
-        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2" onClick={(event) => { event.stopPropagation(); onAbort(); }}>
-          <X className="h-3.5 w-3.5" />
+        <Button variant="secondary" size="sm" className="h-7 rounded-[8px] px-2" onClick={(event) => { event.stopPropagation(); onAbort(); }}>
+          <X className="h-3 w-3" />
         </Button>
       </div>
     </div>
@@ -678,15 +678,15 @@ function TaskListRow({ task, selected, onSelect, onAbort }: { task: TaskView; se
     <button
       type="button"
       onClick={onSelect}
-      className={cn("grid w-full grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-4 py-3 text-left text-sm hover:bg-white/[0.035]", selected && "bg-blue-500/[0.08]")}
+      className={cn("grid w-full grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-3 py-2.5 text-left text-xs hover:bg-white/[0.035]", selected && "bg-blue-500/[0.08]")}
     >
       <span className="min-w-0">
         <span className="block truncate font-semibold text-white">{task.title}</span>
-        <span className="mt-1 block truncate text-xs text-slate-400">{task.agentName} · {task.category}</span>
+        <span className="mt-1 block truncate text-[0.68rem] text-slate-400">{task.agentName} · {task.category}</span>
       </span>
       <StatusBadge label={task.statusLabel} tone={task.statusTone} />
-      <span className="w-28 text-right text-slate-400">{task.tokenLabel}</span>
-      <Button variant="secondary" size="sm" className="h-8 rounded-[9px]" onClick={(event) => { event.stopPropagation(); onAbort(); }}>Cancel</Button>
+      <span className="w-24 text-right text-slate-400">{task.tokenLabel}</span>
+      <Button variant="secondary" size="sm" className="h-7 rounded-[8px] px-2 text-[0.7rem]" onClick={(event) => { event.stopPropagation(); onAbort(); }}>Cancel</Button>
     </button>
   );
 }
@@ -694,53 +694,53 @@ function TaskListRow({ task, selected, onSelect, onAbort }: { task: TaskView; se
 function TaskInspector({ task, onAbort }: { task: TaskView; onAbort: () => void }) {
   return (
     <InspectorPanelFrame title="Task Details">
-      <h2 className="text-lg font-semibold text-white">{task.title}</h2>
+      <h2 className="text-base font-semibold text-white">{task.title}</h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <StatusBadge label={task.statusLabel} tone={task.statusTone} />
-        <span className="font-mono text-xs text-slate-500">ID: {task.id.slice(0, 18)}</span>
+        <span className="font-mono text-[0.68rem] text-slate-500">ID: {task.id.slice(0, 18)}</span>
       </div>
-      <SectionCard title="Assigned Agent" className="mt-4">
-        <div className="flex items-center justify-between gap-3 p-3">
+      <SectionCard title="Assigned Agent" className="mt-3">
+        <div className="flex items-center justify-between gap-2 p-2.5">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">{task.agentName}</p>
-            <p className="mt-1 text-xs text-slate-400">{task.category} work item</p>
+            <p className="truncate text-xs font-semibold text-white">{task.agentName}</p>
+            <p className="mt-1 text-[0.68rem] text-slate-400">{task.category} work item</p>
           </div>
-          <Button variant="secondary" size="sm" className="rounded-[9px]" onClick={() => toast.message("Agent messaging opens from Mission Control.")}>Message</Button>
+          <Button variant="secondary" size="sm" className="h-7 rounded-[8px] px-2 text-[0.7rem]" onClick={() => toast.message("Agent messaging opens from Mission Control.")}>Message</Button>
         </div>
       </SectionCard>
-      <div className="mt-4 space-y-4">
+      <div className="mt-3 space-y-3">
         <div>
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-slate-500">Objective</p>
-          <p className="mt-2 text-sm leading-6 text-slate-300">{task.objective}</p>
+          <p className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-slate-500">Objective</p>
+          <p className="mt-1.5 text-xs leading-5 text-slate-300">{task.objective}</p>
         </div>
         <div>
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-slate-500">Description</p>
-          <p className="mt-2 text-sm leading-6 text-slate-300">{task.description}</p>
+          <p className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-slate-500">Description</p>
+          <p className="mt-1.5 text-xs leading-5 text-slate-300">{task.description}</p>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-3 gap-2 rounded-[12px] border border-white/[0.08] bg-white/[0.03] p-3">
+      <div className="mt-3 grid grid-cols-3 gap-2 rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-2.5">
         <MetricMini label="Status" value={task.statusLabel} />
         <MetricMini label="Priority" value={task.priority} />
         <MetricMini label="Due" value={task.dueLabel} />
       </div>
-      <div className="mt-4">
-        <div className="mb-2 flex justify-between text-sm">
+      <div className="mt-3">
+        <div className="mb-1.5 flex justify-between text-xs">
           <span className="text-slate-400">Progress</span>
           <span className="text-blue-300">{task.progress}%</span>
         </div>
         <ProgressBar value={task.progress} />
       </div>
-      <div className="mt-5 rounded-[12px] border border-white/[0.08] bg-white/[0.03] px-4">
+      <div className="mt-4 rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3">
         <KeyValue label="Policy" value="Market Research Policy v2.1" />
         <KeyValue label="Approvals" value={task.status === "approval" ? "0 / 1 pending" : "None required"} />
         <KeyValue label="Outputs / Files" value={`${task.artifactCount} files`} />
         <KeyValue label="Warnings" value={`${task.warningCount} warnings`} />
       </div>
-      <div className="mt-5 grid grid-cols-2 gap-2">
-        <Button className="rounded-[10px] bg-blue-500 text-white hover:bg-blue-400" onClick={() => toast.message("Open task selected in inspector.")}>Open</Button>
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("Pause is not exposed by the current task API.")}>Pause</Button>
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("Run Again needs a task brief confirmation flow.")}>Run Again</Button>
-        <Button variant="destructive" className="rounded-[10px]" onClick={onAbort}>Cancel</Button>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <Button size="sm" className="h-8 rounded-[9px] bg-blue-500 text-xs text-white hover:bg-blue-400" onClick={() => toast.message("Open task selected in inspector.")}>Open</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs" onClick={() => toast.message("Pause is not exposed by the current task API.")}>Pause</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs" onClick={() => toast.message("Run Again needs a task brief confirmation flow.")}>Run Again</Button>
+        <Button variant="destructive" size="sm" className="h-8 rounded-[9px] text-xs" onClick={onAbort}>Cancel</Button>
       </div>
     </InspectorPanelFrame>
   );
@@ -749,9 +749,9 @@ function TaskInspector({ task, onAbort }: { task: TaskView; onAbort: () => void 
 function RecentTasksPanel({ tasks }: { tasks: TaskView[] }) {
   return (
     <SectionCard title="Recent Activity" action={<button className="text-xs text-blue-300">View all activity</button>}>
-      <div className="divide-y divide-white/[0.06] px-4">
+      <div className="divide-y divide-white/[0.06] px-3">
         {tasks.map((task) => (
-          <div key={task.id} className="flex items-center justify-between gap-3 py-3 text-xs">
+          <div key={task.id} className="flex items-center justify-between gap-2 py-2.5 text-[0.68rem]">
             <span className="min-w-0 truncate text-slate-300">{task.title}</span>
             <span className="shrink-0 text-slate-500">{task.statusLabel}</span>
           </div>
@@ -764,9 +764,9 @@ function RecentTasksPanel({ tasks }: { tasks: TaskView[] }) {
 function ScheduledTasksPanel({ tasks }: { tasks: TaskView[] }) {
   return (
     <SectionCard title="Scheduled Tasks" action={<button className="text-xs text-blue-300">View calendar</button>}>
-      <div className="divide-y divide-white/[0.06] px-4">
+      <div className="divide-y divide-white/[0.06] px-3">
         {tasks.map((task, index) => (
-          <div key={task.id} className="grid grid-cols-[1fr_auto] gap-3 py-3 text-xs">
+          <div key={task.id} className="grid grid-cols-[1fr_auto] gap-2 py-2.5 text-[0.68rem]">
             <span className="truncate text-slate-300">{task.title}</span>
             <span className="text-slate-500">{index % 2 ? "Daily · 10:00" : "Weekly · Mon 09:00"}</span>
           </div>
@@ -785,17 +785,17 @@ function AutomationsPanel({
 }) {
   return (
     <SectionCard title="Automations" action={<button className="text-xs text-blue-300">Manage</button>}>
-      <div className="divide-y divide-white/[0.06] px-4">
+      <div className="divide-y divide-white/[0.06] px-3">
         {Object.entries(state).map(([label, enabled]) => (
           <button
             type="button"
             key={label}
             onClick={() => onChange({ ...state, [label]: !enabled })}
-            className="flex w-full items-center justify-between gap-3 py-3 text-left text-xs"
+            className="flex w-full items-center justify-between gap-2 py-2.5 text-left text-[0.68rem]"
           >
             <span className="text-slate-300">{label}</span>
-            <span className={cn("h-5 w-9 rounded-full p-0.5 transition-colors", enabled ? "bg-emerald-400" : "bg-white/[0.12]")}>
-              <span className={cn("block h-4 w-4 rounded-full bg-white transition-transform", enabled && "translate-x-4")} />
+            <span className={cn("h-4 w-7 rounded-full p-0.5 transition-colors", enabled ? "bg-emerald-400" : "bg-white/[0.12]")}>
+              <span className={cn("block h-3 w-3 rounded-full bg-white transition-transform", enabled && "translate-x-3")} />
             </span>
           </button>
         ))}
@@ -941,12 +941,12 @@ function FilesPageContent({
           </SearchToolbar>
 
           {fileError ? (
-            <div className="rounded-[12px] border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">{fileError}</div>
+            <div className="rounded-[10px] border border-amber-300/20 bg-amber-400/10 px-3 py-2.5 text-xs text-amber-100">{fileError}</div>
           ) : null}
 
-          <div className="grid gap-3 xl:grid-cols-[205px_minmax(0,1fr)]">
-            <SectionCard title="Collections" action={<button className="text-slate-400 hover:text-white"><Plus className="h-4 w-4" /></button>}>
-              <div className="flex flex-col gap-1 p-3">
+          <div className="grid gap-2.5 xl:grid-cols-[180px_minmax(0,1fr)]">
+            <SectionCard title="Collections" action={<button className="text-slate-400 hover:text-white"><Plus className="h-3.5 w-3.5" /></button>}>
+              <div className="flex flex-col gap-1 p-2.5">
                 {collectionItems.map((item) => {
                   const Icon = fileCollectionIcons[item] ?? Folder;
                   const count = item === "All Files" ? fileViews.length : fileViews.filter((file) => file.collection === item).length;
@@ -955,24 +955,24 @@ function FilesPageContent({
                       type="button"
                       key={item}
                       onClick={() => setCollection(item)}
-                      className={cn("flex items-center justify-between gap-3 rounded-[10px] px-3 py-2.5 text-left text-sm transition-colors", collection === item ? "bg-blue-500/[0.14] text-blue-200" : "text-slate-300 hover:bg-white/[0.05] hover:text-white")}
+                      className={cn("flex items-center justify-between gap-2 rounded-[9px] px-2.5 py-2 text-left text-xs transition-colors", collection === item ? "bg-blue-500/[0.14] text-blue-200" : "text-slate-300 hover:bg-white/[0.05] hover:text-white")}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <Icon className="h-4 w-4 shrink-0" />
+                        <Icon className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{item}</span>
                       </span>
-                      <span className="text-xs text-slate-500">{count}</span>
+                      <span className="text-[0.68rem] text-slate-500">{count}</span>
                     </button>
                   );
                 })}
               </div>
-              <div className="mt-auto border-t border-white/[0.07] p-4">
-                <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
+              <div className="mt-auto border-t border-white/[0.07] p-3">
+                <div className="mb-2 flex items-center justify-between text-[0.68rem] text-slate-400">
                   <span>Storage</span>
                   <span>{totalSize ? "Live" : "Sample"}</span>
                 </div>
                 <ProgressBar value={totalSize ? Math.min(100, (totalSize / 10_000_000_000) * 100) : 24} />
-                <Button variant="secondary" size="sm" className="mt-3 w-full rounded-[10px]" onClick={() => toast.message("Storage management is not exposed yet.")}>Manage Storage</Button>
+                <Button variant="secondary" size="sm" className="mt-3 h-7 w-full rounded-[8px] px-2 text-[0.7rem]" onClick={() => toast.message("Storage management is not exposed yet.")}>Manage Storage</Button>
               </div>
             </SectionCard>
 
@@ -980,22 +980,22 @@ function FilesPageContent({
               {view === "list" ? (
                 <FilesTable files={filteredFiles} selectedPath={selectedFile?.path} onSelect={setSelectedPath} />
               ) : (
-                <div className="grid gap-3 p-4 lg:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid gap-2.5 p-3 lg:grid-cols-2 2xl:grid-cols-3">
                   {filteredFiles.map((file) => (
-                    <button key={file.path} type="button" onClick={() => setSelectedPath(file.path)} className={cn("rounded-[12px] border p-4 text-left hover:bg-white/[0.05]", file.path === selectedFile?.path ? "border-blue-400/60 bg-blue-500/[0.08]" : "border-white/[0.08] bg-white/[0.03]")}>
-                      <div className="flex items-start gap-3">
+                    <button key={file.path} type="button" onClick={() => setSelectedPath(file.path)} className={cn("rounded-[10px] border p-3 text-left hover:bg-white/[0.05]", file.path === selectedFile?.path ? "border-blue-400/60 bg-blue-500/[0.08]" : "border-white/[0.08] bg-white/[0.03]")}>
+                      <div className="flex items-start gap-2.5">
                         <EntityIcon icon={file.icon} label={file.name} tone={file.iconTone} />
                         <span className="min-w-0">
-                          <span className="block truncate font-semibold text-white">{file.name}</span>
-                          <span className="mt-1 block truncate text-xs text-slate-500">{file.path}</span>
+                          <span className="block truncate text-xs font-semibold text-white">{file.name}</span>
+                          <span className="mt-1 block truncate text-[0.68rem] text-slate-500">{file.path}</span>
                         </span>
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-1.5">{file.tags.map((tag) => <MiniBadge key={tag}>{tag}</MiniBadge>)}</div>
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">{file.tags.map((tag) => <MiniBadge key={tag}>{tag}</MiniBadge>)}</div>
                     </button>
                   ))}
                 </div>
               )}
-              <div className="flex items-center justify-between border-t border-white/[0.07] px-4 py-3 text-xs text-slate-400">
+              <div className="flex items-center justify-between border-t border-white/[0.07] px-3 py-2.5 text-[0.68rem] text-slate-400">
                 <span>Showing 1 to {filteredFiles.length} of {fileViews.length} files</span>
                 <span className="flex items-center gap-2"><button className="rounded border border-blue-400/40 px-2 py-1 text-blue-200">1</button><button>2</button><button>3</button><span>...</span></span>
               </div>
@@ -1019,18 +1019,18 @@ function FilesTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[740px] text-left text-xs">
-        <thead className="border-b border-white/[0.07] text-[0.66rem] uppercase tracking-[0.16em] text-slate-500">
+      <table className="w-full min-w-[700px] text-left text-[0.72rem]">
+        <thead className="border-b border-white/[0.07] text-[0.56rem] uppercase tracking-[0.14em] text-slate-500">
           <tr>
-            <th className="w-9 px-4 py-3"><span className="block h-4 w-4 rounded border border-white/[0.14]" /></th>
-            <th className="px-2 py-3 font-semibold">Name</th>
-            <th className="px-2 py-3 font-semibold">Type</th>
-            <th className="px-2 py-3 font-semibold">Last Updated</th>
-            <th className="px-2 py-3 font-semibold">Owner / Agent</th>
-            <th className="px-2 py-3 font-semibold">Size</th>
-            <th className="px-2 py-3 font-semibold">Tags</th>
-            <th className="px-2 py-3 font-semibold">Tasks</th>
-            <th className="px-4 py-3 font-semibold">Actions</th>
+            <th className="w-8 px-3 py-2.5"><span className="block h-3.5 w-3.5 rounded border border-white/[0.14]" /></th>
+            <th className="px-2 py-2.5 font-semibold">Name</th>
+            <th className="px-2 py-2.5 font-semibold">Type</th>
+            <th className="px-2 py-2.5 font-semibold">Last Updated</th>
+            <th className="px-2 py-2.5 font-semibold">Owner / Agent</th>
+            <th className="px-2 py-2.5 font-semibold">Size</th>
+            <th className="px-2 py-2.5 font-semibold">Tags</th>
+            <th className="px-2 py-2.5 font-semibold">Tasks</th>
+            <th className="px-3 py-2.5 font-semibold">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.06] text-slate-300">
@@ -1040,23 +1040,23 @@ function FilesTable({
               onClick={() => onSelect(file.path)}
               className={cn("cursor-pointer hover:bg-white/[0.035]", file.path === selectedPath && "bg-blue-500/[0.10] outline outline-1 outline-blue-400/50")}
             >
-              <td className="px-4 py-3"><span className={cn("flex h-4 w-4 items-center justify-center rounded border", file.path === selectedPath ? "border-blue-400 bg-blue-500 text-white" : "border-white/[0.14]")}><Check className="h-3 w-3" /></span></td>
-              <td className="px-2 py-3">
-                <div className="flex items-center gap-3">
+              <td className="px-3 py-2.5"><span className={cn("flex h-3.5 w-3.5 items-center justify-center rounded border", file.path === selectedPath ? "border-blue-400 bg-blue-500 text-white" : "border-white/[0.14]")}><Check className="h-2.5 w-2.5" /></span></td>
+              <td className="px-2 py-2.5">
+                <div className="flex items-center gap-2.5">
                   <EntityIcon icon={file.icon} label={file.name} tone={file.iconTone} size="sm" />
                   <span className="min-w-0">
                     <span className="block truncate font-semibold text-white">{file.name}</span>
-                    <span className="mt-0.5 block truncate text-xs text-slate-500">{file.path}</span>
+                    <span className="mt-0.5 block truncate text-[0.66rem] text-slate-500">{file.path}</span>
                   </span>
                 </div>
               </td>
-              <td className="px-2 py-3"><MiniBadge>{file.type}</MiniBadge></td>
-              <td className="px-2 py-3">{file.updatedLabel}</td>
-              <td className="px-2 py-3"><span className="line-clamp-2 max-w-24">{file.owner}</span></td>
-              <td className="px-2 py-3">{file.sizeLabel}</td>
-              <td className="px-2 py-3"><div className="flex max-w-28 flex-wrap gap-1">{file.tags.slice(0, 2).map((tag) => <MiniBadge key={tag}>{tag}</MiniBadge>)}</div></td>
-              <td className="px-2 py-3 text-white">{file.tasks}</td>
-              <td className="px-4 py-3"><MoreButton /></td>
+              <td className="px-2 py-2.5"><MiniBadge>{file.type}</MiniBadge></td>
+              <td className="px-2 py-2.5">{file.updatedLabel}</td>
+              <td className="px-2 py-2.5"><span className="line-clamp-2 max-w-24">{file.owner}</span></td>
+              <td className="px-2 py-2.5">{file.sizeLabel}</td>
+              <td className="px-2 py-2.5"><div className="flex max-w-28 flex-wrap gap-1">{file.tags.slice(0, 2).map((tag) => <MiniBadge key={tag}>{tag}</MiniBadge>)}</div></td>
+              <td className="px-2 py-2.5 text-white">{file.tasks}</td>
+              <td className="px-3 py-2.5"><MoreButton /></td>
             </tr>
           ))}
         </tbody>
@@ -1078,28 +1078,28 @@ function FileInspector({
 }) {
   return (
     <InspectorPanelFrame>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
           <EntityIcon icon={file.icon} label={file.name} tone={file.iconTone} size="lg" />
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold text-white">{file.name}</h2>
-            <div className="mt-2 flex gap-2"><MiniBadge>{file.type}</MiniBadge><MiniBadge>{file.sizeLabel}</MiniBadge></div>
+            <h2 className="truncate text-base font-semibold text-white">{file.name}</h2>
+            <div className="mt-1.5 flex gap-1.5"><MiniBadge>{file.type}</MiniBadge><MiniBadge>{file.sizeLabel}</MiniBadge></div>
           </div>
         </div>
         <MoreButton />
       </div>
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <Button className="rounded-[10px] bg-blue-500 text-white hover:bg-blue-400" onClick={onReveal}><SquareArrowOutUpRight className="mr-2 h-4 w-4" />Open</Button>
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("Preview will use the existing workspace file reader in a future pass.")}>Preview</Button>
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("More file actions are pending backend support.")}>More</Button>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Button size="sm" className="h-8 rounded-[9px] bg-blue-500 px-2 text-xs text-white hover:bg-blue-400" onClick={onReveal}><SquareArrowOutUpRight className="mr-1.5 h-3.5 w-3.5" />Open</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Preview will use the existing workspace file reader in a future pass.")}>Preview</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("More file actions are pending backend support.")}>More</Button>
       </div>
-      <div className="mt-4 flex border-b border-white/[0.08]">
+      <div className="mt-3 flex border-b border-white/[0.08]">
         {(["Details", "Versions", "Activity"] as const).map((item) => (
           <button
             key={item}
             type="button"
             onClick={() => onTabChange(item)}
-            className={cn("border-b-2 px-4 py-3 text-sm transition-colors", tab === item ? "border-blue-400 text-blue-200" : "border-transparent text-slate-400 hover:text-white")}
+            className={cn("border-b-2 px-3 py-2.5 text-xs transition-colors", tab === item ? "border-blue-400 text-blue-200" : "border-transparent text-slate-400 hover:text-white")}
           >
             {item}
           </button>
@@ -1107,7 +1107,7 @@ function FileInspector({
       </div>
       {tab === "Details" ? (
         <>
-          <div className="mt-4 rounded-[12px] border border-white/[0.08] bg-white/[0.03] px-4">
+          <div className="mt-3 rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3">
             <KeyValue label="File Path" value={file.path} />
             <KeyValue label="Type" value={file.type} />
             <KeyValue label="Size" value={file.sizeLabel} />
@@ -1115,39 +1115,39 @@ function FileInspector({
             <KeyValue label="Owner / Agent" value={file.owner} />
             <KeyValue label="Linked Task" value={`${file.tasks} tasks`} />
           </div>
-          <div className="mt-4">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-slate-500">Tags</p>
-            <div className="mt-2 flex flex-wrap gap-2">{file.tags.map((tag) => <MiniBadge key={tag}>{tag}</MiniBadge>)}</div>
+          <div className="mt-3">
+            <p className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-slate-500">Tags</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">{file.tags.map((tag) => <MiniBadge key={tag}>{tag}</MiniBadge>)}</div>
           </div>
-          <div className="mt-4">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-slate-500">Description</p>
-            <p className="mt-2 text-sm leading-6 text-slate-300">{file.source?.description ?? "Workspace context file managed by AgentOS and OpenClaw."}</p>
+          <div className="mt-3">
+            <p className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-slate-500">Description</p>
+            <p className="mt-1.5 text-xs leading-5 text-slate-300">{file.source?.description ?? "Workspace context file managed by AgentOS and OpenClaw."}</p>
           </div>
         </>
       ) : tab === "Versions" ? (
-        <div className="mt-4 divide-y divide-white/[0.07] rounded-[12px] border border-white/[0.08] bg-white/[0.03] px-4">
+        <div className="mt-3 divide-y divide-white/[0.07] rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3">
           {["v3.4 (current)", "v3.3", "v3.2"].map((version, index) => (
-            <div key={version} className="flex items-center justify-between gap-3 py-3 text-sm">
+            <div key={version} className="flex items-center justify-between gap-2 py-2.5 text-xs">
               <span className="text-blue-200">{version}</span>
               <span className="text-slate-400">{index === 0 ? "Current" : `${index + 2} days ago`}</span>
             </div>
           ))}
         </div>
       ) : (
-        <div className="mt-4 space-y-3">
+        <div className="mt-3 space-y-2.5">
           {["Opened by workspace", "Added to context", "Linked to task"].map((event, index) => (
-            <div key={event} className="rounded-[12px] border border-white/[0.08] bg-white/[0.03] p-3 text-sm text-slate-300">
+            <div key={event} className="rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-2.5 text-xs text-slate-300">
               <span className="text-white">{event}</span>
-              <span className="ml-2 text-xs text-slate-500">{index + 1}h ago</span>
+              <span className="ml-2 text-[0.68rem] text-slate-500">{index + 1}h ago</span>
             </div>
           ))}
         </div>
       )}
-      <SectionCard title="Quick Actions" className="mt-5">
-        <div className="grid grid-cols-2 gap-2 p-3">
-          <Button variant="secondary" size="sm" className="rounded-[10px]" onClick={() => toast.message("Share is pending backend support.")}>Share</Button>
-          <Button variant="secondary" size="sm" className="rounded-[10px]" onClick={() => toast.message("Added to local context selection.")}>Add to Context</Button>
-          <Button variant="destructive" size="sm" className="col-span-2 rounded-[10px]" onClick={() => toast.message("Move to Trash requires file mutation support.")}>Move to Trash</Button>
+      <SectionCard title="Quick Actions" className="mt-4">
+        <div className="grid grid-cols-2 gap-2 p-2.5">
+          <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Share is pending backend support.")}>Share</Button>
+          <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Added to local context selection.")}>Add to Context</Button>
+          <Button variant="destructive" size="sm" className="col-span-2 h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Move to Trash requires file mutation support.")}>Move to Trash</Button>
         </div>
       </SectionCard>
     </InspectorPanelFrame>
@@ -1208,13 +1208,13 @@ function ModelsPageContent({ snapshot }: { snapshot: MissionControlSnapshot }) {
             <ModelsTable models={filteredModels} selectedId={selectedModel?.id} onSelect={setSelectedId} />
           </SectionCard>
 
-          <div className="grid gap-3 xl:grid-cols-[0.9fr_1.6fr]">
+          <div className="grid gap-2.5 xl:grid-cols-[0.9fr_1.6fr]">
             <SectionCard title="Default by Use Case">
-              <div className="divide-y divide-white/[0.07] px-4">
+              <div className="divide-y divide-white/[0.07] px-3">
                 {["Reasoning & Analysis", "Chat & Conversation", "Research & Summarization", "Automation & Tool Use", "Low-Cost Background Tasks"].map((useCase, index) => {
                   const model = effectiveModels[index % Math.max(1, effectiveModels.length)];
                   return (
-                    <div key={useCase} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 py-3 text-sm">
+                    <div key={useCase} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 py-2.5 text-xs">
                       <span className="truncate text-slate-300">{useCase}</span>
                       <MiniBadge>Primary</MiniBadge>
                       <span className="truncate text-white">{model?.name ?? "Unassigned"}</span>
@@ -1224,8 +1224,8 @@ function ModelsPageContent({ snapshot }: { snapshot: MissionControlSnapshot }) {
               </div>
             </SectionCard>
             <SectionCard title="Model Routing & Usage (7D)">
-              <div className="p-4">
-                <div className="grid grid-cols-3 gap-4 text-sm">
+              <div className="p-3">
+                <div className="grid grid-cols-3 gap-3 text-xs">
                   <MetricMini label="Total Requests" value="128.4K" />
                   <MetricMini label="Total Tokens" value={formatBigNumber(tokenTotal || 4_210_000_000)} />
                   <MetricMini label="Avg Latency" value="286ms" />
@@ -1264,31 +1264,31 @@ function ModelsTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] text-left text-sm">
-        <thead className="border-b border-white/[0.07] text-[0.66rem] uppercase tracking-[0.16em] text-slate-500">
+      <table className="w-full min-w-[900px] text-left text-xs">
+        <thead className="border-b border-white/[0.07] text-[0.56rem] uppercase tracking-[0.14em] text-slate-500">
           <tr>
             {["Model / Provider", "Status", "Latency", "Context Window", "Cost (Input / Output)", "Rate Limit", "Role", "Last Active", "Actions"].map((header) => (
-              <th key={header} className="px-4 py-3 font-semibold">{header}</th>
+              <th key={header} className="px-3 py-2.5 font-semibold">{header}</th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.06] text-slate-300">
           {models.map((model) => (
             <tr key={model.id} onClick={() => onSelect(model.id)} className={cn("cursor-pointer hover:bg-white/[0.035]", model.id === selectedId && "bg-blue-500/[0.10] outline outline-1 outline-blue-400/50")}>
-              <td className="px-4 py-3">
-                <div className="flex items-center gap-3">
+              <td className="px-3 py-2.5">
+                <div className="flex items-center gap-2.5">
                   <EntityIcon icon={BrainCircuit} label={model.name} tone={model.statusTone} size="sm" />
-                  <span><span className="block font-semibold text-white">{model.name}</span><span className="text-xs text-slate-500">{model.provider}</span></span>
+                  <span><span className="block font-semibold text-white">{model.name}</span><span className="text-[0.66rem] text-slate-500">{model.provider}</span></span>
                 </div>
               </td>
-              <td className="px-4 py-3"><StatusBadge label={model.statusLabel} tone={model.statusTone} /></td>
-              <td className="px-4 py-3">{model.latencyLabel}</td>
-              <td className="px-4 py-3">{model.contextLabel}</td>
-              <td className="px-4 py-3">{model.costLabel}<span className="block text-xs text-slate-500">per 1M tokens</span></td>
-              <td className="px-4 py-3">{model.rateLimitLabel}</td>
-              <td className="px-4 py-3"><StatusBadge label={model.role} tone={model.role === "Primary" ? "info" : model.role === "Fallback" ? "purple" : model.role === "Secondary" ? "success" : "warning"} dot={false} /></td>
-              <td className="px-4 py-3">{model.lastActiveLabel}</td>
-              <td className="px-4 py-3"><MoreButton /></td>
+              <td className="px-3 py-2.5"><StatusBadge label={model.statusLabel} tone={model.statusTone} /></td>
+              <td className="px-3 py-2.5">{model.latencyLabel}</td>
+              <td className="px-3 py-2.5">{model.contextLabel}</td>
+              <td className="px-3 py-2.5">{model.costLabel}<span className="block text-[0.66rem] text-slate-500">per 1M tokens</span></td>
+              <td className="px-3 py-2.5">{model.rateLimitLabel}</td>
+              <td className="px-3 py-2.5"><StatusBadge label={model.role} tone={model.role === "Primary" ? "info" : model.role === "Fallback" ? "purple" : model.role === "Secondary" ? "success" : "warning"} dot={false} /></td>
+              <td className="px-3 py-2.5">{model.lastActiveLabel}</td>
+              <td className="px-3 py-2.5"><MoreButton /></td>
             </tr>
           ))}
         </tbody>
@@ -1310,32 +1310,32 @@ function ModelInspector({
 }) {
   return (
     <InspectorPanelFrame>
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2.5">
         <EntityIcon icon={BrainCircuit} label={model.name} tone={model.statusTone} size="lg" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <h2 className="text-lg font-semibold text-white">{model.name}</h2>
-              <p className="mt-1 text-sm text-slate-300">{model.provider}</p>
+              <h2 className="text-base font-semibold text-white">{model.name}</h2>
+              <p className="mt-1 text-xs text-slate-300">{model.provider}</p>
             </div>
             <StatusBadge label={model.statusLabel} tone={model.statusTone} />
           </div>
-          <p className="mt-3 text-sm leading-6 text-slate-300">Most capable configured model route for AgentOS agents.</p>
+          <p className="mt-2.5 text-xs leading-5 text-slate-300">Most capable configured model route for AgentOS agents.</p>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <Button className="col-span-2 rounded-[10px] bg-blue-500 text-white hover:bg-blue-400" onClick={() => onSetRole("Primary")}>Set as Primary</Button>
-        <Button variant="secondary" className="rounded-[10px] text-violet-200" onClick={() => onSetRole("Fallback")}>Set as Fallback</Button>
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("Model editing is handled by the Add Models flow.")}>Edit</Button>
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("Disable is local until model removal is exposed here.")}>Disable</Button>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Button size="sm" className="col-span-2 h-8 rounded-[9px] bg-blue-500 text-xs text-white hover:bg-blue-400" onClick={() => onSetRole("Primary")}>Set as Primary</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs text-violet-200" onClick={() => onSetRole("Fallback")}>Set as Fallback</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs" onClick={() => toast.message("Model editing is handled by the Add Models flow.")}>Edit</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs" onClick={() => toast.message("Disable is local until model removal is exposed here.")}>Disable</Button>
       </div>
-      <div className="mt-4 flex border-b border-white/[0.08]">
+      <div className="mt-3 flex border-b border-white/[0.08]">
         {(["Details", "Capabilities", "Performance"] as const).map((item) => (
-          <button key={item} type="button" onClick={() => onTabChange(item)} className={cn("border-b-2 px-4 py-3 text-sm", tab === item ? "border-blue-400 text-blue-200" : "border-transparent text-slate-400 hover:text-white")}>{item}</button>
+          <button key={item} type="button" onClick={() => onTabChange(item)} className={cn("border-b-2 px-3 py-2.5 text-xs", tab === item ? "border-blue-400 text-blue-200" : "border-transparent text-slate-400 hover:text-white")}>{item}</button>
         ))}
       </div>
       {tab === "Details" ? (
-        <div className="mt-4 rounded-[12px] border border-white/[0.08] bg-white/[0.03] px-4">
+        <div className="mt-3 rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3">
           <KeyValue label="Provider" value={model.provider} />
           <KeyValue label="API Status" value={model.statusLabel} />
           <KeyValue label="Model ID" value={model.id} />
@@ -1345,11 +1345,11 @@ function ModelInspector({
           <KeyValue label="Cost / 1M" value={model.costLabel} />
         </div>
       ) : tab === "Capabilities" ? (
-        <div className="mt-4 flex flex-wrap gap-2">{model.capabilities.map((capability) => <MiniBadge key={capability}>{capability}</MiniBadge>)}</div>
+        <div className="mt-3 flex flex-wrap gap-1.5">{model.capabilities.map((capability) => <MiniBadge key={capability}>{capability}</MiniBadge>)}</div>
       ) : (
         <div className="mt-4">
           <UsageChart />
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="mt-3 grid grid-cols-2 gap-2.5">
             <MetricMini label="Latency" value={model.latencyLabel} />
             <MetricMini label="Rate Limit" value={model.rateLimitLabel} />
           </div>
@@ -1413,11 +1413,11 @@ function IntegrationsPageContent({ snapshot }: { snapshot: MissionControlSnapsho
             <StatCard label="Automations Using" value={String(Math.max(connectedCount, snapshot.channelRegistry.channels.length))} detail="+18% vs last 7d" icon={Workflow} tone="purple" />
           </StatGrid>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             {Array.from(new Set(filteredIntegrations.map((integration) => integration.category))).map((section) => (
               <section key={section}>
-                <h2 className="mb-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-slate-500">{section} ({filteredIntegrations.filter((integration) => integration.category === section).length})</h2>
-                <div className={cn(view === "grid" ? "grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" : "flex flex-col gap-3")}>
+                <h2 className="mb-2 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-slate-500">{section} ({filteredIntegrations.filter((integration) => integration.category === section).length})</h2>
+                <div className={cn(view === "grid" ? "grid gap-2.5 lg:grid-cols-2 min-[1400px]:grid-cols-3" : "flex flex-col gap-2.5")}>
                   {filteredIntegrations.filter((integration) => integration.category === section).map((integration) => (
                     <IntegrationCard key={integration.id} integration={integration} selected={integration.id === selectedIntegration?.id} list={view === "list"} onSelect={() => setSelectedId(integration.id)} />
                   ))}
@@ -1457,27 +1457,27 @@ function IntegrationCard({
         }
       }}
       className={cn(
-        "rounded-[14px] border p-4 text-left transition-all hover:bg-white/[0.055] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
+        "rounded-[12px] border p-3 text-left transition-all hover:bg-white/[0.055] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
         pageSurface,
         selected && "border-blue-400/70 bg-blue-500/[0.08]"
       )}
     >
-      <div className={cn("flex gap-4", list ? "items-center" : "items-start")}>
+      <div className={cn("flex gap-3", list ? "items-center" : "items-start")}>
         <EntityIcon icon={integration.icon} label={integration.name} tone={integration.iconTone} size="lg" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <h3 className="truncate text-base font-semibold text-white">{integration.name}</h3>
-              <p className="mt-1 text-xs text-slate-400">Last sync: {integration.lastSyncLabel}</p>
-              <p className="mt-1 text-xs text-slate-400">Linked: {integration.linkedAgents} agents</p>
+              <h3 className="truncate text-[0.88rem] font-semibold text-white">{integration.name}</h3>
+              <p className="mt-1 text-[0.68rem] text-slate-400">Last sync: {integration.lastSyncLabel}</p>
+              <p className="mt-1 text-[0.68rem] text-slate-400">Linked: {integration.linkedAgents} agents</p>
             </div>
             <StatusBadge label={integration.statusLabel} tone={integration.statusTone} />
           </div>
-          <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="mt-2.5 flex items-center justify-between gap-2">
             <MiniBadge>{integration.category.split(" ")[0]}</MiniBadge>
             <div className="flex gap-2">
-              <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2" onClick={(event) => { event.stopPropagation(); toast.message(`${integration.name} configuration opens from Mission Control when available.`); }}><Gauge className="h-3.5 w-3.5" /></Button>
-              <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2" onClick={(event) => { event.stopPropagation(); toast.message(`${integration.name} linking is local until backend actions are exposed.`); }}><Plug className="h-3.5 w-3.5" /></Button>
+              <Button variant="secondary" size="sm" className="h-7 rounded-[8px] px-2" onClick={(event) => { event.stopPropagation(); toast.message(`${integration.name} configuration opens from Mission Control when available.`); }}><Gauge className="h-3 w-3" /></Button>
+              <Button variant="secondary" size="sm" className="h-7 rounded-[8px] px-2" onClick={(event) => { event.stopPropagation(); toast.message(`${integration.name} linking is local until backend actions are exposed.`); }}><Plug className="h-3 w-3" /></Button>
               <MoreButton />
             </div>
           </div>
@@ -1491,53 +1491,53 @@ function IntegrationInspector({ integration }: { integration: IntegrationView })
   const StatusIcon = integrationStatusIcons[integration.status];
   return (
     <InspectorPanelFrame>
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-3">
         <EntityIcon icon={integration.icon} label={integration.name} tone={integration.iconTone} size="lg" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <h2 className="text-lg font-semibold text-white">{integration.name}</h2>
-              <StatusBadge label={integration.statusLabel} tone={integration.statusTone} className="mt-2" />
+              <h2 className="text-base font-semibold text-white">{integration.name}</h2>
+              <StatusBadge label={integration.statusLabel} tone={integration.statusTone} className="mt-1.5" />
             </div>
             <MoreButton />
           </div>
           <MiniBadge>{integration.category}</MiniBadge>
-          <p className="mt-3 text-sm leading-6 text-slate-300">{integration.description}</p>
+          <p className="mt-2.5 text-xs leading-5 text-slate-300">{integration.description}</p>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("Reconnect uses provider-specific setup in Mission Control.")}><RefreshCw className="mr-2 h-4 w-4" />Reconnect</Button>
-        <Button variant="secondary" className="rounded-[10px]" onClick={() => toast.message("Configure is pending a provider-specific route.")}>Configure</Button>
-        <Button variant="destructive" className="rounded-[10px]" onClick={() => toast.message("Disable is local until integration mutation is exposed.")}>Disable</Button>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Reconnect uses provider-specific setup in Mission Control.")}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Reconnect</Button>
+        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Configure is pending a provider-specific route.")}>Configure</Button>
+        <Button variant="destructive" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Disable is local until integration mutation is exposed.")}>Disable</Button>
       </div>
-      <SectionCard title="Connection Health" className="mt-4">
-        <div className="px-4 py-3">
-          <KeyValue label="Health" value={<span className="inline-flex items-center gap-2"><StatusIcon className="h-4 w-4 text-emerald-300" />{integration.statusLabel}</span>} />
+      <SectionCard title="Connection Health" className="mt-3">
+        <div className="px-3 py-2.5">
+          <KeyValue label="Health" value={<span className="inline-flex items-center gap-1.5"><StatusIcon className="h-3.5 w-3.5 text-emerald-300" />{integration.statusLabel}</span>} />
           <KeyValue label="Last sync" value={integration.lastSyncLabel} />
           <KeyValue label="Uptime" value={integration.status === "connected" ? "99.9%" : "n/a"} />
           <KeyValue label="Rate limit" value={integration.status === "connected" ? "8,432 / 10,000" : "n/a"} />
           <ProgressBar value={integration.status === "connected" ? 84 : 12} tone={integration.statusTone} />
         </div>
       </SectionCard>
-      <SectionCard title="Scopes / Permissions" className="mt-4">
-        <div className="space-y-2 p-4 text-sm text-slate-300">
+      <SectionCard title="Scopes / Permissions" className="mt-3">
+        <div className="space-y-1.5 p-3 text-xs text-slate-300">
           {["Send Messages", "Read Messages", "Manage Chats", "Webhook Access"].map((scope) => (
-            <div key={scope} className="flex items-center gap-2"><CircleCheck className="h-4 w-4 text-emerald-300" />{scope}</div>
+            <div key={scope} className="flex items-center gap-1.5"><CircleCheck className="h-3.5 w-3.5 text-emerald-300" />{scope}</div>
           ))}
         </div>
       </SectionCard>
-      <SectionCard title={`Linked Agents (${integration.linkedAgents})`} className="mt-4" action={<button className="text-xs text-blue-300">View all</button>}>
-        <div className="divide-y divide-white/[0.07] px-4">
+      <SectionCard title={`Linked Agents (${integration.linkedAgents})`} className="mt-3" action={<button className="text-[0.68rem] text-blue-300">View all</button>}>
+        <div className="divide-y divide-white/[0.07] px-3">
           {["Browser Agent", "Campaign Manager", "Support Operator"].map((agent) => (
-            <div key={agent} className="flex items-center justify-between py-3 text-sm">
+            <div key={agent} className="flex items-center justify-between py-2.5 text-xs">
               <span className="text-slate-200">{agent}</span>
               <span className="text-slate-500">›</span>
             </div>
           ))}
         </div>
       </SectionCard>
-      <SectionCard title="Setup Notes" className="mt-4" action={<button className="text-xs text-blue-300">Edit</button>}>
-        <div className="p-4 text-sm leading-6 text-slate-300">
+      <SectionCard title="Setup Notes" className="mt-3" action={<button className="text-[0.68rem] text-blue-300">Edit</button>}>
+        <div className="p-3 text-xs leading-5 text-slate-300">
           Used for real-time alerts and agent handoffs. Webhook URL is masked until a secure reveal action exists.
         </div>
       </SectionCard>
@@ -1549,25 +1549,25 @@ function AutomationImpactSummary({ integrations }: { integrations: IntegrationVi
   const connected = integrations.filter((integration) => integration.status === "connected");
   return (
     <SectionCard title="Automation Impact Summary">
-      <div className="grid gap-3 p-4 lg:grid-cols-[repeat(4,minmax(0,1fr))_1.4fr_0.8fr]">
+      <div className="grid gap-2.5 p-3 lg:grid-cols-[repeat(4,minmax(0,1fr))_1.4fr_0.8fr]">
         <MetricTile icon={Workflow} label="Automations" value={String(Math.max(14, connected.length))} detail="Using integrations" tone="info" />
         <MetricTile icon={Sparkles} label="Triggers fired" value="56" detail="Last 24 hours" tone="success" />
         <MetricTile icon={BellRing} label="Actions executed" value="1,284" detail="Last 24 hours" tone="purple" />
         <MetricTile icon={ShieldCheck} label="Success rate" value="98.3%" detail="Last 7 days" tone="success" />
-        <div className="rounded-[12px] border border-white/[0.08] bg-white/[0.03] p-3">
-          <p className="mb-3 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-slate-500">Top integrations powering automations</p>
+        <div className="rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-2.5">
+          <p className="mb-2.5 text-[0.58rem] font-semibold uppercase tracking-[0.14em] text-slate-500">Top integrations powering automations</p>
           {connected.slice(0, 3).map((integration, index) => (
-            <div key={integration.id} className="mb-2 grid grid-cols-[90px_1fr_auto] items-center gap-3 text-xs">
+            <div key={integration.id} className="mb-2 grid grid-cols-[80px_1fr_auto] items-center gap-2 text-[0.68rem]">
               <span className="truncate text-slate-300">{integration.name}</span>
               <ProgressBar value={72 - index * 15} />
               <span className="text-slate-500">{6 - index} automations</span>
             </div>
           ))}
         </div>
-        <div className="rounded-[12px] border border-white/[0.08] bg-white/[0.03] p-3">
-          <p className="mb-3 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-slate-500">Recently added</p>
+        <div className="rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-2.5">
+          <p className="mb-2.5 text-[0.58rem] font-semibold uppercase tracking-[0.14em] text-slate-500">Recently added</p>
           {integrations.slice(-3).map((integration, index) => (
-            <div key={integration.id} className="flex justify-between gap-3 py-1.5 text-xs">
+            <div key={integration.id} className="flex justify-between gap-2 py-1 text-[0.68rem]">
               <span className="text-slate-300">{integration.name}</span>
               <span className="text-slate-500">{index + 2} days ago</span>
             </div>
@@ -1580,8 +1580,8 @@ function AutomationImpactSummary({ integrations }: { integrations: IntegrationVi
 
 function OperationsPageLayout({ main, inspector }: { main: React.ReactNode; inspector: React.ReactNode }) {
   return (
-    <div className={cn("grid gap-4", inspector ? "xl:grid-cols-[minmax(0,1fr)_360px]" : "xl:grid-cols-1")}>
-      <div className="flex min-w-0 flex-col gap-4">{main}</div>
+    <div className={cn("grid gap-3", inspector ? "xl:grid-cols-[minmax(0,1fr)_320px]" : "xl:grid-cols-1")}>
+      <div className="flex min-w-0 flex-col gap-3">{main}</div>
       {inspector}
     </div>
   );
@@ -1590,8 +1590,8 @@ function OperationsPageLayout({ main, inspector }: { main: React.ReactNode; insp
 function MetricMini({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <p className="truncate text-[0.66rem] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-1 truncate text-sm font-semibold text-white">{value}</p>
+      <p className="truncate text-[0.56rem] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-xs font-semibold text-white">{value}</p>
     </div>
   );
 }
@@ -1610,15 +1610,15 @@ function MetricTile({
   tone: "info" | "success" | "purple";
 }) {
   return (
-    <div className="rounded-[12px] border border-white/[0.08] bg-white/[0.03] p-3">
-      <div className="flex items-center gap-3">
+    <div className="rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-2.5">
+      <div className="flex items-center gap-2.5">
         <EntityIcon icon={Icon} label={label} tone={tone} />
         <span className="min-w-0">
-          <span className="block text-xl font-semibold text-white">{value}</span>
-          <span className="block truncate text-xs text-slate-400">{label}</span>
+          <span className="block text-base font-semibold text-white">{value}</span>
+          <span className="block truncate text-[0.68rem] text-slate-400">{label}</span>
         </span>
       </div>
-      <p className="mt-2 text-xs text-slate-500">{detail}</p>
+      <p className="mt-1.5 text-[0.68rem] text-slate-500">{detail}</p>
     </div>
   );
 }
@@ -1630,7 +1630,7 @@ function UsageChart({ className }: { className?: string }) {
     "M 0 132 C 45 118 72 112 104 108 S 170 116 210 92 S 270 106 320 86"
   ];
   return (
-    <div className={cn("h-48 rounded-[12px] border border-white/[0.08] bg-slate-950/35 p-3", className)}>
+    <div className={cn("h-40 rounded-[10px] border border-white/[0.08] bg-slate-950/35 p-2.5", className)}>
       <svg viewBox="0 0 320 150" className="h-full w-full overflow-visible">
         {[20, 55, 90, 125].map((y) => (
           <line key={y} x1="0" x2="320" y1={y} y2={y} stroke="rgba(255,255,255,0.08)" />

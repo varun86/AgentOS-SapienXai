@@ -28,6 +28,7 @@ export function OperationsShell({
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
     initialSnapshot.workspaces[0]?.id ?? null
   );
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const activeWorkspace = useMemo(
     () =>
       (activeWorkspaceId
@@ -49,14 +50,27 @@ export function OperationsShell({
         />
       </div>
 
-      <div className="fixed left-0 top-0 z-30 hidden h-[100dvh] w-[292px] lg:block">
+      <div
+        className={cn(
+          "fixed left-0 top-0 z-30 hidden h-[100dvh] overflow-hidden bg-[#050a12] shadow-[18px_0_60px_rgba(0,0,0,0.36)] transition-[width] duration-200 ease-out lg:block",
+          sidebarExpanded ? "w-[256px]" : "w-[72px]"
+        )}
+        onMouseEnter={() => setSidebarExpanded(true)}
+        onMouseLeave={() => setSidebarExpanded(false)}
+        onFocusCapture={() => setSidebarExpanded(true)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setSidebarExpanded(false);
+          }
+        }}
+      >
         <MissionSidebar
           snapshot={snapshot}
           surfaceTheme="dark"
           activeWorkspaceId={resolvedWorkspaceId}
           requestedAgentAction={null}
           connectionState={connectionState}
-          collapsed={false}
+          collapsed={!sidebarExpanded}
           modelManager={{
             runState: "idle",
             statusMessage: null,
@@ -67,7 +81,7 @@ export function OperationsShell({
             discoveredModels: [],
             systemReady: snapshot.diagnostics.health === "healthy"
           }}
-          onToggleCollapsed={() => {}}
+          onToggleCollapsed={() => setSidebarExpanded((current) => !current)}
           onSelectWorkspace={setActiveWorkspaceId}
           onRefresh={refresh}
           onRunModelRefresh={() => toast.message("Model refresh is available from Mission Control setup.")}
@@ -83,8 +97,8 @@ export function OperationsShell({
         />
       </div>
 
-      <main className={cn("relative z-20 min-h-screen px-4 py-5 sm:px-6 lg:pl-[316px] lg:pr-5")}>
-        <div className="mx-auto flex w-full max-w-[1880px] flex-col gap-5">
+      <main className={cn("relative z-20 min-h-screen px-4 py-4 sm:px-5 lg:pl-[92px] lg:pr-4")}>
+        <div className="mx-auto flex w-full max-w-[1880px] flex-col gap-3">
           <OperationsTopBar snapshot={snapshot} connectionState={connectionState} />
           {children({
             snapshot,
