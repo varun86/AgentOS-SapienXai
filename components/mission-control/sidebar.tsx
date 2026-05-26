@@ -22,8 +22,7 @@ import {
   Plug,
   Plus,
   Settings2,
-  TerminalSquare,
-  Workflow
+  TerminalSquare
 } from "lucide-react";
 
 import { ChannelBindingPicker } from "@/components/mission-control/channel-binding-picker";
@@ -88,7 +87,7 @@ type AgentDraft = {
   channelIds: string[];
 };
 
-type SidebarSection = "navigation" | "resources" | "admin";
+type SidebarSection = "overview" | "operations" | "system";
 
 type SidebarItem = {
   label: string;
@@ -137,23 +136,21 @@ type MissionSidebarProps = {
 };
 
 const sidebarSections: Array<{ id: SidebarSection; label: string }> = [
-  { id: "navigation", label: "Navigation" },
-  { id: "resources", label: "Resources" },
-  { id: "admin", label: "Admin" }
+  { id: "overview", label: "Overview" },
+  { id: "operations", label: "Operations" },
+  { id: "system", label: "System" }
 ];
 
 const sidebarItems: SidebarItem[] = [
-  { label: "Mission Control", href: "/", icon: Gauge, section: "navigation" },
-  { label: "Agents", href: "/#agents", hash: "agents", icon: Bot, section: "navigation" },
-  { label: "Tasks", href: "/#tasks", hash: "tasks", icon: ClipboardList, section: "navigation" },
-  { label: "Inbox", href: "/#inbox", hash: "inbox", icon: Inbox, badge: 8, section: "navigation" },
-  { label: "Automations", href: "/#automations", hash: "automations", icon: Workflow, section: "navigation" },
-  { label: "Approvals", href: "/#approvals", hash: "approvals", icon: CheckCircle2, badge: 3, section: "navigation" },
-  { label: "Files", href: "/#files", hash: "files", icon: FileText, section: "resources" },
-  { label: "Models", href: "/#models", hash: "models", icon: Cpu, section: "resources" },
-  { label: "Integrations", href: "/#integrations", hash: "integrations", icon: Plug, section: "resources" },
-  { label: "Settings", href: "/settings", icon: Settings2, section: "admin" },
-  { label: "Diagnostics", href: "/settings#diagnostics", hash: "diagnostics", icon: TerminalSquare, section: "admin" }
+  { label: "Mission Control", href: "/", icon: Gauge, section: "overview" },
+  { label: "Dashboard", href: "/#dashboard", hash: "dashboard", icon: Inbox, section: "overview" },
+  { label: "Agents", href: "/agents", icon: Bot, section: "operations" },
+  { label: "Tasks", href: "/tasks", icon: ClipboardList, section: "operations" },
+  { label: "Files", href: "/files", icon: FileText, section: "operations" },
+  { label: "Models", href: "/models", icon: Cpu, section: "operations" },
+  { label: "Integrations", href: "/integrations", icon: Plug, section: "operations" },
+  { label: "Settings", href: "/settings", icon: Settings2, section: "system" },
+  { label: "Diagnostics", href: "/settings#diagnostics", hash: "diagnostics", icon: TerminalSquare, section: "system" }
 ];
 
 export function MissionSidebar({
@@ -1243,6 +1240,10 @@ function CollapsedSidebar({
 function isSidebarItemActive(item: SidebarItem, pathname: string, activeHash: string) {
   if (item.label === "Mission Control") {
     return pathname === "/" && (!activeHash || activeHash === "mission-control");
+  }
+
+  if (item.href && !item.hash && item.href !== "/" && !item.href.startsWith("/settings")) {
+    return pathname === item.href || pathname.startsWith(`${item.href}/`);
   }
 
   if (item.href?.startsWith("/settings")) {
