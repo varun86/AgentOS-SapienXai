@@ -974,6 +974,7 @@ export interface WorkspaceCreateResult {
   kickoffRunId?: string;
   kickoffStatus?: string;
   kickoffError?: string;
+  warnings?: string[];
 }
 
 export type WorkspaceCreateStreamEvent =

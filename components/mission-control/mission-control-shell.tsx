@@ -2263,6 +2263,12 @@ export function MissionControlShell({
         description: `${result.agentIds.length} agent${result.agentIds.length === 1 ? "" : "s"} created at ${result.workspacePath}`
       });
 
+      if (result.warnings?.length) {
+        toast.message("Workspace created with a sync warning.", {
+          description: result.warnings[0]
+        });
+      }
+
       if (result.kickoffError) {
         toast.message("Workspace created, but kickoff needs attention.", {
           description: result.kickoffError

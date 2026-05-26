@@ -49,6 +49,7 @@ export type WebSocketLike = {
   readonly readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  terminate?: () => void;
   addEventListener?: (type: string, listener: (event: unknown) => void) => void;
   removeEventListener?: (type: string, listener: (event: unknown) => void) => void;
   on?: (type: string, listener: (...args: unknown[]) => void) => void;

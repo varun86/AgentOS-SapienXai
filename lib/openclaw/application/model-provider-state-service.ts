@@ -73,7 +73,7 @@ const openClawAuthProfilesPath = path.join(
   "auth-profiles.json"
 );
 const legacyProviderFileFallbackEnv = "AGENTOS_OPENCLAW_LEGACY_PROVIDER_FILE_FALLBACK";
-const gatewayConfigPatchRetryDelaysMs = [750, 1_500, 3_000, 5_000, 8_000, 12_000];
+const gatewayConfigPatchRetryDelaysMs = [750, 1_500, 3_000];
 const maxInlineGatewayConfigRateLimitRetryMs = 3_000;
 
 type OpenClawAgentDefaultsConfig = NonNullable<NonNullable<OpenClawConfigPayload["agents"]>["defaults"]>;

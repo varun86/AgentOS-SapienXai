@@ -22,6 +22,7 @@ import {
 import {
   createAgent,
   deleteAgent,
+  formatPostCreateAgentConfigSyncWarning,
   updateAgent
 } from "@/lib/openclaw/application/agent-service";
 import {
@@ -232,6 +233,7 @@ export async function createWorkspaceProject(
   await progress.completeStep("scaffold", "Workspace files and starter docs are in place.");
 
   const createdAgentIds: string[] = [];
+  const syncWarnings: string[] = [];
 
   await progress.startStep(
     "agents",
@@ -249,15 +251,31 @@ export async function createWorkspaceProject(
     });
     await progress.addActivity("agents", `Creating ${agent.name} (${agent.role}).`);
 
-    const createdAgentId = await createBootstrappedWorkspaceAgentFromProvisioning({
-      workspacePath: targetDir,
-      workspaceSlug: normalized.slug,
-      workspaceModelId,
-      agent
-    });
+    const expectedAgentId = createWorkspaceAgentIdFromProvisioning(normalized.slug, agent.id);
+    let createdAgentId: string;
+    let agentSyncWarning: string | null = null;
+
+    try {
+      createdAgentId = await createBootstrappedWorkspaceAgentFromProvisioning({
+        workspacePath: targetDir,
+        workspaceSlug: normalized.slug,
+        workspaceModelId,
+        agent
+      });
+    } catch (error) {
+      agentSyncWarning = assertWorkspacePostCreateConfigSyncWarning(error);
+      syncWarnings.push(agentSyncWarning);
+      createdAgentId = expectedAgentId;
+    }
     createdAgentIds.push(createdAgentId);
 
-    await progress.addActivity("agents", `Created ${agent.name} as ${createdAgentId}.`, "done");
+    await progress.addActivity(
+      "agents",
+      agentSyncWarning
+        ? `Created ${agent.name} as ${createdAgentId}; config sync needs a Gateway refresh.`
+        : `Created ${agent.name} as ${createdAgentId}.`,
+      "done"
+    );
     await progress.updateStep("agents", {
       percent: Math.round((createdAgentIds.length / enabledAgents.length) * 100),
       detail: `${createdAgentIds.length} of ${enabledAgents.length} agent${enabledAgents.length === 1 ? "" : "s"} ready.`
@@ -269,7 +287,12 @@ export async function createWorkspaceProject(
   );
 
   invalidateSnapshotCache();
-  await syncWorkspaceAgentPolicySkills(targetDir);
+  try {
+    await syncWorkspaceAgentPolicySkills(targetDir);
+  } catch (error) {
+    syncWarnings.push(assertWorkspacePostCreateConfigSyncWarning(error));
+    await progress.addActivity("agents", "Agent policy config sync needs a Gateway refresh.", "done");
+  }
   await syncWorkspaceAgentsMarkdown(targetDir);
 
   const primaryAgentId =
@@ -332,8 +355,29 @@ export async function createWorkspaceProject(
     primaryAgentId,
     kickoffRunId,
     kickoffStatus,
-    kickoffError
+    kickoffError,
+    warnings: uniqueStrings(syncWarnings)
   };
+}
+
+export function formatPostCreateWorkspaceConfigSyncWarning(error: unknown) {
+  const agentWarning = formatPostCreateAgentConfigSyncWarning(error);
+
+  if (!agentWarning) {
+    return null;
+  }
+
+  return "AgentOS created the workspace, but OpenClaw could not finish the agent config sync in time. Restart or refresh the OpenClaw Gateway if the workspace agent profile looks incomplete, then refresh AgentOS.";
+}
+
+function assertWorkspacePostCreateConfigSyncWarning(error: unknown) {
+  const warning = formatPostCreateWorkspaceConfigSyncWarning(error);
+
+  if (!warning) {
+    throw error;
+  }
+
+  return warning;
 }
 
 export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {

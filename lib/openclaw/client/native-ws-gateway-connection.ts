@@ -337,12 +337,45 @@ export class PersistentOpenClawGatewayConnection {
       }
     }
 
-    if (options.closeSocket && socket && socket.readyState !== 3) {
-      try {
-        socket.close();
-      } catch {
-        // Ignore close errors during connection cleanup.
-      }
+    if (options.closeSocket && socket) {
+      closeSocketForDisconnect(socket);
     }
+  }
+}
+
+function closeSocketForDisconnect(socket: WebSocketLike) {
+  if (socket.readyState === 3) {
+    return;
+  }
+
+  let cleanupErrorListener: (() => void) | null = addSocketListener(socket, "error", () => {
+    // A Node ws socket can emit "WebSocket was closed before the connection was established"
+    // after cleanup removed the normal error listener. The stale socket is already detached.
+  });
+  const cleanupTimer = globalThis.setTimeout(() => {
+    cleanupErrorListener?.();
+    cleanupErrorListener = null;
+  }, 5_000);
+
+  if (
+    typeof cleanupTimer === "object" &&
+    cleanupTimer &&
+    "unref" in cleanupTimer &&
+    typeof cleanupTimer.unref === "function"
+  ) {
+    cleanupTimer.unref();
+  }
+
+  try {
+    if (socket.readyState === 0 && typeof socket.terminate === "function") {
+      socket.terminate();
+      return;
+    }
+
+    socket.close();
+  } catch {
+    cleanupErrorListener?.();
+    cleanupErrorListener = null;
+    globalThis.clearTimeout(cleanupTimer);
   }
 }

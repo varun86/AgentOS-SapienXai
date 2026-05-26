@@ -86,6 +86,7 @@ export function CreateAgentDialog({
   const [isSaving, setIsSaving] = useState(false);
   const [createProgress, setCreateProgress] = useState<CreateAgentProgress>("idle");
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
+  const [createdAgentWarning, setCreatedAgentWarning] = useState<string | null>(null);
   const isSubmittingRef = useRef(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<AgentDraft>(() => createCustomAgentDraft(initialWorkspaceId, snapshot));
@@ -172,6 +173,7 @@ export function CreateAgentDialog({
     setIsSaving(false);
     setCreateProgress("idle");
     setCreatedAgentId(null);
+    setCreatedAgentWarning(null);
     if (createSyncTimeoutRef.current) {
       clearTimeout(createSyncTimeoutRef.current);
       createSyncTimeoutRef.current = null;
@@ -233,13 +235,21 @@ export function CreateAgentDialog({
 
     onAgentCreatedVisible?.(createdAgentId);
     onAgentCreated?.(createdAgentId);
-    toast.success("Agent created in OpenClaw.", {
-      description: createdAgentId
-    });
+    if (createdAgentWarning) {
+      toast.message("Agent created with a sync warning.", {
+        description: createdAgentWarning
+      });
+    } else {
+      toast.success("Agent created in OpenClaw.", {
+        description: createdAgentId
+      });
+    }
     setCreateProgress("idle");
     setCreatedAgentId(null);
+    setCreatedAgentWarning(null);
+    setIsSaving(false);
     setOpen(false);
-  }, [createProgress, createdAgentId, createdAgentVisible, onAgentCreated, onAgentCreatedVisible]);
+  }, [createProgress, createdAgentId, createdAgentVisible, createdAgentWarning, onAgentCreated, onAgentCreatedVisible]);
 
   useEffect(() => {
     if (createProgress !== "syncing" || !createdAgentId || createdAgentVisible) {
@@ -253,11 +263,13 @@ export function CreateAgentDialog({
     createSyncTimeoutRef.current = setTimeout(() => {
       createSyncTimeoutRef.current = null;
       onAgentCreated?.(createdAgentId);
-      toast.message("Agent created.", {
-        description: "The canvas is taking longer than usual to refresh."
+      toast.message(createdAgentWarning ? "Agent created with a sync warning." : "Agent created.", {
+        description: createdAgentWarning ?? "The canvas is taking longer than usual to refresh."
       });
       setCreateProgress("idle");
       setCreatedAgentId(null);
+      setCreatedAgentWarning(null);
+      setIsSaving(false);
       setOpen(false);
     }, 12000);
 
@@ -267,7 +279,7 @@ export function CreateAgentDialog({
         createSyncTimeoutRef.current = null;
       }
     };
-  }, [createProgress, createdAgentId, createdAgentVisible, onAgentCreated]);
+  }, [createProgress, createdAgentId, createdAgentVisible, createdAgentWarning, onAgentCreated]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && (isSaving || createProgress !== "idle")) {
@@ -397,6 +409,7 @@ export function CreateAgentDialog({
     setIsSaving(true);
     setCreateProgress("creating");
     setCreatedAgentId(null);
+    setCreatedAgentWarning(null);
 
     try {
       const response = await fetch("/api/agents", {
@@ -411,7 +424,12 @@ export function CreateAgentDialog({
         })
       });
 
-      const result = (await response.json()) as { agentId?: string; error?: string };
+      const result = (await response.json()) as {
+        agentId?: string;
+        error?: string;
+        warning?: string;
+        warnings?: string[];
+      };
 
       if (!response.ok || result.error || !result.agentId) {
         throw new Error(result.error || "OpenClaw could not create the agent.");
@@ -430,6 +448,7 @@ export function CreateAgentDialog({
 
       setCreateProgress("syncing");
       setCreatedAgentId(result.agentId);
+      setCreatedAgentWarning(result.warning ?? result.warnings?.[0] ?? null);
 
       void onRefresh().catch(() => {});
     } catch (error) {
@@ -440,6 +459,7 @@ export function CreateAgentDialog({
 
       setCreateProgress("idle");
       setCreatedAgentId(null);
+      setCreatedAgentWarning(null);
       setIsSaving(false);
       toast.error("Agent creation failed.", {
         description: error instanceof Error ? error.message : "Unknown agent error."

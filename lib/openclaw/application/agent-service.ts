@@ -127,6 +127,7 @@ export async function createAgent(input: AgentCreateInput) {
   const setupAgentId =
     snapshot.agents.find((entry) => entry.workspaceId === resolvedWorkspaceId && entry.policy.preset === "setup")?.id ?? null;
   const agentDir = buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId);
+  const syncWarnings: string[] = [];
 
   await getOpenClawAdapter().addAgent({
     id: agentId,
@@ -150,32 +151,36 @@ export async function createAgent(input: AgentCreateInput) {
     await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
-  await upsertAgentConfigEntryWithRecovery(
-    agentId,
-    resolvedWorkspacePath,
-    {
-      agentDir,
-      name: displayName,
-      model: agentModelId,
-      heartbeat,
-      skills: uniqueStrings([...declaredSkillIds, policySkillId]),
-      tools:
-        policy.fileAccess === "workspace-only"
-          ? {
-              fs: {
-                workspaceOnly: true
-              }
-            }
-          : null,
-      identity: {
+  try {
+    await upsertAgentConfigEntryWithRecovery(
+      agentId,
+      resolvedWorkspacePath,
+      {
+        agentDir,
         name: displayName,
-        emoji,
-        theme,
-        avatar
-      }
-    },
-    snapshot
-  );
+        model: agentModelId,
+        heartbeat,
+        skills: uniqueStrings([...declaredSkillIds, policySkillId]),
+        tools:
+          policy.fileAccess === "workspace-only"
+            ? {
+                fs: {
+                  workspaceOnly: true
+                }
+              }
+            : null,
+        identity: {
+          name: displayName,
+          emoji,
+          theme,
+          avatar
+        }
+      },
+      snapshot
+    );
+  } catch (error) {
+    syncWarnings.push(assertPostCreateAgentConfigSyncWarning(error));
+  }
 
   await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,
@@ -200,14 +205,60 @@ export async function createAgent(input: AgentCreateInput) {
   await removeLegacyAgentContextFiles(agentId, resolvedWorkspacePath, agentDir);
 
   invalidateMissionControlSnapshotCache();
-  await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
+  try {
+    await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
+  } catch (error) {
+    syncWarnings.push(assertPostCreateAgentConfigSyncWarning(error));
+  }
 
   return {
     agentId,
-    workspaceId: resolvedWorkspaceId
+    workspaceId: resolvedWorkspaceId,
+    warnings: uniqueStrings(syncWarnings)
   };
 }
 
+export function formatPostCreateAgentConfigSyncWarning(error: unknown) {
+  const message = readErrorMessage(error);
+
+  if (!isTransientGatewayConfigSyncFailure(message)) {
+    return null;
+  }
+
+  return "AgentOS created the agent, but OpenClaw could not finish the config sync in time. Restart or refresh the OpenClaw Gateway if the agent profile looks incomplete, then refresh AgentOS.";
+}
+
+function assertPostCreateAgentConfigSyncWarning(error: unknown) {
+  const warning = formatPostCreateAgentConfigSyncWarning(error);
+
+  if (!warning) {
+    throw error;
+  }
+
+  return warning;
+}
+
+function isTransientGatewayConfigSyncFailure(message: string) {
+  if (!message) {
+    return false;
+  }
+
+  if (
+    /Refusing to write a redacted OpenClaw secret|path traversal|Workspace was not found|already exists/i.test(message)
+  ) {
+    return false;
+  }
+
+  return /Timed out waiting for OpenClaw Gateway method "config\.(?:patch|apply|set)"|UNAVAILABLE:.*config\.(?:patch|apply|set)|Gateway-native operation failed; CLI fallback disabled/i.test(message);
+}
+
+function readErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return typeof error === "string" ? error : "";
+}
 export async function updateAgent(input: AgentUpdateInput) {
   const agentId = input.id.trim();
 

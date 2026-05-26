@@ -7,6 +7,7 @@ import {
 import {
   createWorkspaceProject as createApplicationWorkspaceProject,
   deleteWorkspaceProject as deleteApplicationWorkspaceProject,
+  formatPostCreateWorkspaceConfigSyncWarning,
   readWorkspaceEditSeed as readApplicationWorkspaceEditSeed,
   updateWorkspaceProject as updateApplicationWorkspaceProject
 } from "@/lib/openclaw/application/workspace-service";
@@ -106,6 +107,24 @@ test("workspace application service preserves delete validation shape", async ()
   assert.equal(
     await readErrorMessage(() => deleteApplicationWorkspaceProject(input)),
     await readErrorMessage(() => deleteCompatibilityWorkspaceProject(input))
+  );
+});
+
+test("workspace creation treats post-create Gateway config timeouts as sync warnings", () => {
+  const warning = formatPostCreateWorkspaceConfigSyncWarning(
+    new Error(
+      'Timed out waiting for OpenClaw Gateway method "config.patch". Gateway-native operation failed; CLI fallback disabled for this operation.'
+    )
+  );
+
+  assert.match(warning ?? "", /AgentOS created the workspace/);
+  assert.match(warning ?? "", /agent config sync/);
+});
+
+test("workspace creation does not downgrade validation failures to sync warnings", () => {
+  assert.equal(
+    formatPostCreateWorkspaceConfigSyncWarning(new Error('Agent id "main" already exists in workspace "Workspace".')),
+    null
   );
 });
 

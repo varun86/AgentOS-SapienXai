@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   createAgent as createApplicationAgent,
   deleteAgent as deleteApplicationAgent,
+  formatPostCreateAgentConfigSyncWarning,
   updateAgent as updateApplicationAgent
 } from "@/lib/openclaw/application/agent-service";
 import {
@@ -53,5 +54,27 @@ test("agent application service preserves delete validation shape", async () => 
   assert.equal(
     await readErrorMessage(() => deleteApplicationAgent(input)),
     await readErrorMessage(() => deleteCompatibilityAgent(input))
+  );
+});
+
+test("agent creation treats post-create Gateway config timeouts as sync warnings", () => {
+  const warning = formatPostCreateAgentConfigSyncWarning(
+    new Error(
+      'Timed out waiting for OpenClaw Gateway method "config.patch". Gateway-native operation failed; CLI fallback disabled for this operation.'
+    )
+  );
+
+  assert.match(warning ?? "", /AgentOS created the agent/);
+  assert.match(warning ?? "", /config sync/);
+});
+
+test("agent creation does not downgrade validation failures to sync warnings", () => {
+  assert.equal(
+    formatPostCreateAgentConfigSyncWarning(new Error('Agent id "main" already exists in workspace "Workspace".')),
+    null
+  );
+  assert.equal(
+    formatPostCreateAgentConfigSyncWarning(new Error("Refusing to write a redacted OpenClaw secret.")),
+    null
   );
 });

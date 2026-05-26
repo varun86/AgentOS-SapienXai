@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2119,6 +2120,54 @@ test("native WS gateway client refuses redacted config writes without CLI fallba
   );
   assert.deepEqual(sentFrames, []);
   assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client does not surface stale connecting socket close errors", async () => {
+  const fallback = new FallbackGatewayClient();
+  let terminated = false;
+
+  class ClosingBeforeOpenSocket extends EventEmitter {
+    readyState = 0;
+
+    constructor(readonly url: string) {
+      super();
+    }
+
+    send() {
+      throw new Error("socket is not open");
+    }
+
+    close() {
+      this.readyState = 3;
+      this.emit("close", 1006, "closed before open");
+      globalThis.queueMicrotask(() => {
+        this.emit("error", new Error("WebSocket was closed before the connection was established"));
+      });
+    }
+
+    terminate() {
+      terminated = true;
+      this.readyState = 3;
+      this.emit("close", 1006, "terminated before open");
+      globalThis.queueMicrotask(() => {
+        this.emit("error", new Error("WebSocket was closed before the connection was established"));
+      });
+    }
+  }
+
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: ClosingBeforeOpenSocket as unknown as WebSocketFactory,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 5
+  });
+
+  await assert.rejects(
+    () => client.listAgents(),
+    /Timed out connecting to OpenClaw Gateway/
+  );
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+  assert.equal(terminated, true);
 });
 
 test("native WS gateway client surfaces native failure without CLI fallback after Gateway failure", async () => {
