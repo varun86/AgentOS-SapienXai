@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
@@ -40,6 +40,8 @@ import {
   X
 } from "lucide-react";
 
+import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
+import { WorkspaceChannelsDialog } from "@/components/mission-control/workspace-channels-dialog";
 import { OperationsShell } from "@/components/operations/operations-shell";
 import {
   EmptyState,
@@ -82,8 +84,15 @@ import {
   type TaskView
 } from "@/components/operations/operations-data";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
-import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
+import type { AddModelsProviderId, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import type {
   WorkspaceManagedFile,
   WorkspaceManagedFileListResponse
@@ -103,11 +112,17 @@ export function OperationsPage({
     <OperationsShell initialSnapshot={initialSnapshot}>
       {(context) => {
         if (page === "agents") {
-          return <AgentsPageContent snapshot={context.snapshot} />;
+          return <AgentsPageContent snapshot={context.snapshot} activeWorkspaceId={context.activeWorkspaceId} />;
         }
 
         if (page === "tasks") {
-          return <TasksPageContent snapshot={context.snapshot} refresh={context.refresh} />;
+          return (
+            <TasksPageContent
+              snapshot={context.snapshot}
+              activeWorkspaceId={context.activeWorkspaceId}
+              refresh={context.refresh}
+            />
+          );
         }
 
         if (page === "files") {
@@ -120,17 +135,34 @@ export function OperationsPage({
         }
 
         if (page === "models") {
-          return <ModelsPageContent snapshot={context.snapshot} />;
+          return <ModelsPageContent snapshot={context.snapshot} activeWorkspaceId={context.activeWorkspaceId} />;
         }
 
-        return <IntegrationsPageContent snapshot={context.snapshot} />;
+        return (
+          <IntegrationsPageContent
+            snapshot={context.snapshot}
+            rootSnapshot={context.rootSnapshot}
+            activeWorkspaceId={context.activeWorkspaceId}
+            refresh={context.refresh}
+            setSnapshot={context.setSnapshot}
+          />
+        );
       }}
     </OperationsShell>
   );
 }
 
-function AgentsPageContent({ snapshot }: { snapshot: MissionControlSnapshot }) {
-  const agents = useMemo(() => buildAgentViews(snapshot), [snapshot]);
+function AgentsPageContent({
+  snapshot,
+  activeWorkspaceId
+}: {
+  snapshot: MissionControlSnapshot;
+  activeWorkspaceId: string | null;
+}) {
+  const agents = useMemo(
+    () => buildAgentViews(snapshot, { useExamples: !activeWorkspaceId }),
+    [activeWorkspaceId, snapshot]
+  );
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<AgentFilter>("all");
   const [view, setView] = useState<"grid" | "list">("grid");
@@ -414,12 +446,17 @@ function RecentAgentActivity({ snapshot, agents }: { snapshot: MissionControlSna
 
 function TasksPageContent({
   snapshot,
+  activeWorkspaceId,
   refresh
 }: {
   snapshot: MissionControlSnapshot;
+  activeWorkspaceId: string | null;
   refresh: () => Promise<void>;
 }) {
-  const tasks = useMemo(() => buildTaskViews(snapshot), [snapshot]);
+  const tasks = useMemo(
+    () => buildTaskViews(snapshot, { useExamples: !activeWorkspaceId }),
+    [activeWorkspaceId, snapshot]
+  );
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | TaskView["status"]>("all");
   const [view, setView] = useState<"board" | "list">("board");
@@ -811,24 +848,25 @@ function FilesPageContent({
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
 }) {
-  const activeWorkspace =
-    snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? snapshot.workspaces[0] ?? null;
-  const workspaceAgents = useMemo(
-    () => (activeWorkspace ? snapshot.agents.filter((agent) => agent.workspaceId === activeWorkspace.id) : []),
-    [activeWorkspace, snapshot.agents]
+  const activeWorkspace = activeWorkspaceId
+    ? snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null
+    : null;
+  const visibleWorkspaces = useMemo(
+    () => (activeWorkspaceId ? (activeWorkspace ? [activeWorkspace] : []) : snapshot.workspaces),
+    [activeWorkspace, activeWorkspaceId, snapshot.workspaces]
   );
-  const [files, setFiles] = useState<WorkspaceManagedFile[]>([]);
+  const [filesByWorkspace, setFilesByWorkspace] = useState<Record<string, WorkspaceManagedFile[]>>({});
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [collection, setCollection] = useState("All Files");
   const [view, setView] = useState<"grid" | "list">("list");
-  const [selectedPath, setSelectedPath] = useState("");
+  const [selectedFileId, setSelectedFileId] = useState("");
   const [tab, setTab] = useState<"Details" | "Versions" | "Activity">("Details");
 
   useEffect(() => {
-    if (!activeWorkspace) {
-      setFiles([]);
+    if (visibleWorkspaces.length === 0) {
+      setFilesByWorkspace({});
       setFileError(null);
       return;
     }
@@ -838,45 +876,62 @@ function FilesPageContent({
     setFileError(null);
 
     void (async () => {
-      try {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(activeWorkspace.id)}/files`, {
-          cache: "no-store"
-        });
-        const result = (await response.json()) as WorkspaceManagedFileListResponse & { error?: string };
-        if (!response.ok || result.error) {
-          throw new Error(result.error || "Workspace files could not be loaded.");
+      const entries = await Promise.all(
+        visibleWorkspaces.map(async (workspace) => {
+          try {
+            const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace.id)}/files`, {
+              cache: "no-store"
+            });
+            const result = (await response.json()) as WorkspaceManagedFileListResponse & { error?: string };
+            if (!response.ok || result.error) {
+              throw new Error(result.error || "Workspace files could not be loaded.");
+            }
+            return { workspaceId: workspace.id, files: result.files, error: null as string | null };
+          } catch (error) {
+            return {
+              workspaceId: workspace.id,
+              files: [] as WorkspaceManagedFile[],
+              error: `${workspace.name}: ${error instanceof Error ? error.message : "Workspace files could not be loaded."}`
+            };
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setFilesByWorkspace(
+          Object.fromEntries(entries.map((entry) => [entry.workspaceId, entry.files]))
+        );
+        const errors = entries.map((entry) => entry.error).filter((error): error is string => Boolean(error));
+        if (errors.length > 0) {
+          setFileError(errors.join(" "));
         }
-        if (!cancelled) {
-          setFiles(result.files);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setFiles([]);
-          setFileError(error instanceof Error ? error.message : "Workspace files could not be loaded.");
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingFiles(false);
-        }
+        setIsLoadingFiles(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspace]);
+  }, [visibleWorkspaces]);
 
   const fileViews = useMemo(
-    () => buildFileViews(files, activeWorkspace, workspaceAgents),
-    [activeWorkspace, files, workspaceAgents]
+    () =>
+      visibleWorkspaces.flatMap((workspace) =>
+        buildFileViews(
+          filesByWorkspace[workspace.id] ?? [],
+          workspace,
+          snapshot.agents.filter((agent) => agent.workspaceId === workspace.id)
+        )
+      ),
+    [filesByWorkspace, snapshot.agents, visibleWorkspaces]
   );
 
-  const selectedFile = fileViews.find((file) => file.path === selectedPath) ?? fileViews[0] ?? null;
+  const selectedFile = fileViews.find((file) => file.id === selectedFileId) ?? fileViews[0] ?? null;
   const filteredFiles = fileViews.filter((file) => {
     const query = search.trim().toLowerCase();
     const matchesSearch =
       !query ||
-      [file.name, file.path, file.type, file.owner, ...file.tags].join(" ").toLowerCase().includes(query);
+      [file.name, file.path, file.type, file.owner, file.workspaceName, ...file.tags].join(" ").toLowerCase().includes(query);
     const matchesCollection = collection === "All Files" || file.collection === collection;
     return matchesSearch && matchesCollection;
   });
@@ -887,8 +942,8 @@ function FilesPageContent({
   const collectionItems = ["All Files", "Core Knowledge", "Memory", "Generated Outputs", "Reports", "Screenshots", "Datasets", "Campaigns", "Archived", "Trash"];
 
   const revealFile = async (file: FileView) => {
-    if (!activeWorkspace) {
-      toast.message("No workspace is selected.");
+    if (!file.workspacePath) {
+      toast.message("This file is not attached to a workspace.");
       return;
     }
 
@@ -896,7 +951,7 @@ function FilesPageContent({
       const response = await fetch("/api/files/reveal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: file.source?.path ?? file.path.replace(/^\//, ""), basePath: activeWorkspace.path })
+        body: JSON.stringify({ path: file.source?.path ?? file.relativePath, basePath: file.workspacePath })
       });
       const result = (await response.json()) as { error?: string };
       if (!response.ok || result.error) {
@@ -978,11 +1033,11 @@ function FilesPageContent({
 
             <SectionCard title={`Files (${fileViews.length})`}>
               {view === "list" ? (
-                <FilesTable files={filteredFiles} selectedPath={selectedFile?.path} onSelect={setSelectedPath} />
+                <FilesTable files={filteredFiles} selectedId={selectedFile?.id} onSelect={setSelectedFileId} />
               ) : (
                 <div className="grid gap-2.5 p-3 lg:grid-cols-2 2xl:grid-cols-3">
                   {filteredFiles.map((file) => (
-                    <button key={file.path} type="button" onClick={() => setSelectedPath(file.path)} className={cn("rounded-[10px] border p-3 text-left hover:bg-white/[0.05]", file.path === selectedFile?.path ? "border-blue-400/60 bg-blue-500/[0.08]" : "border-white/[0.08] bg-white/[0.03]")}>
+                    <button key={file.id} type="button" onClick={() => setSelectedFileId(file.id)} className={cn("rounded-[10px] border p-3 text-left hover:bg-white/[0.05]", file.id === selectedFile?.id ? "border-blue-400/60 bg-blue-500/[0.08]" : "border-white/[0.08] bg-white/[0.03]")}>
                       <div className="flex items-start gap-2.5">
                         <EntityIcon icon={file.icon} label={file.name} tone={file.iconTone} />
                         <span className="min-w-0">
@@ -1010,12 +1065,12 @@ function FilesPageContent({
 
 function FilesTable({
   files,
-  selectedPath,
+  selectedId,
   onSelect
 }: {
   files: FileView[];
-  selectedPath?: string;
-  onSelect: (path: string) => void;
+  selectedId?: string;
+  onSelect: (id: string) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -1036,17 +1091,17 @@ function FilesTable({
         <tbody className="divide-y divide-white/[0.06] text-slate-300">
           {files.map((file) => (
             <tr
-              key={file.path}
-              onClick={() => onSelect(file.path)}
-              className={cn("cursor-pointer hover:bg-white/[0.035]", file.path === selectedPath && "bg-blue-500/[0.10] outline outline-1 outline-blue-400/50")}
+              key={file.id}
+              onClick={() => onSelect(file.id)}
+              className={cn("cursor-pointer hover:bg-white/[0.035]", file.id === selectedId && "bg-blue-500/[0.10] outline outline-1 outline-blue-400/50")}
             >
-              <td className="px-3 py-2.5"><span className={cn("flex h-3.5 w-3.5 items-center justify-center rounded border", file.path === selectedPath ? "border-blue-400 bg-blue-500 text-white" : "border-white/[0.14]")}><Check className="h-2.5 w-2.5" /></span></td>
+              <td className="px-3 py-2.5"><span className={cn("flex h-3.5 w-3.5 items-center justify-center rounded border", file.id === selectedId ? "border-blue-400 bg-blue-500 text-white" : "border-white/[0.14]")}><Check className="h-2.5 w-2.5" /></span></td>
               <td className="px-2 py-2.5">
                 <div className="flex items-center gap-2.5">
                   <EntityIcon icon={file.icon} label={file.name} tone={file.iconTone} size="sm" />
                   <span className="min-w-0">
                     <span className="block truncate font-semibold text-white">{file.name}</span>
-                    <span className="mt-0.5 block truncate text-[0.66rem] text-slate-500">{file.path}</span>
+                    <span className="mt-0.5 block truncate text-[0.66rem] text-slate-500">{file.workspaceName} · {file.path}</span>
                   </span>
                 </div>
               </td>
@@ -1112,6 +1167,7 @@ function FileInspector({
             <KeyValue label="Type" value={file.type} />
             <KeyValue label="Size" value={file.sizeLabel} />
             <KeyValue label="Last Updated" value={file.updatedLabel} />
+            <KeyValue label="Workspace" value={file.workspaceName} />
             <KeyValue label="Owner / Agent" value={file.owner} />
             <KeyValue label="Linked Task" value={`${file.tasks} tasks`} />
           </div>
@@ -1154,8 +1210,17 @@ function FileInspector({
   );
 }
 
-function ModelsPageContent({ snapshot }: { snapshot: MissionControlSnapshot }) {
-  const models = useMemo(() => buildModelViews(snapshot), [snapshot]);
+function ModelsPageContent({
+  snapshot,
+  activeWorkspaceId
+}: {
+  snapshot: MissionControlSnapshot;
+  activeWorkspaceId: string | null;
+}) {
+  const models = useMemo(
+    () => buildModelViews(snapshot, { useExamples: !activeWorkspaceId }),
+    [activeWorkspaceId, snapshot]
+  );
   const [search, setSearch] = useState("");
   const [provider, setProvider] = useState("All Providers");
   const [selectedId, setSelectedId] = useState(models[0]?.id ?? "");
@@ -1359,78 +1424,480 @@ function ModelInspector({
   );
 }
 
-function IntegrationsPageContent({ snapshot }: { snapshot: MissionControlSnapshot }) {
-  const integrations = useMemo(() => buildIntegrationViews(snapshot), [snapshot]);
+type IntegrationSortMode = "last-active" | "name" | "status" | "category";
+type IntegrationRuntimeOverride = Partial<Pick<
+  IntegrationView,
+  "status" | "statusLabel" | "statusTone" | "connectionHealth" | "lastSyncLabel" | "uptimeLabel" | "rateLimitLabel" | "errorMessage"
+>> & {
+  sourceMethods?: string[];
+};
+
+const integrationStatusToneMap: Record<IntegrationStatus, IntegrationView["statusTone"]> = {
+  connected: "success",
+  disabled: "muted",
+  "pending-setup": "warning",
+  failed: "danger",
+  "needs-authentication": "warning",
+  "missing-credentials": "warning",
+  unsupported: "muted",
+  unknown: "muted"
+};
+
+function IntegrationsPageContent({
+  snapshot,
+  rootSnapshot,
+  activeWorkspaceId,
+  refresh,
+  setSnapshot
+}: {
+  snapshot: MissionControlSnapshot;
+  rootSnapshot: MissionControlSnapshot;
+  activeWorkspaceId: string | null;
+  refresh: () => Promise<void>;
+  setSnapshot: Dispatch<SetStateAction<MissionControlSnapshot>>;
+}) {
+  const baseIntegrations = useMemo(() => buildIntegrationViews(snapshot), [snapshot]);
+  const [runtimeOverrides, setRuntimeOverrides] = useState<Record<string, IntegrationRuntimeOverride>>({});
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
   const [status, setStatus] = useState<"All Statuses" | IntegrationStatus>("All Statuses");
+  const [sort, setSort] = useState<IntegrationSortMode>("last-active");
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [selectedId, setSelectedId] = useState(integrations[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(baseIntegrations[0]?.id ?? "");
+  const [runningAction, setRunningAction] = useState<string | null>(null);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [isChannelsDialogOpen, setIsChannelsDialogOpen] = useState(false);
+  const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
+  const [initialModelProvider, setInitialModelProvider] = useState<AddModelsProviderId | null>(null);
+  const [initialSurfaceProvider, setInitialSurfaceProvider] = useState<IntegrationView["surfaceProvider"] | null>(null);
+  const integrations = useMemo(
+    () =>
+      baseIntegrations.map((integration) => {
+        const override = runtimeOverrides[integration.id];
+        if (!override) {
+          return integration;
+        }
+
+        const statusOverride = override.status
+          ? {
+              status: override.status,
+              statusLabel: override.statusLabel ?? integration.statusLabel,
+              statusTone: override.statusTone ?? integrationStatusToneMap[override.status]
+            }
+          : {};
+
+        return {
+          ...integration,
+          ...override,
+          ...statusOverride,
+          sourceMethods: Array.from(new Set([
+            ...integration.sourceMethods,
+            ...(override.sourceMethods ?? [])
+          ]))
+        };
+      }),
+    [baseIntegrations, runtimeOverrides]
+  );
   const categories = ["All Categories", ...Array.from(new Set(integrations.map((integration) => integration.category)))];
-  const statuses: Array<"All Statuses" | IntegrationStatus> = ["All Statuses", "connected", "pending", "failed", "disabled"];
+  const statuses: Array<"All Statuses" | IntegrationStatus> = [
+    "All Statuses",
+    "connected",
+    "unknown",
+    "pending-setup",
+    "missing-credentials",
+    "needs-authentication",
+    "failed",
+    "disabled",
+    "unsupported"
+  ];
+  const sorts: IntegrationSortMode[] = ["last-active", "name", "status", "category"];
 
   const filteredIntegrations = integrations.filter((integration) => {
     const query = search.trim().toLowerCase();
     const matchesSearch =
       !query ||
-      [integration.name, integration.category, integration.description, integration.statusLabel].join(" ").toLowerCase().includes(query);
+      [
+        integration.name,
+        integration.category,
+        integration.description,
+        integration.statusLabel,
+        integration.managedBy,
+        integration.providerType,
+        integration.permissions.join(" "),
+        integration.setupRequirements.join(" ")
+      ].join(" ").toLowerCase().includes(query);
     const matchesCategory = category === "All Categories" || integration.category === category;
     const matchesStatus = status === "All Statuses" || integration.status === status;
     return matchesSearch && matchesCategory && matchesStatus;
-  });
-  const selectedIntegration = integrations.find((integration) => integration.id === selectedId) ?? filteredIntegrations[0] ?? integrations[0] ?? null;
-  const connectedCount = integrations.filter((integration) => integration.status === "connected").length;
-  const pendingCount = integrations.filter((integration) => integration.status === "pending").length;
-  const failedCount = integrations.filter((integration) => integration.status === "failed").length;
+  }).sort((left, right) => sortIntegrations(left, right, sort));
+  const selectedIntegration = filteredIntegrations.find((integration) => integration.id === selectedId) ?? filteredIntegrations[0] ?? null;
+  const connectedCount = filteredIntegrations.filter((integration) => integration.status === "connected").length;
+  const pendingCount = filteredIntegrations.filter((integration) =>
+    integration.status === "pending-setup" ||
+    integration.status === "missing-credentials" ||
+    integration.status === "needs-authentication"
+  ).length;
+  const failedCount = filteredIntegrations.filter((integration) => integration.status === "failed").length;
+
+  const openSurfaceSetup = (surfaceProvider: IntegrationView["surfaceProvider"] | null = null) => {
+    if (!activeWorkspaceId) {
+      toast.error("Select a workspace before configuring workspace surfaces.", {
+        description: "All Workspaces is read-only for surface setup. Pick a workspace from the sidebar first."
+      });
+      return;
+    }
+
+    setInitialSurfaceProvider(surfaceProvider);
+    setIsChannelsDialogOpen(true);
+  };
+
+  const openModelSetup = (provider: AddModelsProviderId | null = null) => {
+    setInitialModelProvider(provider);
+    setIsAddModelsDialogOpen(true);
+  };
+
+  const handleConfigureIntegration = (integration: IntegrationView) => {
+    if (!integration.actionSupport.configure.supported) {
+      toast.message("Configure is not available.", {
+        description: integration.actionSupport.configure.reason
+      });
+      return;
+    }
+
+    if (integration.modelProvider) {
+      openModelSetup(integration.modelProvider);
+      return;
+    }
+
+    if (integration.surfaceProvider) {
+      openSurfaceSetup(integration.surfaceProvider);
+      return;
+    }
+
+    toast.message("No setup flow is wired for this integration.", {
+      description: integration.actionSupport.configure.reason
+    });
+  };
+
+  const handleReconnectIntegration = async (integration: IntegrationView) => {
+    if (!integration.actionSupport.reconnect.supported) {
+      toast.message("Reconnect is not available.", {
+        description: integration.actionSupport.reconnect.reason
+      });
+      return;
+    }
+
+    const actionKey = `${integration.id}:reconnect`;
+    setRunningAction(actionKey);
+
+    try {
+      if (integration.modelProvider) {
+        const response = await fetch("/api/models/providers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "status",
+            provider: integration.modelProvider,
+            includeSnapshot: true
+          })
+        });
+        const result = await response.json().catch(() => null) as {
+          ok?: boolean;
+          message?: string;
+          error?: string;
+          connection?: {
+            connected?: boolean;
+            detail?: string | null;
+            canConnect?: boolean;
+          };
+          snapshot?: MissionControlSnapshot;
+        } | null;
+
+        if (!response.ok || !result) {
+          throw new Error(result?.error || "Model provider status check failed.");
+        }
+
+        if (result.snapshot) {
+          setSnapshot(result.snapshot);
+        }
+
+        const nextStatus: IntegrationStatus = result.connection?.connected
+          ? "connected"
+          : integration.modelProvider === "ollama"
+            ? "pending-setup"
+            : "missing-credentials";
+        setRuntimeOverrides((current) => ({
+          ...current,
+          [integration.id]: {
+            status: nextStatus,
+            statusLabel: formatIntegrationStatusLabel(nextStatus),
+            statusTone: integrationStatusToneMap[nextStatus],
+            connectionHealth: {
+              label: result.connection?.connected ? "Provider status verified" : "Provider not connected",
+              detail: result.connection?.detail ?? result.message ?? "Provider status was refreshed through /api/models/providers."
+            },
+            lastSyncLabel: "Checked just now",
+            sourceMethods: ["/api/models/providers"]
+          }
+        }));
+
+        toast.message(result.connection?.connected ? "Provider is ready." : "Provider needs setup.", {
+          description: result.connection?.detail ?? result.message
+        });
+        return;
+      }
+
+      if (integration.surfaceProvider) {
+        const response = await fetch(`/api/integrations/${encodeURIComponent(integration.id)}/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        });
+        const result = await response.json().catch(() => null) as {
+          ok?: boolean;
+          status?: IntegrationStatus;
+          statusLabel?: string;
+          connectionHealth?: IntegrationView["connectionHealth"];
+          lastSyncLabel?: string;
+          uptimeLabel?: string;
+          rateLimitLabel?: string;
+          errorMessage?: string | null;
+          sourceMethods?: string[];
+          error?: string;
+        } | null;
+
+        const resultStatus = result?.status;
+        if (!response.ok || !resultStatus) {
+          throw new Error(result?.error || "Integration status check failed.");
+        }
+
+        setRuntimeOverrides((current) => ({
+          ...current,
+          [integration.id]: {
+            status: resultStatus,
+            statusLabel: result.statusLabel ?? formatIntegrationStatusLabel(resultStatus),
+            statusTone: integrationStatusToneMap[resultStatus],
+            connectionHealth: result.connectionHealth ?? {
+              label: formatIntegrationStatusLabel(resultStatus),
+              detail: "OpenClaw channel status was refreshed."
+            },
+            lastSyncLabel: result.lastSyncLabel ?? "Checked just now",
+            uptimeLabel: result.uptimeLabel,
+            rateLimitLabel: result.rateLimitLabel,
+            errorMessage: result.errorMessage,
+            sourceMethods: result.sourceMethods
+          }
+        }));
+
+        toast.message(result.status === "connected" ? "Integration status verified." : "Status check completed.", {
+          description: result.connectionHealth?.detail
+        });
+        return;
+      }
+
+      toast.message("Reconnect is not wired for this integration.", {
+        description: integration.actionSupport.reconnect.reason
+      });
+    } catch (error) {
+      const message = readClientError(error);
+      setRuntimeOverrides((current) => ({
+        ...current,
+        [integration.id]: {
+          status: "unknown",
+          statusLabel: "Unknown",
+          statusTone: "muted",
+          connectionHealth: {
+            label: "Status check failed",
+            detail: message
+          },
+          lastSyncLabel: "Check failed",
+          errorMessage: message
+        }
+      }));
+      toast.error("Reconnect failed.", {
+        description: message
+      });
+    } finally {
+      setRunningAction(null);
+    }
+  };
+
+  const handleDisableIntegration = async (integration: IntegrationView) => {
+    if (!integration.actionSupport.disable.supported) {
+      toast.message("Disable is not available.", {
+        description: integration.actionSupport.disable.reason
+      });
+      return;
+    }
+
+    if (!activeWorkspaceId) {
+      toast.error("Select a workspace before disabling a surface.", {
+        description: "All Workspaces cannot safely remove a workspace-specific binding."
+      });
+      return;
+    }
+
+    if (integration.channelIds.length === 0) {
+      toast.message("No workspace binding found.", {
+        description: "There is no AgentOS workspace surface binding to disconnect."
+      });
+      return;
+    }
+
+    const actionKey = `${integration.id}:disable`;
+    setRunningAction(actionKey);
+
+    try {
+      for (const channelId of integration.channelIds) {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/channels`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channelId, scope: "workspace" })
+        });
+        const result = await response.json().catch(() => null) as { error?: string } | null;
+
+        if (!response.ok) {
+          throw new Error(result?.error || `Unable to disconnect ${channelId}.`);
+        }
+      }
+
+      await refresh();
+      setRuntimeOverrides((current) => ({
+        ...current,
+        [integration.id]: {
+          status: "disabled",
+          statusLabel: "Disabled",
+          statusTone: "muted",
+          connectionHealth: {
+            label: "Disconnected from workspace",
+            detail: "The workspace surface binding was removed through the channels API."
+          },
+          lastSyncLabel: "Updated just now",
+          sourceMethods: ["/api/workspaces/[workspaceId]/channels DELETE"]
+        }
+      }));
+      toast.success(`${integration.name} disconnected from this workspace.`);
+    } catch (error) {
+      toast.error("Disable failed.", {
+        description: readClientError(error)
+      });
+    } finally {
+      setRunningAction(null);
+    }
+  };
 
   return (
-    <OperationsPageLayout
-      main={
-        <>
-          <PageHeader
-            title="Integrations"
-            subtitle="Connect channels, tools, and external systems to extend AgentOS capabilities and power automations."
-            secondaryAction={{ label: "Import Integration", icon: Import, onClick: () => toast.message("Integration import is not exposed yet.") }}
-            primaryAction={{ label: "Add Integration", icon: Plus, onClick: () => toast.message("Use Mission Control channels and model setup to add integrations.") }}
+    <>
+      <OperationsPageLayout
+        main={
+          <>
+            <PageHeader
+              title="Integrations"
+              subtitle="Connect channels, tools, and external systems to extend AgentOS capabilities and power automations."
+              secondaryAction={{ label: "Import Integration", icon: Import, onClick: () => setIsImportDialogOpen(true) }}
+              primaryAction={{ label: "Add Integration", icon: Plus, onClick: () => setIsAddDialogOpen(true) }}
+            />
+
+            <SearchToolbar
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder="Search integrations..."
+              right={<ViewToggle value={view} onChange={setView} />}
+            >
+              <ToolbarButton icon={Layers3} label={category} chevron onClick={() => setCategory((current) => categories[(categories.indexOf(current) + 1) % categories.length])} />
+              <ToolbarButton icon={SearchCheck} label={formatIntegrationStatusFilterLabel(status)} chevron onClick={() => setStatus((current) => statuses[(statuses.indexOf(current) + 1) % statuses.length])} />
+              <ToolbarButton icon={SlidersHorizontal} label={`Sort: ${formatIntegrationSortLabel(sort)}`} chevron onClick={() => setSort((current) => sorts[(sorts.indexOf(current) + 1) % sorts.length])} />
+            </SearchToolbar>
+
+            <StatGrid columns={5}>
+              <StatCard label="Total Integrations" value={String(filteredIntegrations.length)} detail={`${integrations.length} registered`} icon={Plug} tone="info" />
+              <StatCard label="Connected" value={String(connectedCount)} detail={`${Math.round((connectedCount / Math.max(1, filteredIntegrations.length)) * 100)}% of filtered`} icon={CircleCheck} tone="success" />
+              <StatCard label="Pending Setup" value={String(pendingCount)} detail="Needs setup or credentials" icon={Clock3} tone="warning" />
+              <StatCard label="Failed" value={String(failedCount)} detail="Real errors only" icon={X} tone="danger" />
+              <StatCard label="Automations Using" value="-" detail="Metrics unavailable from snapshot" icon={Workflow} tone="purple" />
+            </StatGrid>
+
+            {filteredIntegrations.length === 0 ? (
+              <EmptyState
+                title="No integrations match"
+                description="Adjust search, category, or status filters to inspect another integration set."
+              />
+            ) : (
+              <div className="space-y-3">
+                {Array.from(new Set(filteredIntegrations.map((integration) => integration.category))).map((section) => (
+                  <section key={section}>
+                    <h2 className="mb-2 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-slate-500">{section} ({filteredIntegrations.filter((integration) => integration.category === section).length})</h2>
+                    <div className={cn(view === "grid" ? "grid gap-2.5 lg:grid-cols-2 min-[1400px]:grid-cols-3" : "flex flex-col gap-2.5")}>
+                      {filteredIntegrations.filter((integration) => integration.category === section).map((integration) => (
+                        <IntegrationCard
+                          key={integration.id}
+                          integration={integration}
+                          selected={integration.id === selectedIntegration?.id}
+                          list={view === "list"}
+                          actionBusy={runningAction?.startsWith(`${integration.id}:`) ?? false}
+                          onSelect={() => setSelectedId(integration.id)}
+                          onConfigure={() => handleConfigureIntegration(integration)}
+                          onReconnect={() => void handleReconnectIntegration(integration)}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+
+            <AutomationImpactSummary integrations={integrations} />
+          </>
+        }
+        inspector={selectedIntegration ? (
+          <IntegrationInspector
+            integration={selectedIntegration}
+            actionBusy={runningAction?.startsWith(`${selectedIntegration.id}:`) ?? false}
+            activeWorkspaceId={activeWorkspaceId}
+            onConfigure={() => handleConfigureIntegration(selectedIntegration)}
+            onReconnect={() => void handleReconnectIntegration(selectedIntegration)}
+            onDisable={() => void handleDisableIntegration(selectedIntegration)}
           />
-
-          <SearchToolbar
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search integrations..."
-            right={<ViewToggle value={view} onChange={setView} />}
-          >
-            <ToolbarButton icon={Layers3} label={category} chevron onClick={() => setCategory((current) => categories[(categories.indexOf(current) + 1) % categories.length])} />
-            <ToolbarButton icon={SearchCheck} label={status} chevron onClick={() => setStatus((current) => statuses[(statuses.indexOf(current) + 1) % statuses.length])} />
-            <ToolbarButton icon={SlidersHorizontal} label="Sort: Last active" chevron />
-          </SearchToolbar>
-
-          <StatGrid columns={5}>
-            <StatCard label="Total Integrations" value={String(integrations.length)} detail="+3 this week" icon={Plug} tone="info" />
-            <StatCard label="Connected" value={String(connectedCount)} detail={`${Math.round((connectedCount / Math.max(1, integrations.length)) * 100)}% of total`} icon={CircleCheck} tone="success" />
-            <StatCard label="Pending Setup" value={String(pendingCount)} detail={`${Math.round((pendingCount / Math.max(1, integrations.length)) * 100)}% of total`} icon={Clock3} tone="warning" />
-            <StatCard label="Failed" value={String(failedCount)} detail={`${Math.round((failedCount / Math.max(1, integrations.length)) * 100)}% of total`} icon={X} tone="danger" />
-            <StatCard label="Automations Using" value={String(Math.max(connectedCount, snapshot.channelRegistry.channels.length))} detail="+18% vs last 7d" icon={Workflow} tone="purple" />
-          </StatGrid>
-
-          <div className="space-y-3">
-            {Array.from(new Set(filteredIntegrations.map((integration) => integration.category))).map((section) => (
-              <section key={section}>
-                <h2 className="mb-2 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-slate-500">{section} ({filteredIntegrations.filter((integration) => integration.category === section).length})</h2>
-                <div className={cn(view === "grid" ? "grid gap-2.5 lg:grid-cols-2 min-[1400px]:grid-cols-3" : "flex flex-col gap-2.5")}>
-                  {filteredIntegrations.filter((integration) => integration.category === section).map((integration) => (
-                    <IntegrationCard key={integration.id} integration={integration} selected={integration.id === selectedIntegration?.id} list={view === "list"} onSelect={() => setSelectedId(integration.id)} />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-
-          <AutomationImpactSummary integrations={integrations} />
-        </>
-      }
-      inspector={selectedIntegration ? <IntegrationInspector integration={selectedIntegration} /> : null}
-    />
+        ) : null}
+      />
+      <IntegrationAddDialog
+        open={isAddDialogOpen}
+        integrations={integrations}
+        onOpenChange={setIsAddDialogOpen}
+        onSelect={(integration) => {
+          setIsAddDialogOpen(false);
+          handleConfigureIntegration(integration);
+        }}
+      />
+      <IntegrationImportDialog
+        open={isImportDialogOpen}
+        onOpenChange={setIsImportDialogOpen}
+        onOpenSurfaceSetup={() => {
+          setIsImportDialogOpen(false);
+          openSurfaceSetup(null);
+        }}
+        onOpenModelSetup={() => {
+          setIsImportDialogOpen(false);
+          openModelSetup(null);
+        }}
+      />
+      <WorkspaceChannelsDialog
+        snapshot={rootSnapshot}
+        workspaceId={activeWorkspaceId}
+        open={isChannelsDialogOpen}
+        initialProvider={initialSurfaceProvider}
+        onOpenChange={setIsChannelsDialogOpen}
+        onRefresh={refresh}
+        onSnapshotChange={(updater) => setSnapshot((current) => updater(current))}
+      />
+      <AddModelsDialog
+        open={isAddModelsDialogOpen}
+        onOpenChange={setIsAddModelsDialogOpen}
+        snapshot={rootSnapshot}
+        initialProvider={initialModelProvider}
+        onSnapshotChange={setSnapshot}
+      />
+    </>
   );
 }
 
@@ -1438,12 +1905,18 @@ function IntegrationCard({
   integration,
   selected,
   list,
-  onSelect
+  actionBusy,
+  onSelect,
+  onConfigure,
+  onReconnect
 }: {
   integration: IntegrationView;
   selected: boolean;
   list: boolean;
+  actionBusy: boolean;
   onSelect: () => void;
+  onConfigure: () => void;
+  onReconnect: () => void;
 }) {
   return (
     <div
@@ -1468,16 +1941,43 @@ function IntegrationCard({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <h3 className="truncate text-[0.88rem] font-semibold text-white">{integration.name}</h3>
-              <p className="mt-1 text-[0.68rem] text-slate-400">Last sync: {integration.lastSyncLabel}</p>
-              <p className="mt-1 text-[0.68rem] text-slate-400">Linked: {integration.linkedAgents} agents</p>
+              <p className="mt-1 truncate text-[0.68rem] text-slate-400">{integration.connectionHealth.label}</p>
+              <p className="mt-1 text-[0.68rem] text-slate-400">Linked: {integration.linkedAgentCount} agents</p>
             </div>
             <StatusBadge label={integration.statusLabel} tone={integration.statusTone} />
           </div>
           <div className="mt-2.5 flex items-center justify-between gap-2">
-            <MiniBadge>{integration.category.split(" ")[0]}</MiniBadge>
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              <MiniBadge>{integration.category.split(" ")[0]}</MiniBadge>
+              <MiniBadge>{integration.managedBy}</MiniBadge>
+            </div>
             <div className="flex gap-2">
-              <Button variant="secondary" size="sm" className="h-7 rounded-[8px] px-2" onClick={(event) => { event.stopPropagation(); toast.message(`${integration.name} configuration opens from Mission Control when available.`); }}><Gauge className="h-3 w-3" /></Button>
-              <Button variant="secondary" size="sm" className="h-7 rounded-[8px] px-2" onClick={(event) => { event.stopPropagation(); toast.message(`${integration.name} linking is local until backend actions are exposed.`); }}><Plug className="h-3 w-3" /></Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-7 rounded-[8px] px-2"
+                disabled={actionBusy || !integration.actionSupport.configure.supported}
+                title={integration.actionSupport.configure.reason}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onConfigure();
+                }}
+              >
+                <Gauge className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-7 rounded-[8px] px-2"
+                disabled={actionBusy || !integration.actionSupport.reconnect.supported}
+                title={integration.actionSupport.reconnect.reason}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReconnect();
+                }}
+              >
+                <RefreshCw className={cn("h-3 w-3", actionBusy && "animate-spin")} />
+              </Button>
               <MoreButton />
             </div>
           </div>
@@ -1487,8 +1987,25 @@ function IntegrationCard({
   );
 }
 
-function IntegrationInspector({ integration }: { integration: IntegrationView }) {
+function IntegrationInspector({
+  integration,
+  actionBusy,
+  activeWorkspaceId,
+  onConfigure,
+  onReconnect,
+  onDisable
+}: {
+  integration: IntegrationView;
+  actionBusy: boolean;
+  activeWorkspaceId: string | null;
+  onConfigure: () => void;
+  onReconnect: () => void;
+  onDisable: () => void;
+}) {
   const StatusIcon = integrationStatusIcons[integration.status];
+  const disableReason = activeWorkspaceId
+    ? integration.actionSupport.disable.reason
+    : "Select a workspace before disabling workspace-specific surface bindings.";
   return (
     <InspectorPanelFrame>
       <div className="flex items-start gap-3">
@@ -1506,39 +2023,93 @@ function IntegrationInspector({ integration }: { integration: IntegrationView })
         </div>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2">
-        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Reconnect uses provider-specific setup in Mission Control.")}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Reconnect</Button>
-        <Button variant="secondary" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Configure is pending a provider-specific route.")}>Configure</Button>
-        <Button variant="destructive" size="sm" className="h-8 rounded-[9px] px-2 text-xs" onClick={() => toast.message("Disable is local until integration mutation is exposed.")}>Disable</Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-8 rounded-[9px] px-2 text-xs"
+          disabled={actionBusy || !integration.actionSupport.reconnect.supported}
+          title={integration.actionSupport.reconnect.reason}
+          onClick={onReconnect}
+        >
+          <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", actionBusy && "animate-spin")} />Reconnect
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-8 rounded-[9px] px-2 text-xs"
+          disabled={actionBusy || !integration.actionSupport.configure.supported}
+          title={integration.actionSupport.configure.reason}
+          onClick={onConfigure}
+        >
+          Configure
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="h-8 rounded-[9px] px-2 text-xs"
+          disabled={actionBusy || !integration.actionSupport.disable.supported || !activeWorkspaceId}
+          title={disableReason}
+          onClick={onDisable}
+        >
+          Disable
+        </Button>
       </div>
       <SectionCard title="Connection Health" className="mt-3">
         <div className="px-3 py-2.5">
-          <KeyValue label="Health" value={<span className="inline-flex items-center gap-1.5"><StatusIcon className="h-3.5 w-3.5 text-emerald-300" />{integration.statusLabel}</span>} />
+          <KeyValue label="Health" value={<span className="inline-flex items-center gap-1.5"><StatusIcon className={cn("h-3.5 w-3.5", statusIconClassName(integration.status))} />{integration.connectionHealth.label}</span>} />
           <KeyValue label="Last sync" value={integration.lastSyncLabel} />
-          <KeyValue label="Uptime" value={integration.status === "connected" ? "99.9%" : "n/a"} />
-          <KeyValue label="Rate limit" value={integration.status === "connected" ? "8,432 / 10,000" : "n/a"} />
-          <ProgressBar value={integration.status === "connected" ? 84 : 12} tone={integration.statusTone} />
+          <KeyValue label="Uptime" value={integration.uptimeLabel} />
+          <KeyValue label="Rate limit" value={integration.rateLimitLabel} />
+          <KeyValue label="Source" value={integration.sourceMethods.join(", ")} />
+          <p className="border-t border-white/[0.07] py-2 text-xs leading-5 text-slate-400">{integration.connectionHealth.detail}</p>
+          <ProgressBar value={integration.status === "connected" ? 84 : integration.status === "failed" ? 8 : 28} tone={integration.statusTone} />
         </div>
       </SectionCard>
       <SectionCard title="Scopes / Permissions" className="mt-3">
         <div className="space-y-1.5 p-3 text-xs text-slate-300">
-          {["Send Messages", "Read Messages", "Manage Chats", "Webhook Access"].map((scope) => (
+          {integration.permissions.map((scope) => (
             <div key={scope} className="flex items-center gap-1.5"><CircleCheck className="h-3.5 w-3.5 text-emerald-300" />{scope}</div>
           ))}
         </div>
       </SectionCard>
-      <SectionCard title={`Linked Agents (${integration.linkedAgents})`} className="mt-3" action={<button className="text-[0.68rem] text-blue-300">View all</button>}>
+      <SectionCard title={`Linked Agents (${integration.linkedAgentCount})`} className="mt-3">
         <div className="divide-y divide-white/[0.07] px-3">
-          {["Browser Agent", "Campaign Manager", "Support Operator"].map((agent) => (
-            <div key={agent} className="flex items-center justify-between py-2.5 text-xs">
-              <span className="text-slate-200">{agent}</span>
-              <span className="text-slate-500">›</span>
+          {integration.linkedAgents.length > 0 ? integration.linkedAgents.map((agent) => (
+            <div key={agent.id} className="py-2.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-slate-200">{agent.name}</span>
+                <span className="shrink-0 text-slate-500">{agent.workspaceName}</span>
+              </div>
+              <p className="mt-1 truncate text-[0.66rem] text-slate-500">{agent.reason}</p>
             </div>
-          ))}
+          )) : (
+            <div className="py-3 text-xs text-slate-500">
+              {integration.managedBy === "unsupported" ? "Linkage unavailable until this connector exists." : "No linked agents found in the current workspace snapshot."}
+            </div>
+          )}
         </div>
       </SectionCard>
-      <SectionCard title="Setup Notes" className="mt-3" action={<button className="text-[0.68rem] text-blue-300">Edit</button>}>
-        <div className="p-3 text-xs leading-5 text-slate-300">
-          Used for real-time alerts and agent handoffs. Webhook URL is masked until a secure reveal action exists.
+      <SectionCard title="Setup Notes" className="mt-3">
+        <div className="space-y-2 p-3 text-xs leading-5 text-slate-300">
+          <KeyValue label="Managed by" value={formatManagedBy(integration.managedBy)} />
+          <KeyValue label="Provider type" value={integration.providerType} />
+          <KeyValue label="Accounts" value={integration.accountIds.length ? integration.accountIds.join(", ") : "None"} />
+          <KeyValue label="Channels" value={integration.channelIds.length ? integration.channelIds.join(", ") : "None"} />
+          <KeyValue label="Models" value={integration.modelIds.length ? integration.modelIds.join(", ") : "None"} />
+          {integration.errorMessage ? <p className="rounded-[9px] border border-red-400/20 bg-red-500/10 p-2 text-red-200">{integration.errorMessage}</p> : null}
+          {integration.missingConfiguration.length > 0 ? (
+            <div>
+              <p className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-slate-500">Required setup</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {integration.missingConfiguration.map((item) => <MiniBadge key={item}>{item}</MiniBadge>)}
+              </div>
+            </div>
+          ) : null}
+          <div className="rounded-[9px] border border-white/[0.07] bg-white/[0.03] p-2 text-slate-400">
+            <p>Configure: {integration.actionSupport.configure.reason}</p>
+            <p>Reconnect: {integration.actionSupport.reconnect.reason}</p>
+            <p>Disable: {integration.actionSupport.disable.reason}</p>
+          </div>
         </div>
       </SectionCard>
     </InspectorPanelFrame>
@@ -1547,35 +2118,216 @@ function IntegrationInspector({ integration }: { integration: IntegrationView })
 
 function AutomationImpactSummary({ integrations }: { integrations: IntegrationView[] }) {
   const connected = integrations.filter((integration) => integration.status === "connected");
+  const linked = integrations
+    .filter((integration) => integration.linkedAgentCount > 0)
+    .sort((left, right) => right.linkedAgentCount - left.linkedAgentCount);
   return (
     <SectionCard title="Automation Impact Summary">
       <div className="grid gap-2.5 p-3 lg:grid-cols-[repeat(4,minmax(0,1fr))_1.4fr_0.8fr]">
-        <MetricTile icon={Workflow} label="Automations" value={String(Math.max(14, connected.length))} detail="Using integrations" tone="info" />
-        <MetricTile icon={Sparkles} label="Triggers fired" value="56" detail="Last 24 hours" tone="success" />
-        <MetricTile icon={BellRing} label="Actions executed" value="1,284" detail="Last 24 hours" tone="purple" />
-        <MetricTile icon={ShieldCheck} label="Success rate" value="98.3%" detail="Last 7 days" tone="success" />
+        <MetricTile icon={Workflow} label="Automations" value="-" detail="OpenClaw metric unavailable" tone="info" />
+        <MetricTile icon={Sparkles} label="Triggers fired" value="-" detail="OpenClaw metric unavailable" tone="success" />
+        <MetricTile icon={BellRing} label="Actions executed" value="-" detail="OpenClaw metric unavailable" tone="purple" />
+        <MetricTile icon={ShieldCheck} label="Success rate" value="-" detail="OpenClaw metric unavailable" tone="success" />
         <div className="rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-2.5">
-          <p className="mb-2.5 text-[0.58rem] font-semibold uppercase tracking-[0.14em] text-slate-500">Top integrations powering automations</p>
-          {connected.slice(0, 3).map((integration, index) => (
+          <p className="mb-2.5 text-[0.58rem] font-semibold uppercase tracking-[0.14em] text-slate-500">Top linked integrations</p>
+          {linked.slice(0, 3).map((integration) => (
             <div key={integration.id} className="mb-2 grid grid-cols-[80px_1fr_auto] items-center gap-2 text-[0.68rem]">
               <span className="truncate text-slate-300">{integration.name}</span>
-              <ProgressBar value={72 - index * 15} />
-              <span className="text-slate-500">{6 - index} automations</span>
+              <ProgressBar value={Math.min(100, 20 + integration.linkedAgentCount * 18)} />
+              <span className="text-slate-500">{integration.linkedAgentCount} agents</span>
             </div>
           ))}
+          {linked.length === 0 ? <p className="text-[0.68rem] text-slate-500">No linked integrations found in the current snapshot.</p> : null}
         </div>
         <div className="rounded-[10px] border border-white/[0.08] bg-white/[0.03] p-2.5">
-          <p className="mb-2.5 text-[0.58rem] font-semibold uppercase tracking-[0.14em] text-slate-500">Recently added</p>
-          {integrations.slice(-3).map((integration, index) => (
+          <p className="mb-2.5 text-[0.58rem] font-semibold uppercase tracking-[0.14em] text-slate-500">Recently observed</p>
+          {connected.slice(0, 3).map((integration) => (
             <div key={integration.id} className="flex justify-between gap-2 py-1 text-[0.68rem]">
               <span className="text-slate-300">{integration.name}</span>
-              <span className="text-slate-500">{index + 2} days ago</span>
+              <span className="text-slate-500">{integration.lastSyncLabel}</span>
             </div>
           ))}
+          {connected.length === 0 ? <p className="text-[0.68rem] text-slate-500">No verified connected integrations yet.</p> : null}
         </div>
       </div>
     </SectionCard>
   );
+}
+
+function IntegrationAddDialog({
+  open,
+  integrations,
+  onOpenChange,
+  onSelect
+}: {
+  open: boolean;
+  integrations: IntegrationView[];
+  onOpenChange: (open: boolean) => void;
+  onSelect: (integration: IntegrationView) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl rounded-[18px] border-white/[0.10] bg-[#08111f]/95 p-4">
+        <DialogHeader>
+          <DialogTitle>Add Integration</DialogTitle>
+          <DialogDescription>
+            Choose a real AgentOS/OpenClaw setup path. Unsupported connectors are shown with their blocking reason.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid max-h-[62vh] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+          {integrations.map((integration) => (
+            <button
+              key={integration.id}
+              type="button"
+              onClick={() => onSelect(integration)}
+              className={cn(
+                "rounded-[12px] border p-3 text-left transition hover:bg-white/[0.06]",
+                pageSurface,
+                !integration.actionSupport.configure.supported && "opacity-70"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <EntityIcon icon={integration.icon} label={integration.name} tone={integration.iconTone} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="truncate text-sm font-semibold text-white">{integration.name}</h3>
+                    <StatusBadge label={integration.statusLabel} tone={integration.statusTone} />
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{integration.description}</p>
+                  <p className="mt-2 text-[0.68rem] text-slate-500">{integration.actionSupport.configure.reason}</p>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IntegrationImportDialog({
+  open,
+  onOpenChange,
+  onOpenSurfaceSetup,
+  onOpenModelSetup
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onOpenSurfaceSetup: () => void;
+  onOpenModelSetup: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl rounded-[18px] border-white/[0.10] bg-[#08111f]/95 p-4">
+        <DialogHeader>
+          <DialogTitle>Import Integration</DialogTitle>
+          <DialogDescription>
+            Secure bulk import is not available because this codebase does not expose a credential import contract or secret store handoff.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-[12px] border border-amber-300/20 bg-amber-400/10 p-3 text-xs leading-5 text-amber-100">
+          Importing tokens, OAuth secrets, bot credentials, or webhook secrets from the browser would expose sensitive values. Use the existing setup flows so OpenClaw handles credentials through its supported config paths.
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button className="h-9 rounded-[9px] bg-blue-500 text-white hover:bg-blue-400" onClick={onOpenSurfaceSetup}>
+            Open Surface Setup
+          </Button>
+          <Button variant="secondary" className="h-9 rounded-[9px]" onClick={onOpenModelSetup}>
+            Open Model Setup
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function sortIntegrations(left: IntegrationView, right: IntegrationView, sort: IntegrationSortMode) {
+  if (sort === "name") {
+    return left.name.localeCompare(right.name);
+  }
+
+  if (sort === "status") {
+    return left.statusLabel.localeCompare(right.statusLabel) || left.name.localeCompare(right.name);
+  }
+
+  if (sort === "category") {
+    return left.category.localeCompare(right.category) || left.name.localeCompare(right.name);
+  }
+
+  const leftTime = left.lastActiveMs ?? 0;
+  const rightTime = right.lastActiveMs ?? 0;
+  return rightTime - leftTime || left.name.localeCompare(right.name);
+}
+
+function formatIntegrationStatusLabel(status: IntegrationStatus) {
+  switch (status) {
+    case "connected":
+      return "Connected";
+    case "disabled":
+      return "Disabled";
+    case "pending-setup":
+      return "Pending Setup";
+    case "failed":
+      return "Failed";
+    case "needs-authentication":
+      return "Needs Authentication";
+    case "missing-credentials":
+      return "Missing Credentials";
+    case "unsupported":
+      return "Unsupported";
+    case "unknown":
+      return "Unknown";
+  }
+}
+
+function formatIntegrationStatusFilterLabel(status: "All Statuses" | IntegrationStatus) {
+  return status === "All Statuses" ? status : formatIntegrationStatusLabel(status);
+}
+
+function formatIntegrationSortLabel(sort: IntegrationSortMode) {
+  switch (sort) {
+    case "last-active":
+      return "Last active";
+    case "name":
+      return "Name";
+    case "status":
+      return "Status";
+    case "category":
+      return "Category";
+  }
+}
+
+function statusIconClassName(status: IntegrationStatus) {
+  if (status === "connected") {
+    return "text-emerald-300";
+  }
+
+  if (status === "failed") {
+    return "text-red-300";
+  }
+
+  if (status === "pending-setup" || status === "missing-credentials" || status === "needs-authentication") {
+    return "text-amber-300";
+  }
+
+  return "text-slate-400";
+}
+
+function formatManagedBy(value: IntegrationView["managedBy"]) {
+  switch (value) {
+    case "openclaw":
+      return "OpenClaw";
+    case "agentos":
+      return "AgentOS";
+    case "external-config":
+      return "External config";
+    case "unsupported":
+      return "Unsupported";
+  }
+}
+
+function readClientError(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown integration error.";
 }
 
 function OperationsPageLayout({ main, inspector }: { main: React.ReactNode; inspector: React.ReactNode }) {

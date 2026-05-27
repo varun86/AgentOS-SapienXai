@@ -803,9 +803,9 @@ export function MissionControlShell({
       activeWorkspaceId
     );
 
-    if (resolvedWorkspaceId && resolvedWorkspaceId !== activeWorkspaceId) {
+    if (resolvedWorkspaceId !== activeWorkspaceId) {
       setActiveWorkspaceId(resolvedWorkspaceId);
-      setSelectedNodeId(resolvedWorkspaceId);
+      setSelectedNodeId(resolvedWorkspaceId ?? null);
     }
 
     setLoadedWorkspaceSelectionRoot(workspaceRoot);
@@ -3285,6 +3285,64 @@ export function MissionControlShell({
               discoveredModels,
               systemReady: isOpenClawOnboardingSystemReady
             }}
+            onExpandCollapsed={() => setIsSidebarOpen(true)}
+            onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
+            onSelectWorkspace={(workspaceId) => {
+              openWorkspaceOnCanvas(workspaceId);
+            }}
+            onRefresh={refresh}
+            onRunModelRefresh={runModelRefresh}
+            onRunModelDiscover={runModelDiscover}
+            onRunModelSetDefault={runModelSetDefault}
+            onConnectModelProvider={runModelProviderLogin}
+            onOpenModelSetup={() => openSetupWizard()}
+            onOpenAddModels={openAddModelsDialog}
+            onOpenWorkspaceCreate={() => openWorkspaceWizard("basic")}
+            onEditWorkspace={openWorkspaceWizardForEdit}
+            onSnapshotChange={setSnapshot}
+            onAgentCreatedVisible={handleCreatedAgentVisible}
+          />
+        </div>
+
+        {isSidebarOpen ? (
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className="fixed inset-0 z-40 bg-black/62 backdrop-blur-[2px] lg:hidden"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        ) : null}
+
+        <div
+          className={cn(
+            "pointer-events-auto fixed left-0 top-0 z-50 h-[100dvh] overflow-hidden mission-ease-smooth bg-[#050a12] shadow-[18px_0_60px_rgba(0,0,0,0.42)] transition-[width] duration-300 lg:hidden",
+            isSidebarOpen ? "w-[min(86vw,292px)]" : "w-[56px]"
+          )}
+          onClickCapture={(event) => {
+            if (isSidebarOpen && event.target instanceof Element && event.target.closest("a")) {
+              setIsSidebarOpen(false);
+            }
+          }}
+        >
+          <MissionSidebar
+            snapshot={uiSnapshot}
+            surfaceTheme={surfaceTheme}
+            activeWorkspaceId={activeWorkspaceId}
+            requestedAgentAction={agentActionRequest}
+            connectionState={connectionState}
+            collapsed={!isSidebarOpen}
+            settingsMode
+            modelManager={{
+              runState: modelOnboardingRunState,
+              statusMessage: modelOnboardingStatusMessage,
+              resultMessage: modelOnboardingResultMessage,
+              log: modelOnboardingLog,
+              manualCommand: modelOnboardingManualCommand,
+              docsUrl: modelOnboardingDocsUrl,
+              discoveredModels,
+              systemReady: isOpenClawOnboardingSystemReady
+            }}
+            onExpandCollapsed={() => setIsSidebarOpen(true)}
             onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
             onSelectWorkspace={(workspaceId) => {
               openWorkspaceOnCanvas(workspaceId);
@@ -3528,6 +3586,7 @@ export function MissionControlShell({
               discoveredModels,
               systemReady: isOpenClawOnboardingSystemReady
             }}
+            onExpandCollapsed={() => setIsSidebarOpen(true)}
             onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
             onSelectWorkspace={(workspaceId) => {
               openWorkspaceOnCanvas(workspaceId);

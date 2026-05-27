@@ -1,20 +1,29 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 
 import { MissionSidebar } from "@/components/mission-control/sidebar";
+import {
+  buildWorkspaceSelectionStorageKey,
+  resolveWorkspaceSelection,
+  serializeWorkspaceSelection,
+  shouldDeferWorkspaceSelectionHydration
+} from "@/components/mission-control/mission-control-shell.utils";
+import { scopeMissionControlSnapshot } from "@/components/operations/operations-data";
+import { OperationsTopBar } from "@/components/operations/operations-ui";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
 import type { MissionControlSnapshot, WorkspaceRecord } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
-import { OperationsTopBar } from "@/components/operations/operations-ui";
 
 export type OperationsShellContext = {
   snapshot: MissionControlSnapshot;
+  rootSnapshot: MissionControlSnapshot;
   activeWorkspace: WorkspaceRecord | null;
   activeWorkspaceId: string | null;
   connectionState: "connecting" | "live" | "retrying";
   refresh: () => Promise<void>;
+  setSnapshot: Dispatch<SetStateAction<MissionControlSnapshot>>;
 };
 
 export function OperationsShell({
@@ -29,16 +38,70 @@ export function OperationsShell({
     initialSnapshot.workspaces[0]?.id ?? null
   );
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [loadedWorkspaceSelectionRoot, setLoadedWorkspaceSelectionRoot] = useState<string | null>(null);
   const activeWorkspace = useMemo(
     () =>
-      (activeWorkspaceId
-        ? snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
-        : null) ??
-      snapshot.workspaces[0] ??
-      null,
+      activeWorkspaceId
+        ? snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null
+        : null,
     [activeWorkspaceId, snapshot.workspaces]
   );
-  const resolvedWorkspaceId = activeWorkspace?.id ?? activeWorkspaceId;
+  const scopedSnapshot = useMemo(
+    () => scopeMissionControlSnapshot(snapshot, activeWorkspaceId),
+    [activeWorkspaceId, snapshot]
+  );
+
+  useEffect(() => {
+    const workspaceRoot = snapshot.diagnostics.workspaceRoot;
+
+    if (loadedWorkspaceSelectionRoot === workspaceRoot) {
+      return;
+    }
+
+    if (shouldDeferWorkspaceSelectionHydration(snapshot)) {
+      return;
+    }
+
+    const workspaceSelectionStorageKey = buildWorkspaceSelectionStorageKey(workspaceRoot);
+    const storedWorkspaceId = globalThis.localStorage?.getItem(workspaceSelectionStorageKey) ?? null;
+    const resolvedWorkspaceId = resolveWorkspaceSelection(
+      snapshot.workspaces.map((workspace) => workspace.id),
+      storedWorkspaceId,
+      activeWorkspaceId
+    );
+
+    queueMicrotask(() => {
+      if (resolvedWorkspaceId !== activeWorkspaceId) {
+        setActiveWorkspaceId(resolvedWorkspaceId);
+      }
+
+      setLoadedWorkspaceSelectionRoot(workspaceRoot);
+    });
+  }, [
+    activeWorkspaceId,
+    loadedWorkspaceSelectionRoot,
+    snapshot
+  ]);
+
+  useEffect(() => {
+    const workspaceRoot = snapshot.diagnostics.workspaceRoot;
+
+    if (loadedWorkspaceSelectionRoot !== workspaceRoot) {
+      return;
+    }
+
+    const storage = globalThis.localStorage;
+
+    if (typeof storage === "undefined") {
+      return;
+    }
+
+    storage.setItem(
+      buildWorkspaceSelectionStorageKey(workspaceRoot),
+      serializeWorkspaceSelection(activeWorkspaceId)
+    );
+  }, [activeWorkspaceId, loadedWorkspaceSelectionRoot, snapshot.diagnostics.workspaceRoot]);
 
   return (
     <div className="mission-shell relative min-h-screen overflow-hidden bg-[#030814] text-slate-100">
@@ -67,7 +130,7 @@ export function OperationsShell({
         <MissionSidebar
           snapshot={snapshot}
           surfaceTheme="dark"
-          activeWorkspaceId={resolvedWorkspaceId}
+          activeWorkspaceId={activeWorkspaceId}
           requestedAgentAction={null}
           connectionState={connectionState}
           collapsed={!sidebarExpanded}
@@ -81,6 +144,7 @@ export function OperationsShell({
             discoveredModels: [],
             systemReady: snapshot.diagnostics.health === "healthy"
           }}
+          onExpandCollapsed={() => setSidebarExpanded(true)}
           onToggleCollapsed={() => setSidebarExpanded((current) => !current)}
           onSelectWorkspace={setActiveWorkspaceId}
           onRefresh={refresh}
@@ -97,15 +161,71 @@ export function OperationsShell({
         />
       </div>
 
-      <main className={cn("relative z-20 min-h-screen px-4 py-4 sm:px-5 lg:pl-[92px] lg:pr-4")}>
+      {mobileSidebarOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-40 bg-black/62 backdrop-blur-[2px] lg:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      ) : null}
+
+      <div
+        className={cn(
+          "fixed left-0 top-0 z-50 h-[100dvh] overflow-hidden bg-[#050a12] shadow-[18px_0_60px_rgba(0,0,0,0.42)] transition-[width] duration-200 ease-out lg:hidden",
+          mobileSidebarOpen ? "w-[min(86vw,292px)]" : "w-[56px]"
+        )}
+        onClickCapture={(event) => {
+          if (mobileSidebarOpen && event.target instanceof Element && event.target.closest("a")) {
+            setMobileSidebarOpen(false);
+          }
+        }}
+      >
+        <MissionSidebar
+          snapshot={snapshot}
+          surfaceTheme="dark"
+          activeWorkspaceId={activeWorkspaceId}
+          requestedAgentAction={null}
+          connectionState={connectionState}
+          collapsed={!mobileSidebarOpen}
+          modelManager={{
+            runState: "idle",
+            statusMessage: null,
+            resultMessage: null,
+            log: "",
+            manualCommand: null,
+            docsUrl: null,
+            discoveredModels: [],
+            systemReady: snapshot.diagnostics.health === "healthy"
+          }}
+          onExpandCollapsed={() => setMobileSidebarOpen(true)}
+          onToggleCollapsed={() => setMobileSidebarOpen((current) => !current)}
+          onSelectWorkspace={setActiveWorkspaceId}
+          onRefresh={refresh}
+          onRunModelRefresh={() => toast.message("Model refresh is available from Mission Control setup.")}
+          onRunModelDiscover={() => toast.message("Model discovery is available from Mission Control setup.")}
+          onRunModelSetDefault={() => toast.message("Default model changes are not exposed on this page yet.")}
+          onConnectModelProvider={(provider) => toast.message(`Open ${provider} setup from Mission Control to connect it.`)}
+          onOpenModelSetup={() => toast.message("Model setup opens from Mission Control.")}
+          onOpenAddModels={() => toast.message("Add Models opens from Mission Control.")}
+          onOpenWorkspaceCreate={() => toast.message("Workspace creation opens from Mission Control.")}
+          onEditWorkspace={() => toast.message("Workspace editing opens from Mission Control.")}
+          onSnapshotChange={setSnapshot}
+          onAgentCreatedVisible={() => {}}
+        />
+      </div>
+
+      <main className={cn("relative z-20 min-h-screen pb-4 pl-[68px] pr-3 pt-4 sm:pl-[76px] sm:pr-5 lg:pl-[92px] lg:pr-4")}>
         <div className="mx-auto flex w-full max-w-[1880px] flex-col gap-3">
           <OperationsTopBar snapshot={snapshot} connectionState={connectionState} />
           {children({
-            snapshot,
+            snapshot: scopedSnapshot,
+            rootSnapshot: snapshot,
             activeWorkspace,
-            activeWorkspaceId: resolvedWorkspaceId,
+            activeWorkspaceId,
             connectionState,
-            refresh
+            refresh,
+            setSnapshot
           })}
         </div>
       </main>

@@ -119,6 +119,7 @@ type MissionSidebarProps = {
     discoveredModels: DiscoveredModelCandidate[];
     systemReady: boolean;
   };
+  onExpandCollapsed?: () => void;
   onToggleCollapsed: () => void;
   onSelectWorkspace: (workspaceId: string | null) => void;
   onRefresh: () => Promise<void>;
@@ -160,6 +161,7 @@ export function MissionSidebar({
   requestedAgentAction,
   connectionState,
   collapsed,
+  onExpandCollapsed,
   onToggleCollapsed,
   onSelectWorkspace,
   onRefresh,
@@ -386,11 +388,8 @@ export function MissionSidebar({
           pathname={pathname}
           statusTone={statusTone}
           surfaceTheme={surfaceTheme}
-          onNavigate={() => {
-            onToggleCollapsed();
-          }}
           onItemNavigate={handleNavigate}
-          onToggleCollapsed={onToggleCollapsed}
+          onExpandCollapsed={onExpandCollapsed ?? onToggleCollapsed}
         />
       ) : (
         <aside className="relative flex h-full w-full flex-col overflow-hidden border-r border-white/[0.08] bg-[radial-gradient(circle_at_18%_0%,rgba(56,102,170,0.20),transparent_34%),linear-gradient(180deg,rgba(18,26,41,0.98)_0%,rgba(10,16,27,0.98)_48%,rgba(5,10,18,0.99)_100%)] text-slate-100 shadow-[18px_0_60px_rgba(0,0,0,0.34)]">
@@ -967,11 +966,11 @@ function WorkspaceSwitcher({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[0.95rem] font-semibold leading-5 text-white">
-            {workspace?.name || "No workspace"}
+            {activeWorkspaceId === null ? "All workspaces" : workspace?.name || "No workspace"}
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-[0.63rem] font-semibold uppercase leading-none tracking-[0.22em] text-slate-500">
             <StatusDot tone={statusTone} pulse={statusTone === "bg-emerald-400"} className="h-2 w-2" />
-            Workspace
+            {activeWorkspaceId === null ? `${snapshot.workspaces.length} workspaces` : "Workspace"}
           </span>
         </span>
         <span className="flex flex-col items-end gap-1">
@@ -1117,6 +1116,7 @@ function SidebarNavItem({
   return (
     <Link
       href={item.href ?? "#"}
+      scroll={item.href?.startsWith("/settings#") ? false : undefined}
       aria-current={active ? "page" : undefined}
       onClick={onNavigate}
       className={cn(
@@ -1145,23 +1145,21 @@ function CollapsedSidebar({
   pathname,
   statusTone,
   surfaceTheme,
-  onNavigate,
   onItemNavigate,
-  onToggleCollapsed
+  onExpandCollapsed
 }: {
   activeHash: string;
   pathname: string;
   statusTone: string;
   surfaceTheme: "dark" | "light";
-  onNavigate: () => void;
   onItemNavigate: (item: SidebarItem) => void;
-  onToggleCollapsed: () => void;
+  onExpandCollapsed: () => void;
 }) {
   return (
     <aside className="relative flex h-full w-full flex-col items-center overflow-hidden border-r border-white/[0.08] bg-[linear-gradient(180deg,rgba(15,23,38,0.98),rgba(6,10,18,0.99))] px-1 py-4 text-slate-100 shadow-[14px_0_44px_rgba(0,0,0,0.32)]">
       <button
         type="button"
-        onClick={onToggleCollapsed}
+        onClick={onExpandCollapsed}
         aria-label="Expand sidebar"
         className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-[13px] border border-cyan-200/18 bg-white/[0.06] shadow-[0_12px_26px_rgba(0,0,0,0.26)] transition-colors hover:border-cyan-200/28 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
       >
@@ -1195,11 +1193,11 @@ function CollapsedSidebar({
                   >
                     <Link
                       href={item.href ?? "#"}
+                      scroll={item.href?.startsWith("/settings#") ? false : undefined}
                       aria-label={item.label}
                       aria-current={active ? "page" : undefined}
                       onClick={() => {
                         onItemNavigate(item);
-                        onNavigate();
                       }}
                       className={cn(
                         "relative inline-flex h-10 w-10 items-center justify-center rounded-[12px] border outline-none transition-all focus-visible:ring-2 focus-visible:ring-cyan-300/40",
@@ -1226,7 +1224,7 @@ function CollapsedSidebar({
         <StatusDot tone={statusTone} pulse={statusTone === "bg-emerald-400"} />
         <button
           type="button"
-          onClick={onToggleCollapsed}
+          onClick={onExpandCollapsed}
           aria-label="Expand sidebar"
           className="inline-flex h-9 w-9 items-center justify-center rounded-[11px] border border-white/[0.08] bg-white/[0.04] text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40"
         >

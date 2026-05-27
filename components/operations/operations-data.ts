@@ -37,10 +37,14 @@ import type {
   AgentRecord,
   MissionControlSnapshot,
   ModelRecord,
-  SurfaceAccountRecord,
   WorkItemRecord,
   WorkspaceRecord
 } from "@/lib/agentos/contracts";
+import {
+  buildIntegrationStates,
+  type IntegrationState,
+  type IntegrationStatus as AgentOSIntegrationStatus
+} from "@/lib/agentos/integrations/state";
 import type { WorkspaceManagedFile } from "@/lib/openclaw/workspace-file-types";
 import {
   formatAgentDisplayName,
@@ -53,7 +57,7 @@ import type { StatusTone } from "@/components/operations/operations-ui";
 
 export type AgentFilter = "all" | "ready" | "running" | "idle" | "needs-approval";
 export type TaskFilter = "all" | "queue" | "running" | "approval" | "completed";
-export type IntegrationStatus = "connected" | "pending" | "failed" | "disabled";
+export type IntegrationStatus = AgentOSIntegrationStatus;
 
 export type AgentView = {
   id: string;
@@ -109,30 +113,25 @@ export type ModelView = {
   source?: ModelRecord;
 };
 
-export type IntegrationView = {
-  id: string;
-  name: string;
-  category: "Communication" | "Productivity" | "Developer Tools" | "Browser / Automation" | "AI / Model Providers";
-  status: IntegrationStatus;
-  statusLabel: string;
-  statusTone: StatusTone;
-  lastSyncLabel: string;
-  linkedAgents: number;
-  description: string;
+export type IntegrationView = IntegrationState & {
   icon: LucideIcon;
   iconTone: StatusTone;
-  source?: SurfaceAccountRecord;
+  statusTone: StatusTone;
 };
 
 export type FileView = {
   id: string;
   name: string;
   path: string;
+  relativePath: string;
   type: string;
   category: string;
   collection: string;
   updatedLabel: string;
   owner: string;
+  workspaceId: string | null;
+  workspaceName: string;
+  workspacePath: string | null;
   sizeLabel: string;
   sizeBytes: number | null;
   tags: string[];
@@ -301,38 +300,121 @@ const modelExamples: ModelView[] = [
   capabilities: ["Reasoning", "Function Calling", "JSON Mode", "Tool Use"]
 }));
 
-const integrationCatalog: Array<Omit<IntegrationView, "status" | "statusLabel" | "statusTone" | "lastSyncLabel" | "linkedAgents">> = [
-  { id: "telegram", name: "Telegram", category: "Communication", description: "Send and receive messages, manage notifications and alerts via Telegram.", icon: MessageCircle, iconTone: "info" },
-  { id: "discord", name: "Discord", category: "Communication", description: "Route workspace channels, discussions, and alert flows through Discord.", icon: MessageCircle, iconTone: "purple" },
-  { id: "gmail", name: "Gmail", category: "Communication", description: "Connect email triage, summaries, and reply workflows.", icon: Mail, iconTone: "danger" },
-  { id: "slack", name: "Slack", category: "Productivity", description: "Power team alerts, handoffs, and operational notifications.", icon: MessageCircle, iconTone: "success" },
-  { id: "notion", name: "Notion", category: "Productivity", description: "Sync knowledge bases, briefs, and planning pages.", icon: FileText, iconTone: "muted" },
-  { id: "google-drive", name: "Google Drive", category: "Productivity", description: "Use shared documents and generated outputs as workspace context.", icon: HardDrive, iconTone: "warning" },
-  { id: "github", name: "GitHub", category: "Developer Tools", description: "Connect repositories, issues, pull requests, and release automation.", icon: Github, iconTone: "muted" },
-  { id: "linear", name: "Linear", category: "Developer Tools", description: "Sync tasks, roadmaps, and delivery queues.", icon: ClipboardList, iconTone: "purple" },
-  { id: "chrome", name: "Chrome / Browser Automation", category: "Browser / Automation", description: "Give browser agents controlled web automation access.", icon: Chrome, iconTone: "warning" },
-  { id: "webhooks", name: "Webhooks", category: "Browser / Automation", description: "Trigger and receive events from external systems.", icon: Workflow, iconTone: "danger" },
-  { id: "x-twitter", name: "X / Twitter", category: "Browser / Automation", description: "Monitor social trends and route campaign signals.", icon: BellRing, iconTone: "muted" },
-  { id: "openrouter", name: "OpenRouter", category: "AI / Model Providers", description: "Route agents across broad hosted model catalogs.", icon: Puzzle, iconTone: "muted" },
-  { id: "ollama", name: "Ollama", category: "AI / Model Providers", description: "Use local models for private and low-cost background tasks.", icon: Terminal, iconTone: "muted" }
-];
-
-const integrationStatusLabels: Record<IntegrationStatus, string> = {
-  connected: "Connected",
-  pending: "Pending Setup",
-  failed: "Failed",
-  disabled: "Disabled"
-};
-
 const integrationStatusTones: Record<IntegrationStatus, StatusTone> = {
   connected: "success",
-  pending: "warning",
+  disabled: "muted",
+  "pending-setup": "warning",
   failed: "danger",
-  disabled: "muted"
+  "needs-authentication": "warning",
+  "missing-credentials": "warning",
+  unsupported: "muted",
+  unknown: "muted"
 };
 
-export function buildAgentViews(snapshot: MissionControlSnapshot): AgentView[] {
+const integrationIconRegistry: Record<string, { icon: LucideIcon; iconTone: StatusTone }> = {
+  telegram: { icon: MessageCircle, iconTone: "info" },
+  discord: { icon: MessageCircle, iconTone: "purple" },
+  gmail: { icon: Mail, iconTone: "danger" },
+  slack: { icon: MessageCircle, iconTone: "success" },
+  "google-chat": { icon: MessageCircle, iconTone: "success" },
+  email: { icon: Mail, iconTone: "info" },
+  notion: { icon: FileText, iconTone: "muted" },
+  "google-drive": { icon: HardDrive, iconTone: "warning" },
+  github: { icon: Github, iconTone: "muted" },
+  linear: { icon: ClipboardList, iconTone: "purple" },
+  chrome: { icon: Chrome, iconTone: "warning" },
+  webhooks: { icon: Workflow, iconTone: "danger" },
+  cron: { icon: Activity, iconTone: "warning" },
+  "x-twitter": { icon: BellRing, iconTone: "muted" },
+  openrouter: { icon: Puzzle, iconTone: "muted" },
+  ollama: { icon: Terminal, iconTone: "muted" }
+};
+
+export function scopeMissionControlSnapshot(
+  snapshot: MissionControlSnapshot,
+  workspaceId: string | null
+): MissionControlSnapshot {
+  if (!workspaceId) {
+    return snapshot;
+  }
+
+  const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
+
+  if (!workspace) {
+    return {
+      ...snapshot,
+      workspaces: [],
+      agents: [],
+      tasks: [],
+      runtimes: [],
+      models: [],
+      channelAccounts: [],
+      channelRegistry: { ...snapshot.channelRegistry, channels: [] }
+    };
+  }
+
+  const agents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
+  const agentIds = new Set(agents.map((agent) => agent.id));
+  const tasks = snapshot.tasks.filter(
+    (task) =>
+      task.workspaceId === workspace.id ||
+      (task.primaryAgentId ? agentIds.has(task.primaryAgentId) : false) ||
+      task.agentIds.some((agentId) => agentIds.has(agentId))
+  );
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const taskRuntimeIds = new Set(tasks.flatMap((task) => task.runtimeIds));
+  const runtimes = snapshot.runtimes.filter(
+    (runtime) =>
+      runtime.workspaceId === workspace.id ||
+      (runtime.agentId ? agentIds.has(runtime.agentId) : false) ||
+      (runtime.taskId ? taskIds.has(runtime.taskId) : false) ||
+      taskRuntimeIds.has(runtime.id)
+  );
+  const modelIds = new Set(
+    [
+      ...agents.map((agent) => agent.modelId),
+      ...runtimes.map((runtime) => runtime.modelId),
+      snapshot.diagnostics.modelReadiness.resolvedDefaultModel,
+      snapshot.diagnostics.modelReadiness.defaultModel
+    ].filter((modelId): modelId is string => Boolean(modelId))
+  );
+  const models = snapshot.models.filter((model) => modelIds.has(model.id));
+  const channels = snapshot.channelRegistry.channels
+    .map((channel) => ({
+      ...channel,
+      workspaces: channel.workspaces.filter((binding) => binding.workspaceId === workspace.id)
+    }))
+    .filter((channel) => channel.workspaces.length > 0);
+  const channelTypes = new Set(channels.map((channel) => normalizeIntegrationKey(channel.type)));
+  const channelAccounts = snapshot.channelAccounts.filter((account) => {
+    const key = normalizeIntegrationKey(account.type);
+    return channelTypes.has(key) || channelTypes.has(aliasIntegrationKey(key));
+  });
+
+  return {
+    ...snapshot,
+    workspaces: [workspace],
+    agents,
+    tasks,
+    runtimes,
+    models,
+    channelAccounts,
+    channelRegistry: {
+      ...snapshot.channelRegistry,
+      channels
+    }
+  };
+}
+
+export function buildAgentViews(
+  snapshot: MissionControlSnapshot,
+  options: { useExamples?: boolean } = {}
+): AgentView[] {
   if (snapshot.agents.length === 0) {
+    if (options.useExamples === false) {
+      return [];
+    }
+
     return agentExamples;
   }
 
@@ -362,8 +444,15 @@ export function buildAgentViews(snapshot: MissionControlSnapshot): AgentView[] {
   });
 }
 
-export function buildTaskViews(snapshot: MissionControlSnapshot): TaskView[] {
+export function buildTaskViews(
+  snapshot: MissionControlSnapshot,
+  options: { useExamples?: boolean } = {}
+): TaskView[] {
   if (snapshot.tasks.length === 0) {
+    if (options.useExamples === false) {
+      return [];
+    }
+
     return taskExamples;
   }
 
@@ -394,8 +483,15 @@ export function buildTaskViews(snapshot: MissionControlSnapshot): TaskView[] {
   });
 }
 
-export function buildModelViews(snapshot: MissionControlSnapshot): ModelView[] {
+export function buildModelViews(
+  snapshot: MissionControlSnapshot,
+  options: { useExamples?: boolean } = {}
+): ModelView[] {
   if (snapshot.models.length === 0) {
+    if (options.useExamples === false) {
+      return [];
+    }
+
     return modelExamples;
   }
 
@@ -419,34 +515,12 @@ export function buildModelViews(snapshot: MissionControlSnapshot): ModelView[] {
 }
 
 export function buildIntegrationViews(snapshot: MissionControlSnapshot): IntegrationView[] {
-  const channelAccountsByType = new Map<string, SurfaceAccountRecord[]>();
-  snapshot.channelAccounts.forEach((account) => {
-    const key = normalizeIntegrationKey(account.type);
-    channelAccountsByType.set(key, [...(channelAccountsByType.get(key) ?? []), account]);
-  });
-
-  const registryByType = new Map<string, number>();
-  snapshot.channelRegistry.channels.forEach((channel) => {
-    const key = normalizeIntegrationKey(channel.type);
-    const linkedCount = uniqueCount(channel.workspaces.flatMap((workspace) => workspace.agentIds));
-    registryByType.set(key, (registryByType.get(key) ?? 0) + linkedCount);
-  });
-
-  return integrationCatalog.map((entry) => {
-    const accounts = channelAccountsByType.get(entry.id) ?? channelAccountsByType.get(aliasIntegrationKey(entry.id)) ?? [];
-    const source = accounts[0];
-    const linkedAgents = registryByType.get(entry.id) ?? registryByType.get(aliasIntegrationKey(entry.id)) ?? 0;
-    const connected = Boolean(source?.enabled || linkedAgents > 0);
-    const status: IntegrationStatus = connected ? "connected" : entry.id === "webhooks" || entry.id === "openrouter" || entry.id === "ollama" ? "pending" : "disabled";
-
+  return buildIntegrationStates(snapshot).map((entry) => {
+    const iconConfig = integrationIconRegistry[entry.id] ?? { icon: Puzzle, iconTone: "muted" as const };
     return {
       ...entry,
-      status,
-      statusLabel: integrationStatusLabels[status],
-      statusTone: integrationStatusTones[status],
-      lastSyncLabel: connected ? "1m ago" : "Not connected",
-      linkedAgents,
-      source
+      ...iconConfig,
+      statusTone: integrationStatusTones[entry.status]
     };
   });
 }
@@ -458,9 +532,9 @@ export function buildFileViews(
 ): FileView[] {
   if (files.length === 0 && workspace) {
     return [
-      ...workspace.bootstrap.coreFiles.map((file) => buildSyntheticFile(file.label, "Core Knowledge", "context")),
-      ...workspace.bootstrap.optionalFiles.map((file) => buildSyntheticFile(file.label, "Memory", "memory")),
-      ...(workspace.bootstrap.contextFiles ?? []).map((file) => buildSyntheticFile(file.label, "Reports", "context"))
+      ...workspace.bootstrap.coreFiles.map((file) => buildSyntheticFile(file.label, "Core Knowledge", "context", workspace)),
+      ...workspace.bootstrap.optionalFiles.map((file) => buildSyntheticFile(file.label, "Memory", "memory", workspace)),
+      ...(workspace.bootstrap.contextFiles ?? []).map((file) => buildSyntheticFile(file.label, "Reports", "context", workspace))
     ];
   }
 
@@ -468,14 +542,18 @@ export function buildFileViews(
     const collection = collectionForFile(file);
     const ownerAgent = agents[index % Math.max(1, agents.length)];
     return {
-      id: file.path,
+      id: `${workspace?.id ?? "global"}:${file.path}`,
       name: file.label,
       path: `/${file.path}`,
+      relativePath: file.path,
       type: languageLabel(file.language),
       category: file.category,
       collection,
       updatedLabel: file.exists ? `${index + 1}h ago` : "Not created",
       owner: ownerAgent ? formatAgentDisplayName(ownerAgent) : "Workspace",
+      workspaceId: workspace?.id ?? null,
+      workspaceName: workspace?.name ?? "All workspaces",
+      workspacePath: workspace?.path ?? null,
       sizeLabel: file.size == null ? "-" : formatBytes(file.size),
       sizeBytes: file.size,
       tags: tagFile(file),
@@ -690,8 +768,13 @@ function buildModelCapabilities(model: ModelRecord) {
 
 function normalizeIntegrationKey(value: string) {
   const normalized = value.toLowerCase().replace(/_/g, "-");
-  if (normalized === "email") {
-    return "gmail";
+
+  if (normalized === "webhook") {
+    return "webhooks";
+  }
+
+  if (normalized === "googlechat") {
+    return "google-chat";
   }
 
   if (normalized === "browser") {
@@ -717,16 +800,25 @@ function aliasIntegrationKey(value: string) {
   return value;
 }
 
-function buildSyntheticFile(name: string, collection: string, category: string): FileView {
+function buildSyntheticFile(
+  name: string,
+  collection: string,
+  category: string,
+  workspace: WorkspaceRecord | null
+): FileView {
   return {
-    id: `synthetic-${name}`,
+    id: `synthetic-${workspace?.id ?? "global"}-${name}`,
     name,
     path: `/${name}`,
+    relativePath: name,
     type: name.endsWith(".json") ? "JSON" : "Markdown",
     category,
     collection,
     updatedLabel: "From workspace manifest",
     owner: "Workspace",
+    workspaceId: workspace?.id ?? null,
+    workspaceName: workspace?.name ?? "All workspaces",
+    workspacePath: workspace?.path ?? null,
     sizeLabel: "-",
     sizeBytes: null,
     tags: [collection.toLowerCase().split(" ")[0]],
@@ -830,9 +922,13 @@ export const taskStatusIcons: Record<TaskView["status"], LucideIcon> = {
 
 export const integrationStatusIcons: Record<IntegrationStatus, LucideIcon> = {
   connected: CircleCheck,
-  pending: CircleDashed,
+  disabled: Archive,
+  "pending-setup": CircleDashed,
   failed: XCircle,
-  disabled: Archive
+  "needs-authentication": ShieldCheck,
+  "missing-credentials": ShieldCheck,
+  unsupported: Archive,
+  unknown: CircleDashed
 };
 
 export const fileCollectionIcons: Record<string, LucideIcon> = {

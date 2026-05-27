@@ -5,7 +5,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
   Bot,
   Box,
   Check,
@@ -212,6 +211,7 @@ export function SettingsControlCenter(
 
     const syncActiveSectionFromHash = () => {
       setActiveSection(resolveInitialSettingsSection());
+      scrollSettingsToTop();
     };
 
     window.addEventListener("hashchange", syncActiveSectionFromHash);
@@ -221,6 +221,10 @@ export function SettingsControlCenter(
       window.removeEventListener("hashchange", syncActiveSectionFromHash);
     };
   }, []);
+
+  useEffect(() => {
+    scrollSettingsToTop();
+  }, [activeSection]);
 
   const saveGatewayAuthCredential = async () => {
     const credential = gatewayAuthCredential.trim();
@@ -329,24 +333,12 @@ export function SettingsControlCenter(
     >
         <section
           className={cn(
-            "min-w-0 px-4 pb-8 pt-[86px] sm:px-6 lg:mr-[84px] lg:px-7 xl:px-8",
+            "min-w-0 pb-8 pl-[72px] pr-3 pt-[86px] sm:pl-[84px] sm:pr-6 lg:mr-[84px] lg:px-7 xl:px-8",
             sidebarOpen ? "lg:ml-[316px]" : "lg:ml-[80px]"
           )}
         >
           <div className="mx-auto max-w-[1160px] 2xl:max-w-[1240px]">
             <div className="flex flex-col">
-              <Link
-                href="/"
-                className={cn(
-                  "mb-2 inline-flex w-fit items-center gap-2 rounded-full border px-3 py-2 text-xs shadow-[0_12px_28px_rgba(91,63,43,0.08)] lg:hidden",
-                  surfaceTheme === "light"
-                    ? "border-[#decfc2] bg-[#fffaf3]/86 text-[#6f5a4b]"
-                    : "border-white/10 bg-[#0e1726]/96 text-slate-200 shadow-[0_12px_28px_rgba(0,0,0,0.24)]"
-                )}
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Mission Control
-              </Link>
               <nav
                 aria-label="Settings sections"
                 className={cn(
@@ -364,8 +356,12 @@ export function SettingsControlCenter(
                     <Link
                       key={section.id}
                       href={`/settings#${section.id}`}
+                      scroll={false}
                       aria-current={active ? "page" : undefined}
-                      onClick={() => setActiveSection(section.id)}
+                      onClick={() => {
+                        setActiveSection(section.id);
+                        scrollSettingsToTop();
+                      }}
                       className={cn(
                         "inline-flex h-10 items-center gap-2 rounded-[14px] border px-3 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40",
                         active && !section.destructive
@@ -1761,6 +1757,16 @@ function copyToClipboard(value: string) {
   }
 
   void navigator.clipboard.writeText(value);
+}
+
+function scrollSettingsToTop() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
 }
 
 function resolveInitialSettingsSection(): SettingsSectionId {

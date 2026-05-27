@@ -445,13 +445,17 @@ test("OpenClaw local module imports do not introduce cycles", () => {
 test("sidebar exposes config-driven mission and admin navigation routes", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
 
-  assert.match(source, /type SidebarSection = "navigation" \| "resources" \| "admin";/);
+  assert.match(source, /type SidebarSection = "overview" \| "operations" \| "system";/);
   assert.match(source, /type SidebarItem = \{[\s\S]*?href\?: string;[\s\S]*?icon: LucideIcon;[\s\S]*?section: SidebarSection;/);
   assert.match(source, /const sidebarItems: SidebarItem\[] = \[/);
-  assert.match(source, /\{ label: "Mission Control", href: "\/", icon: Gauge, section: "navigation" \}/);
-  assert.match(source, /\{ label: "Agents", href: "\/#agents", hash: "agents", icon: Bot, section: "navigation" \}/);
-  assert.match(source, /\{ label: "Settings", href: "\/settings", icon: Settings2, section: "admin" \}/);
-  assert.match(source, /\{ label: "Diagnostics", href: "\/settings#diagnostics", hash: "diagnostics", icon: TerminalSquare, section: "admin" \}/);
+  assert.match(source, /\{ label: "Mission Control", href: "\/", icon: Gauge, section: "overview" \}/);
+  assert.match(source, /\{ label: "Agents", href: "\/agents", icon: Bot, section: "operations" \}/);
+  assert.match(source, /\{ label: "Tasks", href: "\/tasks", icon: ClipboardList, section: "operations" \}/);
+  assert.match(source, /\{ label: "Files", href: "\/files", icon: FileText, section: "operations" \}/);
+  assert.match(source, /\{ label: "Models", href: "\/models", icon: Cpu, section: "operations" \}/);
+  assert.match(source, /\{ label: "Integrations", href: "\/integrations", icon: Plug, section: "operations" \}/);
+  assert.match(source, /\{ label: "Settings", href: "\/settings", icon: Settings2, section: "system" \}/);
+  assert.match(source, /\{ label: "Diagnostics", href: "\/settings#diagnostics", hash: "diagnostics", icon: TerminalSquare, section: "system" \}/);
   assert.match(source, /onOpenWorkspaceCreate: \(\) => void;/);
   assert.match(source, /<span className="block truncate text-\[0\.82rem\] font-medium">Create Workspace<\/span>/);
   assert.match(source, /onOpenWorkspaceCreate\(\);[\s\S]*?setOpen\(false\);/);
@@ -516,7 +520,7 @@ test("settings control center exposes hash navigation for subpages", () => {
   assert.match(source, /\{ id: "diagnostics", label: "Diagnostics", icon: TerminalSquare \}/);
   assert.match(source, /aria-label="Settings sections"/);
   assert.match(source, /href=\{`\/settings#\$\{section\.id\}`\}/);
-  assert.match(source, /onClick=\{\(\) => setActiveSection\(section\.id\)\}/);
+  assert.match(source, /onClick=\{\(\) => \{[\s\S]*?setActiveSection\(section\.id\);[\s\S]*?scrollSettingsToTop\(\);[\s\S]*?\}\}/);
   assert.match(source, /case "diagnostics":\s*return "diagnostics";/);
   assert.doesNotMatch(source, /id: "billing"/);
   assert.doesNotMatch(source, /id: "audit-logs"/);

@@ -39,6 +39,10 @@ import {
   getProvisionDraftText,
   isProvisionFieldSatisfied
 } from "@/lib/openclaw/surface-provision";
+import {
+  resolveGatewayAuthRepairAction,
+  type GatewayAuthRepairAction
+} from "@/lib/openclaw/gateway-auth-actions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type {
   ChannelAccountRecord,
@@ -56,12 +60,24 @@ type ChannelMutationResult = {
   account?: MissionControlSnapshot["channelAccounts"][number];
 };
 
+type GatewayAuthStatusResult = {
+  authStatus?: {
+    native?: {
+      ok?: boolean;
+      issue?: string | null;
+    };
+    recommendation?: string | null;
+  };
+  error?: string;
+};
+
 const SURFACE_KIND_ORDER: MissionControlSurfaceKind[] = ["chat", "inbox", "trigger"];
 
 export function WorkspaceChannelsDialog({
   snapshot,
   workspaceId,
   open,
+  initialProvider = null,
   onOpenChange,
   onRefresh,
   onSnapshotChange
@@ -69,6 +85,7 @@ export function WorkspaceChannelsDialog({
   snapshot: MissionControlSnapshot;
   workspaceId: string | null;
   open: boolean;
+  initialProvider?: MissionControlSurfaceProvider | null;
   onOpenChange: (open: boolean) => void;
   onRefresh: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
@@ -108,6 +125,17 @@ export function WorkspaceChannelsDialog({
   const [provisionDraft, setProvisionDraft] = useState<Record<string, string | boolean>>(
     buildEmptyProvisionDraft(getSurfaceCatalogEntry(activeProvider))
   );
+
+  useEffect(() => {
+    if (!open || !initialProvider) {
+      return;
+    }
+
+    const entry = getSurfaceCatalogEntry(initialProvider);
+    setActiveKind(entry.kind);
+    setActiveProvider(initialProvider);
+    setProvisionDraft(buildEmptyProvisionDraft(entry));
+  }, [initialProvider, open]);
 
   const providerAccounts = useMemo(
     () => allAccounts.filter((account) => account.type === activeProvider),
@@ -416,6 +444,107 @@ export function WorkspaceChannelsDialog({
     });
   };
 
+  const resolveSurfaceGatewayRepairAction = async (message: string) => {
+    const directAction = resolveGatewayAuthRepairAction(message);
+    if (directAction) {
+      return directAction;
+    }
+
+    if (!isGatewayRecoveryCandidate(message)) {
+      return null;
+    }
+
+    try {
+      const response = await fetch("/api/settings/gateway", {
+        method: "GET"
+      });
+      const result = (await response.json().catch(() => null)) as GatewayAuthStatusResult | null;
+      const nativeIssue = result?.authStatus?.native?.issue ?? null;
+      const recommendation = result?.authStatus?.recommendation ?? null;
+
+      return resolveGatewayAuthRepairAction([message, nativeIssue, recommendation].filter(Boolean).join("\n"));
+    } catch {
+      return null;
+    }
+  };
+
+  const repairGatewayAccessAndRetry = async (
+    action: GatewayAuthRepairAction,
+    retry: () => Promise<void>
+  ) => {
+    beginSaving(`${action.label} repair...`);
+
+    try {
+      const response = await fetch("/api/settings/gateway", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ action: action.apiAction })
+      });
+      const result = (await response.json().catch(() => null)) as GatewayAuthStatusResult | null;
+
+      if (!response.ok) {
+        throw new Error(result?.error || "Gateway access could not be repaired.");
+      }
+
+      if (result?.authStatus?.native && result.authStatus.native.ok === false) {
+        throw new Error(result.authStatus.native.issue || "Gateway access still needs attention.");
+      }
+
+      toast.success(`${action.label} repaired.`, {
+        description: "Retrying the surface operation."
+      });
+      await onRefresh().catch(() => undefined);
+      await retry();
+    } catch (error) {
+      toast.error("Gateway repair failed.", {
+        description: error instanceof Error ? error.message : "Unable to repair Gateway access."
+      });
+    } finally {
+      endSaving();
+    }
+  };
+
+  const showSurfaceMutationError = async (
+    title: string,
+    error: unknown,
+    retry?: () => Promise<void>
+  ) => {
+    const message = readSurfaceErrorMessage(error);
+    const repairAction =
+      (await resolveSurfaceGatewayRepairAction(message)) ??
+      (isGatewayRecoveryCandidate(message) ? buildFallbackGatewayRepairAction() : null);
+
+    if (repairAction && retry) {
+      toast.error(title, {
+        description: `${message} ${repairAction.detail}`,
+        duration: 12_000,
+        action: {
+          label: "Repair & retry",
+          onClick: () => void repairGatewayAccessAndRetry(repairAction, retry)
+        }
+      });
+      return;
+    }
+
+    if (isGatewayRecoveryCandidate(message) && retry) {
+      toast.error(title, {
+        description: `${message} Wait for the OpenClaw Gateway to finish restarting, then retry.`,
+        duration: 10_000,
+        action: {
+          label: "Retry",
+          onClick: () => void retry()
+        }
+      });
+      return;
+    }
+
+    toast.error(title, {
+      description: message
+    });
+  };
+
   const handleAttachExisting = async (account: ChannelAccountRecord) => {
     if (!workspace) {
       return;
@@ -436,9 +565,7 @@ export function WorkspaceChannelsDialog({
       toast.success(`${getSurfaceCatalogEntry(activeProvider).label} connected to this workspace.`);
       void onRefresh().catch(() => {});
     } catch (error) {
-      toast.error("Surface connection failed.", {
-        description: error instanceof Error ? error.message : "Unknown surface error."
-      });
+      await showSurfaceMutationError("Surface connection failed.", error, () => handleAttachExisting(account));
     } finally {
       endSaving();
     }
@@ -487,9 +614,7 @@ export function WorkspaceChannelsDialog({
       toast.success(`${currentCatalogEntry.label} provisioned and connected.`);
       void onRefresh().catch(() => {});
     } catch (error) {
-      toast.error("Surface provisioning failed.", {
-        description: error instanceof Error ? error.message : "Unknown surface error."
-      });
+      await showSurfaceMutationError("Surface provisioning failed.", error, handleProvisionSurface);
     } finally {
       endSaving();
     }
@@ -1499,6 +1624,25 @@ function FormField({
       {children}
     </div>
   );
+}
+
+function readSurfaceErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown surface error.";
+}
+
+function isGatewayRecoveryCandidate(message: string) {
+  return /gateway|websocket|connection closed|service restart|ECONNREFUSED|ECONNRESET|socket hang up|unreachable|not reachable|timed out|timeout|scope upgrade|scope mismatch|missing operator/i.test(
+    message
+  );
+}
+
+function buildFallbackGatewayRepairAction(): GatewayAuthRepairAction {
+  return {
+    apiAction: "repairDeviceAccess",
+    cta: "Repair access",
+    label: "Gateway access",
+    detail: "Approve any pending local AgentOS Gateway scope request, then retry."
+  };
 }
 
 function buildSurfaceRouteOptions(
