@@ -10,9 +10,11 @@ import {
 } from "@/components/mission-control/create-agent-dialog.utils";
 import {
   createOptimisticMissionTaskRecord,
+  buildLaunchpadWorkspaceHandoffProgress,
   buildWorkspaceSelectionStorageKey,
   mergeSnapshotWithOptimisticTasks,
   resolveGatewayDraft,
+  resolveLaunchpadWorkspaceSetupReadiness,
   resolveOpenClawInstallSummary,
   resolveOnboardingAction,
   serializeWorkspaceSelection,
@@ -21,7 +23,7 @@ import {
   shouldDeferWorkspaceSelectionHydration
 } from "@/components/mission-control/mission-control-shell.utils";
 import { resolveInitialOnboardingModelId } from "@/components/mission-control/openclaw-onboarding.utils";
-import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
+import type { MissionControlSnapshot, OperationProgressSnapshot } from "@/lib/agentos/contracts";
 
 test("agent draft helpers keep create flows stable", () => {
   const draft = buildAgentDraft("workspace-1", {
@@ -341,6 +343,80 @@ test("onboarding launchpad requires confirmed setup or a workspace-backed model"
     }),
     true
   );
+});
+
+test("launchpad workspace handoff waits for the workspace and starter agent", () => {
+  const target = {
+    workspaceId: "workspace-1",
+    workspacePath: "/tmp/workspace-1",
+    agentIds: ["agent-1"],
+    primaryAgentId: "agent-1"
+  };
+  const workspaceShellSnapshot = {
+    workspaces: [
+      {
+        id: "workspace-1",
+        name: "Workspace 1",
+        path: "/tmp/workspace-1",
+        agentIds: ["agent-1"]
+      }
+    ],
+    agents: []
+  } as unknown as MissionControlSnapshot;
+  const readySnapshot = {
+    ...workspaceShellSnapshot,
+    agents: [
+      {
+        id: "agent-1",
+        workspaceId: "workspace-1"
+      }
+    ]
+  } as unknown as MissionControlSnapshot;
+
+  const shellReadiness = resolveLaunchpadWorkspaceSetupReadiness(workspaceShellSnapshot, target);
+  const readyReadiness = resolveLaunchpadWorkspaceSetupReadiness(readySnapshot, target);
+
+  assert.equal(shellReadiness.workspaceVisible, true);
+  assert.equal(shellReadiness.primaryAgentVisible, false);
+  assert.equal(shellReadiness.ready, false);
+  assert.equal(readyReadiness.ready, true);
+
+  const baseProgress: OperationProgressSnapshot = {
+    title: "Provisioning workspace",
+    description: "Creating workspace.",
+    percent: 100,
+    steps: [
+      {
+        id: "validate",
+        label: "Checking input",
+        description: "Checking input and target path.",
+        status: "done",
+        percent: 100,
+        activities: []
+      }
+    ]
+  };
+  const syncingProgress = buildLaunchpadWorkspaceHandoffProgress({
+    progress: baseProgress,
+    readiness: shellReadiness,
+    state: "syncing"
+  });
+  const syncingHandoffStep = syncingProgress.steps[syncingProgress.steps.length - 1];
+
+  assert.equal(syncingProgress.title, "Opening workspace");
+  assert.equal(syncingHandoffStep.id, "canvas-handoff");
+  assert.equal(syncingHandoffStep.status, "active");
+  assert.match(syncingHandoffStep.detail ?? "", /starter agent/);
+
+  const readyProgress = buildLaunchpadWorkspaceHandoffProgress({
+    progress: syncingProgress,
+    readiness: readyReadiness,
+    state: "ready"
+  });
+  const readyHandoffStep = readyProgress.steps[readyProgress.steps.length - 1];
+
+  assert.equal(readyProgress.percent, 100);
+  assert.equal(readyHandoffStep.status, "done");
 });
 
 test("workspace selection helpers keep the last valid workspace", () => {

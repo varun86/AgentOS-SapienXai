@@ -127,7 +127,8 @@ test("workspace context survives create, dispatch, restart, and second-workspace
     "IDENTITY.md",
     "MEMORY.md",
     "SOUL.md",
-    "TOOLS.md"
+    "TOOLS.md",
+    "USER.md"
   ]);
   assert.ok(firstTranscript.toolReads.includes("docs/brief.md"));
   assert.ok(firstTranscript.toolReads.includes("docs/architecture.md"));
@@ -436,7 +437,7 @@ function createSnapshot(input: {
           template: "software",
           sourceMode: "empty",
           agentTemplate: "core-team",
-          coreFiles: resourceStates(["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"]),
+          coreFiles: resourceStates(["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md", "HEARTBEAT.md"]),
           optionalFiles: resourceStates(["MEMORY.md"]),
           folders: resourceStates(["memory", "docs", "skills"]),
           projectShell: [],

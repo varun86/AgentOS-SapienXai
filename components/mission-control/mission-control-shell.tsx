@@ -44,12 +44,15 @@ import type { MissionControlShellSettingsPanelProps } from "@/components/mission
 import {
   createOptimisticMissionTaskRecord,
   findReplacementTaskForOptimisticTask,
+  buildLaunchpadWorkspaceHandoffProgress,
   hasAgentOSWorkspaceSetup,
   isDirectChatRuntime,
   isTaskAbortable,
   isTaskHiddenByPreferences,
   mergeSnapshotWithOptimisticTasks,
+  resolveLaunchpadWorkspaceSetupReadiness,
   resolveGatewayDraft,
+  describeLaunchpadWorkspaceSetupReadiness,
   resolveModelOnboardingActionCopy,
   resolveModelOnboardingStartPhase,
   resolveOnboardingAction,
@@ -160,6 +163,8 @@ const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
 const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
 const modelAuthTerminalAutoOpenCooldownMs = 2 * 60 * 1000;
 const modelAuthStatusPollDelaysMs = [4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
+const launchpadWorkspaceHandoffPollDelaysMs = [0, 800, 1_200, 1_800, 2_600, 3_600, 5_000, 6_500];
+const launchpadWorkspaceHandoffSuccessPauseMs = 450;
 const useIsomorphicLayoutEffect = typeof globalThis.window === "undefined" ? useEffect : useLayoutEffect;
 const initialModelSwitchFeedback: ModelSwitchFeedback = {
   phase: "idle",
@@ -187,6 +192,12 @@ function isMissingTranscriptActivityMessage(value: string | null | undefined) {
     (/No transcript file was found for this runtime session/i.test(value) ||
       /No transcript entries were found for this runtime/i.test(value))
   );
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function buildTaskReviewContinuationPrompt(task: WorkItemRecord, capturedOutput: string) {
@@ -279,6 +290,8 @@ export function MissionControlShell({
   const [launchpadWorkspaceCreateRunState, setLaunchpadWorkspaceCreateRunState] = useState<UpdateRunState>("idle");
   const [launchpadWorkspaceCreateProgress, setLaunchpadWorkspaceCreateProgress] =
     useState<OperationProgressSnapshot | null>(null);
+  const [launchpadWorkspaceCreateTarget, setLaunchpadWorkspaceCreateTarget] =
+    useState<WorkspaceCreateResult | null>(null);
   const recentCreatedAgentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gatewayDraft, setGatewayDraft] = useState(() => resolveGatewayDraft(initialSnapshot));
   const [workspaceRootDraft, setWorkspaceRootDraft] = useState(() => resolveWorkspaceRootDraft(initialSnapshot));
@@ -2147,11 +2160,122 @@ export function MissionControlShell({
     setIsOnboardingDismissed(true);
     setLaunchpadWorkspaceCreateRunState("idle");
     setLaunchpadWorkspaceCreateProgress(null);
+    setLaunchpadWorkspaceCreateTarget(null);
   }, []);
+
+  const waitForLaunchpadWorkspaceHandoff = useCallback(async (
+    result: WorkspaceCreateResult,
+    baseProgress: OperationProgressSnapshot | null
+  ) => {
+    let latestSnapshot: MissionControlSnapshot = snapshot;
+    let latestReadiness = resolveLaunchpadWorkspaceSetupReadiness(latestSnapshot, result);
+
+    setLaunchpadWorkspaceCreateProgress(
+      buildLaunchpadWorkspaceHandoffProgress({
+        progress: baseProgress,
+        readiness: latestReadiness,
+        state: latestReadiness.ready ? "ready" : "syncing"
+      })
+    );
+
+    for (const delayMs of launchpadWorkspaceHandoffPollDelaysMs) {
+      if (delayMs > 0) {
+        await wait(delayMs);
+      }
+
+      const refreshedSnapshot = await refreshSnapshot({ force: true }).catch(() => null);
+
+      if (refreshedSnapshot) {
+        latestSnapshot = refreshedSnapshot;
+      }
+
+      latestReadiness = resolveLaunchpadWorkspaceSetupReadiness(latestSnapshot, result);
+
+      setLaunchpadWorkspaceCreateProgress(
+        buildLaunchpadWorkspaceHandoffProgress({
+          progress: baseProgress,
+          readiness: latestReadiness,
+          state: latestReadiness.ready ? "ready" : "syncing"
+        })
+      );
+
+      if (latestReadiness.ready) {
+        return {
+          snapshot: latestSnapshot,
+          readiness: latestReadiness
+        };
+      }
+    }
+
+    const errorDetail = describeLaunchpadWorkspaceSetupReadiness(latestReadiness);
+    setLaunchpadWorkspaceCreateProgress(
+      buildLaunchpadWorkspaceHandoffProgress({
+        progress: baseProgress,
+        readiness: latestReadiness,
+        state: "error",
+        errorDetail
+      })
+    );
+
+    throw new Error(errorDetail);
+  }, [refreshSnapshot, snapshot]);
+
+  const finalizeLaunchpadWorkspaceCreate = useCallback(async (
+    result: WorkspaceCreateResult,
+    readySnapshot: MissionControlSnapshot
+  ) => {
+    const nextWorkspaceId =
+      readySnapshot.workspaces.some((workspace) => workspace.id === result.workspaceId)
+        ? result.workspaceId
+        : readySnapshot.workspaces[0]?.id ?? result.workspaceId;
+
+    setLaunchpadWorkspaceCreateRunState("success");
+    openWorkspaceOnCanvas(nextWorkspaceId, { markPending: true });
+    setSnapshot(readySnapshot);
+    await wait(launchpadWorkspaceHandoffSuccessPauseMs);
+    dismissOnboarding();
+
+    toast.success("Workspace ready.", {
+      description: `${result.agentIds.length} agent${result.agentIds.length === 1 ? "" : "s"} visible at ${result.workspacePath}`
+    });
+
+    if (result.warnings?.length) {
+      toast.message("Workspace created with a sync warning.", {
+        description: result.warnings[0]
+      });
+    }
+
+    if (result.kickoffError) {
+      toast.message("Workspace created, but kickoff needs attention.", {
+        description: result.kickoffError
+      });
+    }
+  }, [dismissOnboarding, openWorkspaceOnCanvas, setSnapshot]);
 
   const runLaunchpadWorkspaceCreate = useCallback(async () => {
     if (launchpadWorkspaceCreateRunState === "running") {
       return null;
+    }
+
+    if (launchpadWorkspaceCreateRunState === "error" && launchpadWorkspaceCreateTarget) {
+      setIsOnboardingDismissed(false);
+      setIsOnboardingForcedOpen(true);
+      setLaunchpadWorkspaceCreateRunState("running");
+
+      try {
+        const handoff = await waitForLaunchpadWorkspaceHandoff(
+          launchpadWorkspaceCreateTarget,
+          launchpadWorkspaceCreateProgress
+        );
+        await finalizeLaunchpadWorkspaceCreate(launchpadWorkspaceCreateTarget, handoff.snapshot);
+        return launchpadWorkspaceCreateTarget;
+      } catch (error) {
+        setLaunchpadWorkspaceCreateRunState("error");
+        toast.error("Workspace setup needs attention.", {
+          description: error instanceof Error ? error.message : "AgentOS could not confirm the canvas handoff."
+        });
+        return null;
+      }
     }
 
     const targetModelId =
@@ -2166,16 +2290,20 @@ export function MissionControlShell({
       return null;
     }
 
-    setLaunchpadWorkspaceCreateRunState("running");
-    setLaunchpadWorkspaceCreateProgress(
-      createPendingOperationProgressSnapshot(
-        buildWorkspaceCreateProgressTemplate({
-          sourceMode: "empty",
-          agentCount: 1,
-          kickoffMission: true
-        })
-      )
+    let lastCreateProgress = createPendingOperationProgressSnapshot(
+      buildWorkspaceCreateProgressTemplate({
+        sourceMode: "empty",
+        agentCount: 1,
+        kickoffMission: true
+      })
     );
+    let createdResultForError: WorkspaceCreateResult | null = null;
+
+    setIsOnboardingDismissed(false);
+    setIsOnboardingForcedOpen(true);
+    setLaunchpadWorkspaceCreateRunState("running");
+    setLaunchpadWorkspaceCreateTarget(null);
+    setLaunchpadWorkspaceCreateProgress(lastCreateProgress);
 
     try {
       const response = await fetch("/api/workspaces", {
@@ -2211,11 +2339,13 @@ export function MissionControlShell({
 
       await consumeNdjsonStream<WorkspaceCreateStreamEvent>(response, async (event) => {
         if (event.type === "progress") {
+          lastCreateProgress = event.progress;
           setLaunchpadWorkspaceCreateProgress(event.progress);
           return;
         }
 
         if (event.progress) {
+          lastCreateProgress = event.progress;
           setLaunchpadWorkspaceCreateProgress(event.progress);
         }
 
@@ -2231,59 +2361,30 @@ export function MissionControlShell({
       }
 
       const result = createdResult as WorkspaceCreateResult;
-      setLaunchpadWorkspaceCreateRunState("success");
+      createdResultForError = result;
+      setLaunchpadWorkspaceCreateTarget(result);
 
-      const refreshedSnapshot = await refreshSnapshot({ force: true }).catch(() => null);
-      const nextWorkspaceId =
-        refreshedSnapshot?.workspaces.some((workspace) => workspace.id === result.workspaceId)
-          ? result.workspaceId
-          : refreshedSnapshot?.workspaces[0]?.id ?? result.workspaceId;
-
-      openWorkspaceOnCanvas(nextWorkspaceId, { markPending: true });
-
-      if (refreshedSnapshot) {
-        setSnapshot(refreshedSnapshot);
-      } else {
-        await refresh().catch(() => {});
-      }
-
-      dismissOnboarding();
-
-      toast.success("Workspace created.", {
-        description: `${result.agentIds.length} agent${result.agentIds.length === 1 ? "" : "s"} created at ${result.workspacePath}`
-      });
-
-      if (result.warnings?.length) {
-        toast.message("Workspace created with a sync warning.", {
-          description: result.warnings[0]
-        });
-      }
-
-      if (result.kickoffError) {
-        toast.message("Workspace created, but kickoff needs attention.", {
-          description: result.kickoffError
-        });
-      }
+      const handoff = await waitForLaunchpadWorkspaceHandoff(result, lastCreateProgress);
+      await finalizeLaunchpadWorkspaceCreate(result, handoff.snapshot);
 
       return result;
     } catch (error) {
       setLaunchpadWorkspaceCreateRunState("error");
       const message = error instanceof Error ? error.message : "Unknown workspace error.";
-      toast.error("Workspace creation failed.", {
+      toast.error(createdResultForError ? "Workspace setup needs attention." : "Workspace creation failed.", {
         description: message
       });
       return null;
     }
   }, [
-    dismissOnboarding,
+    finalizeLaunchpadWorkspaceCreate,
+    launchpadWorkspaceCreateProgress,
     launchpadWorkspaceCreateRunState,
-    openWorkspaceOnCanvas,
-    refresh,
-    refreshSnapshot,
+    launchpadWorkspaceCreateTarget,
     activeWorkspaceId,
     selectedOnboardingModelId,
     snapshot,
-    setSnapshot
+    waitForLaunchpadWorkspaceHandoff
   ]);
 
   const openSetupWizard = (stage?: OnboardingWizardStage) => {

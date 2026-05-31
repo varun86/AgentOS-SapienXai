@@ -96,11 +96,20 @@ export function buildSessionHistoryParams(input: OpenClawSessionHistoryInput = {
   };
 }
 
+export function buildChatHistoryParams(input: OpenClawSessionHistoryInput = {}) {
+  const reference = buildSessionReferenceParams(input);
+  return {
+    sessionKey: reference.key,
+    limit: input.limit,
+    cursor: input.cursor ?? undefined
+  };
+}
+
 export function buildSessionPreviewParams(input: OpenClawSessionHistoryInput = {}) {
   const reference = buildSessionReferenceParams(input);
   const key = reference.key;
   return {
-    ...reference,
+    key,
     sessionKey: key,
     sessionKeys: key ? [key] : undefined,
     limit: input.limit,

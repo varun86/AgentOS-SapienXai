@@ -115,9 +115,16 @@ export function OpenClawOnboarding({
       showReadyState ||
       isOpenClawOnboardingModelReady(snapshot)
     );
-  const showLaunchpad = onboardingModelReady && (showReadyState || !hasWorkspaceSetup);
+  const showLaunchpad = onboardingModelReady && (
+    showReadyState ||
+    !hasWorkspaceSetup ||
+    launchpadCreateRunState === "running" ||
+    launchpadCreateRunState === "success" ||
+    launchpadCreateRunState === "error"
+  );
   const isLaunchpadBuilding = launchpadCreateRunState === "running";
   const workspaceCount = snapshot.workspaces.length;
+  const agentCount = snapshot.agents.length;
   const hasWorkspaces = workspaceCount > 0;
   const defaultModelLabel =
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
@@ -136,22 +143,22 @@ export function OpenClawOnboarding({
   const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
   const stageRun = stage === "system" ? systemRun : modelRun;
   const heroLine = showLaunchpad
-    ? hasWorkspaces
-      ? "AGENTOS : OpenClaw is ready. Choose your first action below."
-      : isLaunchpadBuilding
-        ? "AGENTOS : Building AgentOS Workspace."
-        : launchpadCreateRunState === "error"
-          ? "AGENTOS : Workspace creation needs attention."
-          : "AGENTOS : OpenClaw is ready. Create the first workspace below."
+    ? isLaunchpadBuilding
+      ? "AGENTOS : Opening your first workspace."
+      : launchpadCreateRunState === "error"
+        ? "AGENTOS : Workspace setup needs attention."
+        : hasWorkspaceSetup
+          ? "AGENTOS : OpenClaw is ready. Choose your first action below."
+          : hasWorkspaces
+            ? "AGENTOS : Syncing the first workspace agent."
+            : "AGENTOS : OpenClaw is ready. Create the first workspace below."
     : "AGENTOS : Bring your local OpenClaw online.";
   const topBadgeLabel = showLaunchpad
-    ? hasWorkspaces
-      ? "Launchpad"
-      : isLaunchpadBuilding
-        ? "Building"
-        : launchpadCreateRunState === "error"
-          ? "Needs attention"
-          : "Launchpad"
+    ? isLaunchpadBuilding
+      ? "Opening"
+      : launchpadCreateRunState === "error"
+        ? "Needs attention"
+        : "Launchpad"
     : "Welcome";
   const stageStatusCopy =
     stageRun.statusMessage ||
@@ -200,7 +207,10 @@ export function OpenClawOnboarding({
         initial={{ opacity: 0, y: 18, scale: 0.985 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         className={cn(
-          "my-auto flex w-full max-w-[420px] flex-col overflow-hidden rounded-[16px] border shadow-[0_18px_46px_rgba(0,0,0,0.18)] backdrop-blur-2xl max-h-[min(80vh,560px)]",
+          "my-auto flex w-full flex-col overflow-hidden rounded-[16px] border shadow-[0_18px_46px_rgba(0,0,0,0.18)] backdrop-blur-2xl max-h-[min(80vh,640px)]",
+          showLaunchpad && (isLaunchpadBuilding || launchpadCreateRunState === "error")
+            ? "max-w-[640px]"
+            : "max-w-[420px]",
           surfaceTheme === "light"
             ? "border-[#dccabd]/90 bg-[rgba(255,250,246,0.92)] text-[#47362b] shadow-[0_18px_50px_rgba(161,125,101,0.15)]"
             : "border-white/10 bg-[rgba(6,10,18,0.84)] text-slate-100"
@@ -300,6 +310,8 @@ export function OpenClawOnboarding({
           <LaunchpadStage
             surfaceTheme={surfaceTheme}
             workspaceCount={workspaceCount}
+            agentCount={agentCount}
+            workspaceSetupReady={hasWorkspaceSetup}
             defaultModelLabel={defaultModelLabel}
             createProgress={launchpadCreateProgress}
             createRunState={launchpadCreateRunState}
@@ -351,7 +363,11 @@ export function OpenClawOnboarding({
                 )}
               >
                 {hasWorkspaces
-                  ? "Setup complete"
+                  ? hasWorkspaceSetup
+                    ? "Setup complete"
+                    : launchpadCreateRunState === "error"
+                      ? "Needs attention"
+                      : "Syncing agent"
                   : launchpadCreateRunState === "running"
                     ? "Building workspace"
                     : launchpadCreateRunState === "error"
@@ -414,7 +430,7 @@ export function OpenClawOnboarding({
                         : "bg-white text-slate-950 hover:bg-white/92"
                     )}
                   >
-                    Create Workspace
+                    {launchpadCreateRunState === "error" ? "Retry setup" : "Create Workspace"}
                     <ArrowRight className="ml-1.5 h-3 w-3" />
                   </Button>
                 )}

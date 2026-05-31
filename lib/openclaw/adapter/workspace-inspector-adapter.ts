@@ -35,7 +35,7 @@ export async function buildWorkspaceBootstrapProfileCache(
   rules?: WorkspaceCreateRules
 ): Promise<WorkspaceBootstrapProfileCache> {
   const contextManifest = buildWorkspaceContextManifest(template, rules ?? DEFAULT_WORKSPACE_RULES);
-  const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"] as const;
+  const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md", "HEARTBEAT.md"] as const;
   const profileFiles = [
     ...new Set([...bootstrapFiles, ...contextManifest.resources.map((spec) => spec.relativePath)])
   ];
@@ -76,6 +76,7 @@ export async function readWorkspaceInspectorMetadata(
     "AGENTS.md",
     "SOUL.md",
     "IDENTITY.md",
+    "USER.md",
     "TOOLS.md",
     "HEARTBEAT.md",
     "MEMORY.md"
@@ -85,6 +86,7 @@ export async function readWorkspaceInspectorMetadata(
       { id: "agents", label: "AGENTS.md", relativePath: "AGENTS.md", kind: "file" },
       { id: "soul", label: "SOUL.md", relativePath: "SOUL.md", kind: "file" },
       { id: "identity", label: "IDENTITY.md", relativePath: "IDENTITY.md", kind: "file" },
+      { id: "user", label: "USER.md", relativePath: "USER.md", kind: "file" },
       { id: "tools", label: "TOOLS.md", relativePath: "TOOLS.md", kind: "file" },
       { id: "heartbeat", label: "HEARTBEAT.md", relativePath: "HEARTBEAT.md", kind: "file" }
     ]),

@@ -6,6 +6,9 @@ import {
 export const emptyAgentChatResponseMessage =
   "OpenClaw completed the turn, but AgentOS could not find assistant response text in the Gateway stream, session history, or transcript. Retry the message; if it repeats, inspect Gateway diagnostics.";
 
+export const completedEmptyAgentChatResponseMessage =
+  "OpenClaw completed the turn, but it did not return a chat reply. Workspace changes may already be applied; refresh state or ask the agent for a summary if you need details.";
+
 export function sanitizeAgentChatReplyText(value: unknown) {
   if (typeof value !== "string") {
     return "";
@@ -58,6 +61,13 @@ export function extractLatestAssistantTextFromSessionHistory(payload: unknown) {
   }
 
   return null;
+}
+
+export function isCompletedEmptyAgentChatResponse(payload: { meta?: Record<string, unknown> } | null | undefined) {
+  return (
+    payload?.meta?.emptyAgentChatResponse === true &&
+    payload.meta.emptyAgentChatStatus === "completed"
+  );
 }
 
 function stripTrailingMissionControlActionBlock(value: string) {

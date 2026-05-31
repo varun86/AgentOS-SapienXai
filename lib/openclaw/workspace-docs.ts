@@ -46,6 +46,7 @@ export const WORKSPACE_CONTEXT_CORE_PATHS = [
   "AGENTS.md",
   "SOUL.md",
   "IDENTITY.md",
+  "USER.md",
   "TOOLS.md",
   "HEARTBEAT.md"
 ] as const;
@@ -122,6 +123,13 @@ export function buildWorkspaceContextResourceSpecs(template?: WorkspaceTemplate 
       relativePath: "IDENTITY.md",
       kind: "file",
       headings: ["Role"]
+    },
+    {
+      id: "user",
+      label: "USER.md",
+      relativePath: "USER.md",
+      kind: "file",
+      headings: ["Operator Profile", "Preferences"]
     },
     {
       id: "tools",
@@ -478,6 +486,13 @@ function buildWorkspaceScaffoldDocumentSpecs(
       render: ({ template }) => renderIdentityMarkdown(template)
     },
     {
+      path: "USER.md",
+      title: "USER.md",
+      description: "Operator profile and durable user preferences.",
+      category: "core",
+      render: () => renderUserMarkdown()
+    },
+    {
       path: "TOOLS.md",
       title: "TOOLS.md",
       description: "Repository commands and workflow notes.",
@@ -666,6 +681,20 @@ function renderIdentityMarkdown(template: WorkspaceTemplate) {
 This workspace hosts a ${TEMPLATE_LABELS[template].toLowerCase()} team coordinated through OpenClaw.
 
 **Vibe:** pragmatic, concise, quality-minded, workspace-grounded
+`;
+}
+
+function renderUserMarkdown() {
+  return `# USER
+
+## Operator Profile
+- Name:
+- What to call them:
+- Timezone:
+
+## Preferences
+- Capture stable user preferences, review style, delivery expectations, and project-specific working agreements here.
+- Keep sensitive personal details out unless the operator explicitly asks to remember them.
 `;
 }
 

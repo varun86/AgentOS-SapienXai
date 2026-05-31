@@ -149,11 +149,20 @@ function buildSessionHistoryParams(input: OpenClawSessionHistoryInput = {}) {
   };
 }
 
+function buildChatHistoryParams(input: OpenClawSessionHistoryInput = {}) {
+  const reference = buildSessionReferenceParams(input);
+  return {
+    sessionKey: reference.key,
+    limit: input.limit,
+    cursor: input.cursor ?? undefined
+  };
+}
+
 function buildSessionPreviewParams(input: OpenClawSessionHistoryInput = {}) {
   const reference = buildSessionReferenceParams(input);
   const key = reference.key;
   return {
-    ...reference,
+    key,
     sessionKey: key,
     sessionKeys: key ? [key] : undefined,
     limit: input.limit,
@@ -422,7 +431,7 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
   async getSessionHistory(input: OpenClawSessionHistoryInput = {}, options: OpenClawCommandOptions = {}) {
     let lastError: unknown = null;
     const candidates = [
-      ["chat.history", buildSessionHistoryParams(input)] as const,
+      ["chat.history", buildChatHistoryParams(input)] as const,
       ["sessions.preview", buildSessionPreviewParams(input)] as const,
       ["sessions.history", buildSessionHistoryParams(input)] as const
     ];

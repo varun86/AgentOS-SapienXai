@@ -681,12 +681,16 @@ function resolveModelDisplayLabel(
 export function LaunchpadStage({
   surfaceTheme,
   workspaceCount,
+  agentCount,
+  workspaceSetupReady,
   defaultModelLabel,
   createProgress,
   createRunState
 }: {
   surfaceTheme: SurfaceTheme;
   workspaceCount: number;
+  agentCount: number;
+  workspaceSetupReady: boolean;
   defaultModelLabel: string;
   createProgress: OperationProgressSnapshot | null;
   createRunState: "idle" | "running" | "success" | "error";
@@ -696,14 +700,16 @@ export function LaunchpadStage({
   const hasWorkspaceCreateError = createRunState === "error" && Boolean(createProgress);
   const showBuildScene = Boolean(createProgress) && (isBuildingWorkspace || hasWorkspaceCreateError);
   const launchSummary = hasWorkspaces
-    ? `You already have ${workspaceCount} workspace${workspaceCount === 1 ? "" : "s"} online. Use AgentOS to inspect them or create another workspace for a new mission.`
+    ? workspaceSetupReady
+      ? `You already have ${workspaceCount} workspace${workspaceCount === 1 ? "" : "s"} online. Use AgentOS to inspect them or create another workspace for a new mission.`
+      : "The workspace shell is visible. AgentOS is waiting for the starter agent before opening the canvas."
     : isBuildingWorkspace
       ? "AgentOS Workspace is being provisioned now. The scaffold and starter agent are being built in the background."
       : hasWorkspaceCreateError
         ? "The first workspace creation needs attention. Review the output, then try again."
         : "No workspace exists yet. Create one first so the live system has a place to keep context and deliverables.";
-  const modelMetricLabel = hasWorkspaces ? "Default model" : "Detected default";
-  const modelMetricDetail = hasWorkspaces
+  const modelMetricLabel = workspaceSetupReady ? "Default model" : "Detected default";
+  const modelMetricDetail = workspaceSetupReady
     ? "Usable model route selected"
     : "Detected on this machine, not yet confirmed by a workspace.";
 
@@ -778,9 +784,9 @@ export function LaunchpadStage({
             />
             <LaunchpadMetric
               surfaceTheme={surfaceTheme}
-              label="Workspaces"
-              value={String(workspaceCount)}
-              detail={hasWorkspaces ? "Ready for mission planning" : "Create one to begin"}
+              label={hasWorkspaces ? "Starter agent" : "Workspaces"}
+              value={hasWorkspaces ? (agentCount > 0 ? "Visible" : "Pending") : String(workspaceCount)}
+              detail={hasWorkspaces ? "Required before canvas handoff" : "Create one to begin"}
             />
           </div>
         ) : null}
@@ -966,6 +972,109 @@ function LaunchpadBuildScene({
           )}
           style={{ width: `${progress.percent}%` }}
         />
+      </div>
+
+      <div
+        className={cn(
+          "relative z-[1] mt-2.5 overflow-hidden rounded-[14px] border px-2.5 py-2",
+          isLight ? "border-[#ead8c8] bg-white/70" : "border-white/8 bg-white/[0.04]"
+        )}
+      >
+        <div
+          aria-hidden="true"
+          className={cn(
+            "absolute inset-0 opacity-60",
+            isLight
+              ? "bg-[linear-gradient(90deg,transparent,rgba(216,180,254,0.12),transparent)]"
+              : "bg-[linear-gradient(90deg,transparent,rgba(34,211,238,0.08),transparent)]"
+          )}
+        />
+        <div className="relative z-[1] flex items-center gap-2">
+          {["Workspace", "Starter agent", "Canvas"].map((label, index) => {
+            const stepReady =
+              index === 0
+                ? progress.percent >= 28
+                : index === 1
+                  ? progress.percent >= 62
+                  : progress.percent >= 88;
+            const isCurrent = !isError && !stepReady && (
+              index === 0 ||
+              (index === 1 && progress.percent >= 28) ||
+              (index === 2 && progress.percent >= 62)
+            );
+
+            return (
+              <div key={label} className="flex min-w-0 flex-1 items-center gap-2">
+                <div
+                  className={cn(
+                    "relative flex min-h-[52px] min-w-0 flex-1 flex-col justify-between rounded-[12px] border px-2 py-1.5",
+                    stepReady
+                      ? isLight
+                        ? "border-emerald-200 bg-emerald-50/80"
+                        : "border-emerald-300/20 bg-emerald-300/10"
+                      : isCurrent
+                        ? isLight
+                          ? "border-[#d8b69b] bg-[#fff8f1]"
+                          : "border-cyan-300/18 bg-cyan-300/[0.06]"
+                        : isLight
+                          ? "border-[#ead8c8] bg-white/65"
+                          : "border-white/8 bg-white/[0.03]"
+                  )}
+                >
+                  {isCurrent ? (
+                    <motion.div
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute inset-y-0 left-0 w-1/2",
+                        isLight
+                          ? "bg-gradient-to-r from-transparent via-[#d9b08d]/20 to-transparent"
+                          : "bg-gradient-to-r from-transparent via-cyan-200/10 to-transparent"
+                      )}
+                      animate={{ x: ["-50%", "220%"] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: "linear" }}
+                    />
+                  ) : null}
+                  <span
+                    className={cn(
+                      "relative z-[1] inline-flex h-5 w-5 items-center justify-center rounded-full border text-[8px]",
+                      stepReady
+                        ? isLight
+                          ? "border-emerald-300 bg-white text-emerald-700"
+                          : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200"
+                        : isLight
+                          ? "border-[#dcc7b8] bg-white text-[#8b6f5c]"
+                          : "border-white/10 bg-white/[0.05] text-slate-300"
+                    )}
+                  >
+                    {stepReady ? <Check className="h-2.5 w-2.5" /> : isCurrent ? <LoaderCircle className="h-2.5 w-2.5 animate-spin" /> : index + 1}
+                  </span>
+                  <span
+                    className={cn(
+                      "relative z-[1] truncate text-[8px] leading-[0.9rem]",
+                      isLight ? "text-[#5f4b3e]" : "text-slate-300"
+                    )}
+                  >
+                    {label}
+                  </span>
+                </div>
+                {index < 2 ? (
+                  <span
+                    className={cn(
+                      "hidden h-px w-4 shrink-0 sm:block",
+                      stepReady
+                        ? isLight
+                          ? "bg-emerald-300/70"
+                          : "bg-emerald-300/45"
+                        : isLight
+                          ? "bg-[#dfcabb]"
+                          : "bg-white/12"
+                    )}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="relative z-[1] mt-2.5 space-y-1.5">

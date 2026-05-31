@@ -203,6 +203,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
             { id: "agents", label: "AGENTS.md", present: true },
             { id: "soul", label: "SOUL.md", present: true },
             { id: "identity", label: "IDENTITY.md", present: true },
+            { id: "user", label: "USER.md", present: true },
             { id: "tools", label: "TOOLS.md", present: true },
             { id: "heartbeat", label: "HEARTBEAT.md", present: true }
           ],

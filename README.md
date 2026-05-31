@@ -255,7 +255,7 @@ The 0.5.7 release expects Node.js 20.9 or newer and an OpenClaw Gateway whose pr
 - Persistent Gateway event bridge for chat, tool, log, session, and approval activity where supported by OpenClaw.
 - File reveal actions from the inspector for artifacts written to the local filesystem.
 - Workspace wizard with basic create flow and advanced planner mode, including source modes (`empty`, `clone`, `existing`), templates, team presets, model profiles, and kickoff missions.
-- Structured workspace scaffolding with `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`, `docs/`, `memory/`, `deliverables/`, `skills/`, and `.openclaw/project-shell/`.
+- Structured workspace scaffolding with `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`, `docs/`, `memory/`, `deliverables/`, `skills/`, and `.openclaw/project-shell/`.
 - Agent creation and editing with policy presets (`worker`, `setup`, `browser`, `monitoring`, `custom`) plus heartbeat, file-access, install-scope, and network controls.
 - Guided workspace planner that models company, product, workspace, team, operations, and deploy decisions inside the workspace wizard.
 - Planner deploy flows that can turn a plan into a live workspace, agent team, automations, channels, and first missions.

@@ -3103,6 +3103,46 @@ test("native WS gateway client exposes Phase 2 runtime Gateway methods", async (
   assert.deepEqual(fallback.calls, []);
 });
 
+test("native WS gateway client queries chat history with sessionKey for explicit agent sessions", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["chat.history"]
+              }
+            }
+          : { messages: [{ role: "assistant", text: "history reply" }] }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(await client.getSessionHistory({ agentId: "agent-1", sessionId: "session-1", limit: 40 }), {
+    messages: [{ role: "assistant", text: "history reply" }]
+  });
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "chat.history"]);
+  assert.deepEqual(sentFrames[1]?.params, {
+    sessionKey: "agent:agent-1:explicit:session-1",
+    limit: 40
+  });
+  assert.equal(Object.hasOwn(sentFrames[1]?.params ?? {}, "agentId"), false);
+  assert.equal(Object.hasOwn(sentFrames[1]?.params ?? {}, "sessionId"), false);
+  assert.deepEqual(fallback.calls, []);
+});
+
 test("native WS runtime snapshot only queries artifacts with an explicit Gateway scope", async () => {
   const fallback = new FallbackGatewayClient();
   const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   extractAssistantTextFromAgentChatStreamLine,
   extractLatestAssistantTextFromSessionHistory,
+  isCompletedEmptyAgentChatResponse,
   sanitizeAgentChatReplyText,
   sanitizeAgentChatVisibleText
 } from "@/lib/openclaw/agent-chat-response";
@@ -109,5 +110,26 @@ test("agent chat visible text suppresses mission control actions", () => {
       ].join("\n")
     ),
     "I will use Suleyman from now on."
+  );
+});
+
+test("agent chat response helper detects completed turns without assistant text", () => {
+  assert.equal(
+    isCompletedEmptyAgentChatResponse({
+      meta: {
+        emptyAgentChatResponse: true,
+        emptyAgentChatStatus: "completed"
+      }
+    }),
+    true
+  );
+  assert.equal(
+    isCompletedEmptyAgentChatResponse({
+      meta: {
+        emptyAgentChatResponse: true,
+        emptyAgentChatStatus: "stalled"
+      }
+    }),
+    false
   );
 });

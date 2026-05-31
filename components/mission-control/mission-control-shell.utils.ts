@@ -3,7 +3,11 @@ import { isOpenClawOnboardingSystemReady } from "@/lib/openclaw/readiness";
 import type {
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
+  OperationProgressSnapshot,
+  OperationProgressStepSnapshot,
+  OperationProgressStepStatus,
   TaskFeedEvent,
+  WorkspaceCreateResult,
   WorkItemRecord
 } from "@/lib/agentos/contracts";
 
@@ -18,6 +22,19 @@ export type OptimisticMissionTask = {
   dispatchId: string | null;
   task: WorkItemRecord;
 };
+
+export type LaunchpadWorkspaceSetupReadiness = {
+  workspaceVisible: boolean;
+  primaryAgentVisible: boolean;
+  agentsVisible: boolean;
+  ready: boolean;
+  workspaceName: string | null;
+  workspacePath: string | null;
+  visibleAgentCount: number;
+  expectedAgentCount: number;
+};
+
+const launchpadCanvasHandoffStepId = "canvas-handoff";
 
 type MissionDispatchStart = {
   requestId: string;
@@ -553,6 +570,155 @@ export function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
 
 export function hasAgentOSWorkspaceSetup(snapshot: Pick<MissionControlSnapshot, "workspaces" | "agents">) {
   return (snapshot.workspaces?.length ?? 0) > 0 && (snapshot.agents?.length ?? 0) > 0;
+}
+
+export function resolveLaunchpadWorkspaceSetupReadiness(
+  snapshot: Pick<MissionControlSnapshot, "workspaces" | "agents">,
+  target: Pick<WorkspaceCreateResult, "workspaceId" | "agentIds" | "primaryAgentId"> | null
+): LaunchpadWorkspaceSetupReadiness {
+  const workspace = target
+    ? snapshot.workspaces.find((entry) => entry.id === target.workspaceId) ?? null
+    : snapshot.workspaces[0] ?? null;
+  const workspaceAgents = workspace
+    ? snapshot.agents.filter((agent) => agent.workspaceId === workspace.id)
+    : [];
+  const expectedAgentIds = target?.agentIds?.filter(Boolean) ?? workspace?.agentIds?.filter(Boolean) ?? [];
+  const expectedAgentIdSet = new Set(expectedAgentIds);
+  const visibleExpectedAgentCount =
+    expectedAgentIdSet.size > 0
+      ? workspaceAgents.filter((agent) => expectedAgentIdSet.has(agent.id)).length
+      : workspaceAgents.length;
+  const expectedAgentCount = Math.max(expectedAgentIdSet.size, workspaceAgents.length > 0 ? 1 : 0);
+  const primaryAgentVisible = target?.primaryAgentId
+    ? workspaceAgents.some((agent) => agent.id === target.primaryAgentId)
+    : workspaceAgents.length > 0;
+  const agentsVisible =
+    expectedAgentIdSet.size > 0
+      ? visibleExpectedAgentCount >= expectedAgentIdSet.size
+      : workspaceAgents.length > 0;
+  const workspaceVisible = Boolean(workspace);
+
+  return {
+    workspaceVisible,
+    primaryAgentVisible,
+    agentsVisible,
+    ready: workspaceVisible && primaryAgentVisible && agentsVisible,
+    workspaceName: workspace?.name ?? null,
+    workspacePath: workspace?.path ?? null,
+    visibleAgentCount: visibleExpectedAgentCount,
+    expectedAgentCount
+  };
+}
+
+export function describeLaunchpadWorkspaceSetupReadiness(readiness: LaunchpadWorkspaceSetupReadiness) {
+  if (!readiness.workspaceVisible) {
+    return "Waiting for the workspace shell to appear in the AgentOS snapshot.";
+  }
+
+  if (!readiness.primaryAgentVisible) {
+    return "Workspace shell is visible. Waiting for the starter agent to appear on the canvas.";
+  }
+
+  if (!readiness.agentsVisible) {
+    return `Starter agent is visible. Waiting for ${Math.max(
+      1,
+      readiness.expectedAgentCount - readiness.visibleAgentCount
+    )} workspace agent${readiness.expectedAgentCount - readiness.visibleAgentCount === 1 ? "" : "s"} to sync.`;
+  }
+
+  return "Workspace and starter agent are visible. Opening the AgentOS canvas.";
+}
+
+export function buildLaunchpadWorkspaceHandoffProgress(input: {
+  progress: OperationProgressSnapshot | null;
+  readiness: LaunchpadWorkspaceSetupReadiness;
+  state: "syncing" | "ready" | "error";
+  errorDetail?: string;
+}): OperationProgressSnapshot {
+  const handoffPercent = input.state === "ready"
+    ? 100
+    : input.state === "error"
+      ? 100
+      : input.readiness.primaryAgentVisible
+        ? 82
+        : input.readiness.workspaceVisible
+          ? 58
+          : 34;
+  const handoffStatus: OperationProgressStepStatus = input.state === "ready"
+    ? "done"
+    : input.state === "error"
+      ? "error"
+      : "active";
+  const sourceSteps = (input.progress?.steps ?? []).filter((step) => step.id !== launchpadCanvasHandoffStepId);
+  const completedSteps: OperationProgressStepSnapshot[] = sourceSteps.map((step) => ({
+    ...step,
+    status: "done" as const,
+    percent: 100
+  }));
+  const handoffDetail =
+    input.errorDetail ?? describeLaunchpadWorkspaceSetupReadiness(input.readiness);
+  const handoffStep: OperationProgressStepSnapshot = {
+    id: launchpadCanvasHandoffStepId,
+    label: "Opening workspace canvas",
+    description: "AgentOS is refreshing the graph and waiting for the starter agent before leaving setup.",
+    status: handoffStatus,
+    percent: handoffPercent,
+    detail: handoffDetail,
+    activities: [
+      {
+        id: "handoff-workspace",
+        message: input.readiness.workspaceVisible
+          ? "Workspace shell is visible in AgentOS."
+          : "Waiting for workspace shell in AgentOS.",
+        status: input.readiness.workspaceVisible ? "done" : handoffStatus
+      },
+      {
+        id: "handoff-agent",
+        message: input.readiness.primaryAgentVisible
+          ? "Starter agent is visible on the canvas."
+          : "Waiting for the starter agent card.",
+        status: input.readiness.primaryAgentVisible
+          ? "done"
+          : input.readiness.workspaceVisible
+            ? handoffStatus
+            : "pending"
+      },
+      {
+        id: "handoff-open",
+        message: input.state === "ready"
+          ? "Opening the workspace."
+          : input.state === "error"
+            ? "Canvas handoff needs attention."
+            : "Keeping setup open until the graph is usable.",
+        status: input.state === "ready"
+          ? "done"
+          : input.state === "error"
+            ? "error"
+            : "pending"
+      }
+    ]
+  };
+  const steps = [
+    ...completedSteps,
+    handoffStep
+  ];
+
+  return {
+    title: input.state === "error" ? "Workspace setup needs attention" : "Opening workspace",
+    description: input.state === "ready"
+      ? "The workspace and starter agent are ready on the canvas."
+      : "AgentOS is waiting for OpenClaw state to sync before showing the canvas.",
+    percent: calculateLaunchpadProgressPercent(steps),
+    steps
+  };
+}
+
+function calculateLaunchpadProgressPercent(steps: OperationProgressSnapshot["steps"]) {
+  if (steps.length === 0) {
+    return 0;
+  }
+
+  return Math.round(steps.reduce((sum, step) => sum + step.percent, 0) / steps.length);
 }
 
 export function hasWorkspaceBackedModelSetup(snapshot: MissionControlSnapshot) {

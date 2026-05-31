@@ -30,6 +30,7 @@ import {
   buildArtifactListParams,
   buildAutomationProvisionParams,
   buildChannelAccountProvisionParams,
+  buildChatHistoryParams,
   buildChatInjectParams,
   buildNativeSessionCreateParams,
   buildNativeSessionPatchParams,
@@ -1522,7 +1523,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     }
 
     const candidates = [
-      ["chat.history", buildSessionHistoryParams(input)] as const,
+      ["chat.history", buildChatHistoryParams(input)] as const,
       ["sessions.preview", buildSessionPreviewParams(input)] as const,
       ["sessions.history", buildSessionHistoryParams(input)] as const
     ];

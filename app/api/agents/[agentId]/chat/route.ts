@@ -13,9 +13,11 @@ import {
   isStaleAgentChatContextRecoveryText
 } from "@/lib/openclaw/agent-chat-guards";
 import {
+  completedEmptyAgentChatResponseMessage,
   emptyAgentChatResponseMessage,
   extractAssistantTextFromAgentChatStreamLine,
   extractLatestAssistantTextFromSessionHistory,
+  isCompletedEmptyAgentChatResponse,
   sanitizeAgentChatReplyText,
   sanitizeAgentChatVisibleText
 } from "@/lib/openclaw/agent-chat-response";
@@ -394,6 +396,7 @@ export async function POST(
         }
         response = recoverDirectIdentityResponse(response, formatAgentDisplayName(agent), operatorMessage);
         response = attachStreamMissionControlAction(response, latestStreamAction);
+        response = recoverCompletedEmptyAgentChatResponse(response);
         if (isEmptyAgentChatResponse(response)) {
           await send({
             type: "done",
@@ -577,12 +580,35 @@ function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload):
     status: hasResponseText ? status : "stalled",
     summary,
     payloads,
-    meta: hasResponseText ? meta : { ...meta, emptyAgentChatResponse: true }
+    meta: hasResponseText ? meta : { ...meta, emptyAgentChatResponse: true, emptyAgentChatStatus: status }
   };
 }
 
 function isEmptyAgentChatResponse(response: MissionResponse) {
   return response.meta?.emptyAgentChatResponse === true;
+}
+
+function recoverCompletedEmptyAgentChatResponse(response: MissionResponse): MissionResponse {
+  if (!isCompletedEmptyAgentChatResponse(response)) {
+    return response;
+  }
+
+  return {
+    ...response,
+    status: "completed",
+    summary: completedEmptyAgentChatResponseMessage,
+    payloads: [
+      {
+        text: completedEmptyAgentChatResponseMessage,
+        mediaUrl: null
+      }
+    ],
+    meta: {
+      ...response.meta,
+      emptyAgentChatResponse: false,
+      emptyAgentChatCompletedWithoutText: true
+    }
+  };
 }
 
 function recoverDirectIdentityResponse(response: MissionResponse, agentName: string, operatorMessage: string): MissionResponse {
