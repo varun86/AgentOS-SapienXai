@@ -35,6 +35,10 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "getStatus", options });
       return { version: "1.2.3" };
     },
+    async getUpdateStatus(options?: OpenClawCommandOptions) {
+      calls.push({ method: "getUpdateStatus", options });
+      return { latestVersion: "1.2.4" };
+    },
     async getGatewayStatus(options?: OpenClawCommandOptions) {
       calls.push({ method: "getGatewayStatus", options });
       return { rpc: { ok: true }, gateway: { port: 18789 } };

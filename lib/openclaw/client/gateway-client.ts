@@ -85,6 +85,7 @@ export type {
   OpenClawToolsCatalogPayload,
   OpenClawToolsEffectiveInput,
   OpenClawToolsEffectivePayload,
+  OpenClawUpdateStatusPayload,
   OpenClawUpdateAgentInput,
   PresencePayload,
   StatusPayload

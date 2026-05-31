@@ -32,6 +32,7 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
   failConfigWithInvalidConfig = false;
   failStatus = false;
   statusPayload: Record<string, unknown> = {};
+  updateStatusPayload: Record<string, unknown> = {};
 
   async getHealth() {
     this.calls.push({ method: "getHealth" });
@@ -44,6 +45,11 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
       throw new Error("CLI status failed");
     }
     return this.statusPayload;
+  }
+
+  async getUpdateStatus() {
+    this.calls.push({ method: "getUpdateStatus" });
+    return this.updateStatusPayload;
   }
 
   async getGatewayStatus() {
@@ -677,6 +683,55 @@ test("native WS gateway client does not backfill missing update registry details
   assert.deepEqual(await client.getStatus(), { version: "9.9.9" });
   assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "status"]);
   assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client uses CLI update status when Gateway lacks availability details", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  fallback.updateStatusPayload = {
+    update: {
+      registry: {
+        latestVersion: "10.0.0"
+      }
+    },
+    availability: {
+      available: true,
+      latestVersion: "10.0.0"
+    }
+  };
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 3 } : { sentinel: null }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(await client.getUpdateStatus(), {
+    sentinel: null,
+    update: {
+      registry: {
+        latestVersion: "10.0.0"
+      }
+    },
+    availability: {
+      available: true,
+      latestVersion: "10.0.0"
+    }
+  });
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "update.status"]);
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["getUpdateStatus"]);
+  assert.equal(client.getDiagnostics().fallbackTotal, 1);
+  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.operation, "update.status");
 });
 
 test("native WS gateway client keeps status native without cached CLI registry backfill", async () => {

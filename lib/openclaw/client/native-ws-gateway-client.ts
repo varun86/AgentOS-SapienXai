@@ -166,6 +166,7 @@ import type {
   OpenClawToolsEffectiveInput,
   OpenClawToolsEffectivePayload,
   OpenClawUpdateAgentInput,
+  OpenClawUpdateStatusPayload,
   StatusPayload
 } from "@/lib/openclaw/client/types";
 
@@ -329,6 +330,42 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         }
         this.recordGatewayFallback("status", error);
         return this.fallback.getStatus(options);
+      });
+  }
+
+  getUpdateStatus(options: OpenClawCommandOptions = {}) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.getUpdateStatus(options);
+    }
+
+    return this.callNative<unknown>("update.status", {}, options)
+      .then(async (payload) => {
+        const nativeStatus = parseObjectGatewayPayload<OpenClawUpdateStatusPayload>("update.status", payload);
+
+        if (hasUpdateAvailabilityDetails(nativeStatus)) {
+          clearGatewayFallbackDiagnostic("update.status");
+          this.clearNativeFailure("update.status");
+          return nativeStatus;
+        }
+
+        this.recordGatewayFallback(
+          "update.status",
+          new OpenClawGatewayClientError(
+            "OpenClaw Gateway update.status did not include update availability details.",
+            "malformed-response"
+          )
+        );
+        const fallbackStatus = await this.fallback.getUpdateStatus(options);
+        return mergeUpdateStatusPayloads(nativeStatus, fallbackStatus);
+      })
+      .catch((error) => {
+        this.options.onNativeFailure?.(error, "update.status");
+        const policy = resolveGatewayRequestPolicy("update.status", options);
+        if (!shouldUseCliFallback(error, "update.status", policy)) {
+          throw this.cliFallbackDisabledError("update.status", error);
+        }
+        this.recordGatewayFallback("update.status", error);
+        return this.fallback.getUpdateStatus(options);
       });
   }
 
@@ -1941,4 +1978,56 @@ function resolveGatewayStatusRecovery(
     default:
       return "Inspect Gateway diagnostics, check token/device access, update OpenClaw for compatibility gaps, then restart the Gateway before retrying.";
   }
+}
+
+function hasUpdateAvailabilityDetails(payload: OpenClawUpdateStatusPayload) {
+  return collectUpdateStatusRecords(payload).some((record) =>
+    typeof record.updateAvailable === "boolean" ||
+    typeof record.latestVersion === "string" ||
+    typeof record.targetVersion === "string" ||
+    typeof record.availableVersion === "string" ||
+    typeof record.recommendedVersion === "string" ||
+    typeof record.available === "boolean" ||
+    typeof record.hasRegistryUpdate === "boolean"
+  );
+}
+
+function mergeUpdateStatusPayloads(
+  nativeStatus: OpenClawUpdateStatusPayload,
+  fallbackStatus: OpenClawUpdateStatusPayload
+): OpenClawUpdateStatusPayload {
+  return {
+    ...nativeStatus,
+    ...fallbackStatus
+  };
+}
+
+function collectUpdateStatusRecords(payload: OpenClawUpdateStatusPayload | undefined) {
+  const records: Record<string, unknown>[] = [];
+
+  function add(value: unknown) {
+    if (!isObjectRecord(value) || records.includes(value)) {
+      return;
+    }
+
+    records.push(value);
+  }
+
+  add(payload);
+  add(payload?.update);
+  add(payload?.availability);
+  add(readRecord(payload?.update)?.registry);
+  add(payload?.registry);
+  add(payload?.result);
+  add(readRecord(payload?.result)?.update);
+  add(readRecord(readRecord(payload?.result)?.update)?.registry);
+  add(readRecord(payload?.result)?.availability);
+  add(payload?.sentinel);
+  add(readRecord(payload?.sentinel)?.stats);
+
+  return records;
+}
+
+function readRecord(value: unknown) {
+  return isObjectRecord(value) ? value : undefined;
 }

@@ -81,12 +81,14 @@ import type {
   OpenClawToolsEffectiveInput,
   OpenClawToolsEffectivePayload,
   OpenClawUpdateAgentInput,
+  OpenClawUpdateStatusPayload,
   StatusPayload
 } from "@/lib/openclaw/client/gateway-client";
 
 export interface OpenClawAdapter {
   getHealth(options?: OpenClawCommandOptions): Promise<OpenClawHealthPayload>;
   getStatus(options?: OpenClawCommandOptions): Promise<StatusPayload>;
+  getUpdateStatus(options?: OpenClawCommandOptions): Promise<OpenClawUpdateStatusPayload>;
   getGatewayStatus(options?: OpenClawCommandOptions): Promise<GatewayStatusPayload>;
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
   getAgentModelStatus(input: OpenClawAgentModelStatusInput, options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
@@ -198,6 +200,10 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
 
   getStatus(options: OpenClawCommandOptions = {}) {
     return this.getClient().getStatus(options);
+  }
+
+  getUpdateStatus(options: OpenClawCommandOptions = {}) {
+    return this.getClient().getUpdateStatus(options);
   }
 
   getGatewayStatus(options: OpenClawCommandOptions = {}) {

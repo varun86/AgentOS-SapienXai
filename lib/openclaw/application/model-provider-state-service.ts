@@ -36,11 +36,14 @@ type OpenClawConfigPayload = {
       model?: {
         primary?: string;
       };
-      agentRuntime?: {
-        id?: string;
-      };
-      models?: Record<string, Record<string, unknown>>;
+      models?: Record<string, OpenClawModelDefaultsEntry>;
     };
+  };
+};
+
+type OpenClawModelDefaultsEntry = Record<string, unknown> & {
+  agentRuntime?: {
+    id?: string;
   };
 };
 
@@ -207,6 +210,7 @@ export async function addOpenClawModelsToConfig(provider: AddModelsProviderId, m
 
   for (const modelId of normalizedModelIds) {
     config.agents.defaults.models[modelId] = config.agents.defaults.models[modelId] || {};
+    applyModelRuntimePolicyToModelEntries(config.agents.defaults.models, modelId, provider);
   }
 
   if (!config.agents.defaults.model?.primary && normalizedModelIds[0]) {
@@ -214,20 +218,9 @@ export async function addOpenClawModelsToConfig(provider: AddModelsProviderId, m
       ...(config.agents.defaults.model || {}),
       primary: normalizedModelIds[0]
     };
-
-    if (provider === "openai-codex") {
-      config.agents.defaults.agentRuntime = {
-        ...(config.agents.defaults.agentRuntime || {}),
-        id: "codex"
-      };
-    } else if (provider === "openai") {
-      config.agents.defaults.agentRuntime = {
-        ...(config.agents.defaults.agentRuntime || {}),
-        id: "pi"
-      };
-    }
   }
 
+  stripLegacyAgentRuntimeFromDefaults(config.agents.defaults);
   await writeJsonFile(openClawConfigPath, config);
 }
 
@@ -267,7 +260,8 @@ export async function setOpenClawDefaultModel(
     ...(config.agents.defaults.model || {}),
     primary: normalizedModelId
   };
-  applyDefaultModelRuntime(config, provider);
+  applyDefaultModelRuntime(config, provider, normalizedModelId);
+  stripLegacyAgentRuntimeFromDefaults(config.agents.defaults);
 
   await writeJsonFile(openClawConfigPath, config);
 
@@ -312,6 +306,7 @@ async function addModelsToConfigViaGatewayOnce(provider: AddModelsProviderId, no
 
   for (const modelId of normalizedModelIds) {
     nextModels[modelId] = isRecord(nextModels[modelId]) ? nextModels[modelId] : {};
+    applyModelRuntimePolicyToModelEntries(nextModels, modelId, provider);
   }
 
   nextDefaults.models = nextModels;
@@ -321,10 +316,9 @@ async function addModelsToConfigViaGatewayOnce(provider: AddModelsProviderId, no
       ...(nextDefaults.model || {}),
       primary: normalizedModelIds[0]
     };
-
-    applyDefaultModelRuntimeToDefaults(nextDefaults, provider);
   }
 
+  stripLegacyAgentRuntimeFromDefaults(nextDefaults);
   await adapter.setConfig("agents.defaults", nextDefaults, { timeoutMs: 5_000 });
 
   if (provider === "openai-codex") {
@@ -378,7 +372,8 @@ async function setDefaultModelViaGatewayOnce(
     ...(nextDefaults.model || {}),
     primary: normalizedModelId
   };
-  applyDefaultModelRuntimeToDefaults(nextDefaults, provider);
+  applyModelRuntimePolicyToModelEntries(nextModels, normalizedModelId, provider);
+  stripLegacyAgentRuntimeFromDefaults(nextDefaults);
   await adapter.setConfig("agents.defaults", nextDefaults, { timeoutMs: 5_000 });
 
   if (provider === "openai-codex") {
@@ -474,44 +469,74 @@ function cloneAgentDefaults(value: unknown): OpenClawAgentDefaultsConfig {
     delete output.model;
   }
 
-  if (isRecord(value.agentRuntime)) {
-    output.agentRuntime = { ...value.agentRuntime };
-  } else if (value.agentRuntime === undefined) {
-    delete output.agentRuntime;
-  }
+  stripLegacyAgentRuntimeFromDefaults(output);
 
   return output;
 }
 
 function cloneModelEntries(value: unknown) {
-  const output: Record<string, Record<string, unknown>> = {};
+  const output: Record<string, OpenClawModelDefaultsEntry> = {};
 
   if (!isRecord(value)) {
     return output;
   }
 
   for (const [modelId, entry] of Object.entries(value)) {
-    output[modelId] = isRecord(entry) ? { ...entry } : {};
+    output[modelId] = cloneModelDefaultsEntry(entry);
   }
 
   return output;
 }
 
-function applyDefaultModelRuntimeToDefaults(
-  defaults: OpenClawAgentDefaultsConfig,
+function cloneModelDefaultsEntry(value: unknown): OpenClawModelDefaultsEntry {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const output = { ...value } as OpenClawModelDefaultsEntry;
+
+  if (isRecord(value.agentRuntime)) {
+    output.agentRuntime = { ...value.agentRuntime };
+  } else {
+    delete output.agentRuntime;
+  }
+
+  return output;
+}
+
+function applyModelRuntimePolicyToModelEntries(
+  models: Record<string, OpenClawModelDefaultsEntry>,
+  modelId: string,
   provider: AddModelsProviderId | null
 ) {
-  if (provider === "openai-codex") {
-    defaults.agentRuntime = {
-      ...(defaults.agentRuntime || {}),
-      id: "codex"
-    };
-  } else if (provider === "openai") {
-    defaults.agentRuntime = {
-      ...(defaults.agentRuntime || {}),
-      id: "pi"
-    };
+  const runtimeId = resolveModelScopedRuntimeId(provider);
+
+  if (!runtimeId) {
+    return;
   }
+
+  const entry = models[modelId] || {};
+  const existingRuntime = isRecord(entry.agentRuntime) ? entry.agentRuntime : {};
+
+  models[modelId] = {
+    ...entry,
+    agentRuntime: {
+      ...existingRuntime,
+      id: runtimeId
+    }
+  };
+}
+
+function resolveModelScopedRuntimeId(provider: AddModelsProviderId | null) {
+  if (provider === "openai-codex") {
+    return "codex";
+  }
+
+  if (provider === "openai") {
+    return "openclaw";
+  }
+
+  return null;
 }
 
 function normalizeModelIdForProvider(provider: AddModelsProviderId, modelId: string) {
@@ -527,23 +552,21 @@ function resolveProviderFromModelId(modelId: string): AddModelsProviderId | null
   return isAddModelsProviderId(modelProvider) ? modelProvider : null;
 }
 
-function applyDefaultModelRuntime(config: OpenClawConfigPayload, provider: AddModelsProviderId | null) {
+function applyDefaultModelRuntime(
+  config: OpenClawConfigPayload,
+  provider: AddModelsProviderId | null,
+  modelId: string
+) {
+  config.agents = config.agents || {};
+  config.agents.defaults = config.agents.defaults || {};
+  config.agents.defaults.models = config.agents.defaults.models || {};
+  config.agents.defaults.models[modelId] = config.agents.defaults.models[modelId] || {};
+
   if (provider === "openai-codex") {
     enableCodexHarness(config);
-    config.agents = config.agents || {};
-    config.agents.defaults = config.agents.defaults || {};
-    config.agents.defaults.agentRuntime = {
-      ...(config.agents.defaults.agentRuntime || {}),
-      id: "codex"
-    };
-  } else if (provider === "openai") {
-    config.agents = config.agents || {};
-    config.agents.defaults = config.agents.defaults || {};
-    config.agents.defaults.agentRuntime = {
-      ...(config.agents.defaults.agentRuntime || {}),
-      id: "pi"
-    };
   }
+
+  applyModelRuntimePolicyToModelEntries(config.agents.defaults.models, modelId, provider);
 }
 
 function enableCodexHarness(config: OpenClawConfigPayload) {
@@ -557,6 +580,10 @@ function enableCodexHarness(config: OpenClawConfigPayload) {
   if (Array.isArray(config.plugins.allow) && !config.plugins.allow.includes("codex")) {
     config.plugins.allow = [...config.plugins.allow, "codex"];
   }
+}
+
+function stripLegacyAgentRuntimeFromDefaults(defaults: OpenClawAgentDefaultsConfig) {
+  delete (defaults as Record<string, unknown>).agentRuntime;
 }
 
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {

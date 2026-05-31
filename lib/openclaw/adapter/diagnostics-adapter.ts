@@ -35,25 +35,49 @@ export function buildSecurityWarnings(status: StatusPayload | undefined) {
 
 export function buildVersionDiagnostics(input: {
   status: StatusPayload | undefined;
+  updateStatus?: Record<string, unknown>;
+  updateStatusError?: string;
   fallbackVersion?: string;
 }) {
+  const updateStatusRecords = collectUpdateStatusRecords(input.updateStatus);
   const currentVersion =
     normalizeOptionalValue(
       input.status?.runtimeVersion ||
         input.status?.overview?.version ||
         input.status?.version
     ) ??
+    readFirstOptionalString(updateStatusRecords, [
+      "runningVersion",
+      "currentVersion",
+      "runtimeVersion",
+      "version",
+      "afterVersion"
+    ]) ??
     input.fallbackVersion ??
     undefined;
-  const latestVersion = normalizeOptionalValue(input.status?.update?.registry?.latestVersion ?? undefined);
-  const updateError = normalizeUpdateError(input.status?.update?.registry?.error ?? undefined);
+  const latestVersion =
+    normalizeOptionalValue(input.status?.update?.registry?.latestVersion ?? undefined) ??
+    readFirstOptionalString(updateStatusRecords, [
+      "latestVersion",
+      "targetVersion",
+      "availableVersion",
+      "recommendedVersion"
+    ]);
+  const updateError =
+    normalizeUpdateError(input.status?.update?.registry?.error ?? undefined) ??
+    readUpdateStatusError(updateStatusRecords) ??
+    normalizeUpdateError(input.updateStatusError);
   const updateAvailable =
-    currentVersion && latestVersion ? compareVersionStrings(latestVersion, currentVersion) > 0 : undefined;
+    currentVersion && latestVersion
+      ? compareVersionStrings(latestVersion, currentVersion) > 0
+      : readFirstOptionalBoolean(updateStatusRecords, ["updateAvailable", "available", "hasRegistryUpdate"]);
   const updateInfo = resolveUpdateInfo({
     currentVersion,
     latestVersion,
     updateError,
-    legacyInfo: input.status?.overview?.update
+    legacyInfo:
+      input.status?.overview?.update ??
+      readFirstOptionalString(updateStatusRecords, ["updateInfo", "summary", "detail"])
   });
 
   return {
@@ -63,6 +87,89 @@ export function buildVersionDiagnostics(input: {
     updateError,
     updateInfo
   };
+}
+
+function collectUpdateStatusRecords(payload: Record<string, unknown> | undefined) {
+  const records: Record<string, unknown>[] = [];
+
+  function add(value: unknown) {
+    if (!isRecord(value) || records.includes(value)) {
+      return;
+    }
+
+    records.push(value);
+  }
+
+  add(payload);
+  add(payload?.result);
+  add(payload?.data);
+  add(payload?.update);
+  add(payload?.availability);
+  add(readRecord(payload?.update)?.registry);
+  add(payload?.registry);
+  add(payload?.stats);
+  add(payload?.sentinel);
+  add(readRecord(payload?.sentinel)?.stats);
+  add(readRecord(payload?.result)?.update);
+  add(readRecord(readRecord(payload?.result)?.update)?.registry);
+  add(readRecord(payload?.result)?.registry);
+  add(readRecord(payload?.result)?.stats);
+
+  return records;
+}
+
+function readFirstOptionalString(records: Record<string, unknown>[], keys: string[]) {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = normalizeOptionalValue(typeof record[key] === "string" ? record[key] : undefined);
+
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readFirstOptionalBoolean(records: Record<string, unknown>[], keys: string[]) {
+  for (const record of records) {
+    for (const key of keys) {
+      if (typeof record[key] === "boolean") {
+        return record[key];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readUpdateStatusError(records: Record<string, unknown>[]) {
+  const directError = readFirstOptionalString(records, ["error", "errorMessage"]);
+
+  if (directError) {
+    return normalizeUpdateError(directError);
+  }
+
+  for (const record of records) {
+    if (record.ok === false) {
+      const message = readFirstOptionalString([record], ["message", "reason", "status"]);
+
+      if (message) {
+        return normalizeUpdateError(message);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 export function buildGatewayDiagnostics(input: {

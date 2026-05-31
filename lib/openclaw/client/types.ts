@@ -810,9 +810,36 @@ export type OpenClawCronListPayload = Record<string, unknown> & {
   jobs?: unknown[];
 };
 
+export type OpenClawUpdateStatusPayload = Record<string, unknown> & {
+  currentVersion?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  update?: {
+    root?: string | null;
+    installKind?: string | null;
+    packageManager?: string | null;
+    registry?: {
+      latestVersion?: string | null;
+      tag?: string | null;
+      error?: string | null;
+    } | null;
+  };
+  availability?: {
+    available?: boolean | null;
+    hasRegistryUpdate?: boolean | null;
+    latestVersion?: string | null;
+  };
+  channel?: {
+    value?: string | null;
+    label?: string | null;
+  };
+  sentinel?: unknown;
+};
+
 export interface OpenClawGatewayClient {
   getHealth(options?: OpenClawCommandOptions): Promise<OpenClawHealthPayload>;
   getStatus(options?: OpenClawCommandOptions): Promise<StatusPayload>;
+  getUpdateStatus(options?: OpenClawCommandOptions): Promise<OpenClawUpdateStatusPayload>;
   getGatewayStatus(options?: OpenClawCommandOptions): Promise<GatewayStatusPayload>;
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
   getAgentModelStatus(input: OpenClawAgentModelStatusInput, options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;

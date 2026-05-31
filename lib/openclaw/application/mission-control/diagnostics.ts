@@ -29,6 +29,7 @@ import type {
 import { getRecentOpenClawGatewayFallbackDiagnostics } from "@/lib/openclaw/client/gateway-client";
 import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
 import { filterActiveOpenClawGatewayFallbackDiagnostics } from "@/lib/openclaw/client/gateway-diagnostic-activity";
+import { isDeferredPayloadResult } from "@/lib/openclaw/client/payload-cache";
 import { RuntimeDiagnosticsStateCache } from "@/lib/openclaw/state/runtime-diagnostics-cache";
 import {
   buildModelRecords,
@@ -41,6 +42,7 @@ import {
   type MissionControlSettings
 } from "@/lib/openclaw/domains/control-plane-settings";
 import type { SessionsPayload } from "@/lib/openclaw/domains/session-catalog";
+import type { UpdateStatusPayload } from "@/lib/openclaw/adapter/gateway-payloads";
 import type {
   MissionControlSnapshot,
   OpenClawAgent
@@ -77,6 +79,7 @@ export async function buildLiveMissionControlDiagnostics(input: {
   configuredGatewayUrl?: string | null;
   gatewayStatus?: GatewayStatusPayload;
   status?: StatusPayload;
+  updateStatus?: UpdateStatusPayload;
   hasOpenClawSignal: boolean;
   runtimeDiagnostics: MissionControlSnapshot["diagnostics"]["runtime"];
   models: ModelsPayload["models"];
@@ -85,6 +88,7 @@ export async function buildLiveMissionControlDiagnostics(input: {
   payloadResults: {
     gatewayStatus: PromiseSettledResult<GatewayStatusPayload>;
     status: PromiseSettledResult<StatusPayload>;
+    updateStatus: PromiseSettledResult<UpdateStatusPayload>;
     agents: PromiseSettledResult<AgentPayload>;
     agentConfig: PromiseSettledResult<AgentConfigPayload>;
     models: PromiseSettledResult<ModelsPayload>;
@@ -95,6 +99,7 @@ export async function buildLiveMissionControlDiagnostics(input: {
   gatewayStatusRejectedWithCachedValue: boolean;
   payloadReuse: {
     status: PayloadReuseState;
+    updateStatus: PayloadReuseState;
     agents: PayloadReuseState;
     agentConfig: PayloadReuseState;
     models: PayloadReuseState;
@@ -107,6 +112,8 @@ export async function buildLiveMissionControlDiagnostics(input: {
   const securityWarnings = buildSecurityWarnings(input.status);
   const versionDiagnostics = buildVersionDiagnostics({
     status: input.status,
+    updateStatus: input.updateStatus,
+    updateStatusError: describePayloadError(input.payloadResults.updateStatus),
     fallbackVersion: (await resolveOpenClawVersion()) ?? undefined
   });
   const openClawBinarySelection = buildOpenClawBinarySelectionSnapshot(
@@ -151,6 +158,14 @@ export async function buildLiveMissionControlDiagnostics(input: {
       runtimeIssues: [...input.runtimeDiagnostics.issues, ...gatewayFallbackIssues]
     })
   });
+}
+
+function describePayloadError(result: PromiseSettledResult<unknown>) {
+  if (result.status !== "rejected" || isDeferredPayloadResult(result)) {
+    return undefined;
+  }
+
+  return result.reason instanceof Error ? result.reason.message : String(result.reason);
 }
 
 export function buildMissionControlModelRecords(input: {

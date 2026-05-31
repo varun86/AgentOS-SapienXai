@@ -86,6 +86,7 @@ import type {
   OpenClawToolsEffectiveInput,
   OpenClawToolsEffectivePayload,
   OpenClawUpdateAgentInput,
+  OpenClawUpdateStatusPayload,
   StatusPayload
 } from "@/lib/openclaw/client/types";
 
@@ -347,6 +348,10 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
 
   getStatus(options: OpenClawCommandOptions = {}) {
     return runOpenClawJson<StatusPayload>(["status", "--json"], options);
+  }
+
+  getUpdateStatus(options: OpenClawCommandOptions = {}) {
+    return runOpenClawJson<OpenClawUpdateStatusPayload>(["update", "status", "--json"], options);
   }
 
   getGatewayStatus(options: OpenClawCommandOptions = {}) {

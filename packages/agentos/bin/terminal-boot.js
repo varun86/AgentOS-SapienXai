@@ -1,39 +1,63 @@
 import readline from "node:readline";
 
-export const AGENTOS_BOOT_HEADER = ` █████╗  ██████╗ ███████╗███╗   ██╗████████╗ ██████╗ ███████╗
-██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔═══██╗██╔════╝
-███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ██║   ██║███████╗
-██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ██║   ██║╚════██║
-██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ╚██████╔╝███████║
-╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝    ╚═════╝ ╚══════╝`;
+const LARGE_AGENT_WORDMARK = [
+  " █████╗  ██████╗ ███████╗███╗   ██╗████████╗",
+  "██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝",
+  "███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ",
+  "██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ",
+  "██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ",
+  "╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   "
+];
+
+const LARGE_OS_WORDMARK = [
+  " ██████╗ ███████╗",
+  "██╔═══██╗██╔════╝",
+  "██║   ██║███████╗",
+  "██║   ██║╚════██║",
+  "╚██████╔╝███████║",
+  " ╚═════╝ ╚══════╝"
+];
+
+export const AGENTOS_BOOT_HEADER = LARGE_AGENT_WORDMARK
+  .map((line, index) => `${line}  ${LARGE_OS_WORDMARK[index]}`)
+  .join("\n");
 
 export const TERMINAL_THEME = {
-  primaryCyan: "#36D7E8",
-  softCyan: "#8BE9FD",
+  neonRed: "#FF1744",
+  softRed: "#FF5A6D",
+  deepRed: "#6E0A17",
   successGreen: "#39D353",
-  warningAmber: "#D7BA2F",
-  dangerRed: "#FF5C5C",
+  warningAmber: "#FFD166",
+  dangerRed: "#FF3B3B",
   mutedGray: "#8B949E",
   textWhite: "#F0F6FC",
-  dividerGray: "#30363D"
+  brightWhite: "#FFFFFF",
+  dividerGray: "#4A121B"
 };
 
-const BOOT_TAGLINE = "Built on OpenClaw · Human operating layer for AI agents";
-const COMPACT_HEADER = "AgentOS · Built on OpenClaw";
+const HEADER_TITLE = "AGENTOS CONTROL ROOM";
+const BOOT_PRIMARY_LINE = "Built on OpenClaw";
+const BOOT_SECONDARY_LINE = "Human operating layer for AI agents";
+const BOOT_TAGLINE = `${BOOT_PRIMARY_LINE} · ${BOOT_SECONDARY_LINE}`;
 const MEDIUM_HEADER_MIN_COLUMNS = 48;
 const LARGE_HEADER_MIN_COLUMNS = 82;
-const MEDIUM_WORDMARK = [
-  "▄▀█ █▀▀ █▀▀ █▄░█ ▀█▀ █▀█ █▀",
-  "█▀█ █▄█ ██▄ █░▀█  █  █▄█ ▄█"
+const DASHBOARD_MIN_COLUMNS = 56;
+const MEDIUM_AGENT_WORDMARK = [
+  "▄▀█ █▀▀ █▀▀ █▄░█ ▀█▀",
+  "█▀█ █▄█ ██▄ █░▀█  █ "
+];
+const MEDIUM_OS_WORDMARK = [
+  " █▀█ █▀",
+  " █▄█ ▄█"
 ];
 
 const STATE_META = {
-  checking: { label: "CHECKING", color: "primary", symbol: "…", ascii: "..." },
+  checking: { label: "CHECKING", color: "brand", symbol: "…", ascii: "..." },
   waiting: { label: "WAITING", color: "muted", symbol: "…", ascii: "..." },
-  loading: { label: "LOADING", color: "primary", symbol: "…", ascii: "..." },
-  starting: { label: "STARTING", color: "primary", symbol: "…", ascii: "..." },
-  resolving: { label: "RESOLVING", color: "primary", symbol: "…", ascii: "..." },
-  preparing: { label: "PREPARING", color: "primary", symbol: "…", ascii: "..." },
+  loading: { label: "LOADING", color: "brand", symbol: "…", ascii: "..." },
+  starting: { label: "STARTING", color: "brand", symbol: "…", ascii: "..." },
+  resolving: { label: "RESOLVING", color: "brand", symbol: "…", ascii: "..." },
+  preparing: { label: "PREPARING", color: "brand", symbol: "…", ascii: "..." },
   connected: { label: "CONNECTED", color: "success", symbol: "✓", ascii: "OK" },
   active: { label: "ACTIVE", color: "success", symbol: "✓", ascii: "OK" },
   ready: { label: "READY", color: "success", symbol: "✓", ascii: "OK" },
@@ -44,6 +68,7 @@ const STATE_META = {
   failed: { label: "FAILED", color: "danger", symbol: "✕", ascii: "x" },
   unreachable: { label: "UNREACHABLE", color: "danger", symbol: "✕", ascii: "x" },
   broken: { label: "BROKEN", color: "danger", symbol: "✕", ascii: "x" },
+  error: { label: "ERROR", color: "danger", symbol: "✕", ascii: "x" },
   disabled: { label: "DISABLED", color: "muted", symbol: "–", ascii: "-" },
   skipped: { label: "SKIPPED", color: "muted", symbol: "–", ascii: "-" },
   inactive: { label: "INACTIVE", color: "muted", symbol: "–", ascii: "-" },
@@ -65,17 +90,17 @@ const STATUS_ROWS = [
 ];
 
 const UNICODE_FRAMES = [
-  "Workspace ▣──◆──▢ Agent ▢────▣ Channel",
-  "Workspace ▣────▣ Agent ▢──◆──▢ Channel",
-  "Workspace ▢────▣ Agent ▣──◆──▢ Channel",
-  "Workspace ▢──◆──▢ Agent ▣────▣ Channel"
+  "OpenClaw Gateway ▰▱▱  AgentOS Runtime ▱▱▱  Local UI",
+  "OpenClaw Gateway ▰▰▱  AgentOS Runtime ▰▱▱  Local UI",
+  "OpenClaw Gateway ▰▰▰  AgentOS Runtime ▰▰▱  Local UI",
+  "OpenClaw Gateway ▰▰▰  AgentOS Runtime ▰▰▰  Local UI"
 ];
 
 const ASCII_FRAMES = [
-  "Workspace [#]--<>--[ ] Agent [ ]----[#] Channel",
-  "Workspace [#]----[#] Agent [ ]--<>--[ ] Channel",
-  "Workspace [ ]----[#] Agent [#]--<>--[ ] Channel",
-  "Workspace [ ]--<>--[ ] Agent [#]----[#] Channel"
+  "OpenClaw Gateway [#--]  AgentOS Runtime [---]  Local UI",
+  "OpenClaw Gateway [##-]  AgentOS Runtime [#--]  Local UI",
+  "OpenClaw Gateway [###]  AgentOS Runtime [##-]  Local UI",
+  "OpenClaw Gateway [###]  AgentOS Runtime [###]  Local UI"
 ];
 
 export function createTerminalBoot(options = {}) {
@@ -155,7 +180,8 @@ export function renderBootFrame(options = {}) {
     color,
     columns,
     compact,
-    large
+    large,
+    unicode
   }));
 
   lines.push("");
@@ -188,7 +214,8 @@ export function renderStatusDashboard(options = {}) {
       color,
       columns,
       compact: !unicode || columns < MEDIUM_HEADER_MIN_COLUMNS,
-      large: unicode && columns >= LARGE_HEADER_MIN_COLUMNS
+      large: unicode && columns >= LARGE_HEADER_MIN_COLUMNS,
+      unicode
     }));
     lines.push("");
   }
@@ -203,7 +230,12 @@ export function renderStatusDashboard(options = {}) {
 
   if (options.finalInfo) {
     lines.push("");
-    lines.push(color.bold(color.success(`AgentOS ready · ${options.finalInfo}`)));
+    lines.push(...renderReadyBlock({
+      color,
+      columns,
+      finalInfo: options.finalInfo,
+      unicode
+    }));
   } else if (options.footer) {
     lines.push("");
     lines.push(color.muted(options.footer));
@@ -223,7 +255,7 @@ export function renderDoctorReport(options = {}) {
 
   lines.push(color.bold(color.primary(options.title || "AGENTOS DOCTOR")));
   lines.push(color.muted(truncate(options.subtitle || BOOT_TAGLINE, columns)));
-  lines.push(color.divider(divider(columns)));
+  lines.push(color.divider(divider(columns, unicode)));
   lines.push(...formatStatusRows(rows, {
     color,
     columns,
@@ -231,7 +263,7 @@ export function renderDoctorReport(options = {}) {
   }));
 
   if (options.footer) {
-    lines.push(color.divider(divider(columns)));
+    lines.push(color.divider(divider(columns, unicode)));
     lines.push(color.muted(truncate(options.footer, columns)));
   }
 
@@ -420,13 +452,62 @@ function normalizeRows(rows = []) {
 
 function renderStatusSection(options) {
   const title = options.title || "SYSTEM CHECK";
+  const columns = normalizeColumns(options.columns);
+
+  if (columns < DASHBOARD_MIN_COLUMNS) {
+    return renderCompactStatusSection({
+      ...options,
+      title,
+      columns
+    });
+  }
+
+  const width = panelWidth(columns);
+  const innerWidth = width - 4;
+  const rows = options.rows;
+  const labelWidth = Math.min(23, Math.max(17, ...rows.map((row) => row.label.length)));
+  const badgeWidth = 15;
+  const detailWidth = Math.max(8, innerWidth - labelWidth - badgeWidth - 4);
   const lines = [
-    options.color.bold(options.color.text(title)),
-    options.color.divider(divider(options.columns))
+    renderBorder({
+      color: options.color,
+      title,
+      unicode: options.unicode,
+      width,
+      edge: "top"
+    }),
+    boxLine(formatDashboardHeader({
+      badgeWidth,
+      color: options.color,
+      detailWidth,
+      labelWidth
+    }), {
+      color: options.color,
+      unicode: options.unicode,
+      width
+    }),
+    renderBorder({
+      color: options.color,
+      unicode: options.unicode,
+      width,
+      edge: "middle"
+    })
   ];
 
-  lines.push(...formatStatusRows(options.rows, options));
-  lines.push(options.color.divider(divider(options.columns)));
+  lines.push(...rows.map((row) => formatDashboardRow(row, {
+    badgeWidth,
+    color: options.color,
+    detailWidth,
+    labelWidth,
+    unicode: options.unicode,
+    width
+  })));
+  lines.push(renderBorder({
+    color: options.color,
+    unicode: options.unicode,
+    width,
+    edge: "bottom"
+  }));
 
   return lines;
 }
@@ -461,18 +542,16 @@ function formatStatusRow(row, options) {
 }
 
 function renderMediumHeader(options) {
-  const available = Math.max(0, options.columns - 4);
+  return MEDIUM_AGENT_WORDMARK.map((line, index) => {
+    const agent = options.color.bold(options.color.text(line));
+    const os = options.color.bold(options.color.brand(MEDIUM_OS_WORDMARK[index]));
 
-  return [
-    ...MEDIUM_WORDMARK.map((line) => `  ${options.color.bold(options.color.primary(line))}`),
-    `  ${options.color.muted(truncate(BOOT_TAGLINE, available))}`,
-    `  ${options.color.divider(divider(Math.min(available, 72)))}`
-  ];
+    return `${options.color.dim(options.color.brand("▌"))} ${agent}${os}`;
+  });
 }
 
 function renderCompleteFrame(options) {
   const lines = [""];
-  const message = options.finalInfo ? `AgentOS ready · ${options.finalInfo}` : "AgentOS ready";
 
   lines.push(...renderHeaderLines(options));
   lines.push("");
@@ -484,64 +563,108 @@ function renderCompleteFrame(options) {
     unicode: options.unicode
   }));
   lines.push("");
-  lines.push(options.color.bold(options.color.success(message)));
+  lines.push(...renderReadyBlock({
+    color: options.color,
+    columns: options.columns,
+    finalInfo: options.finalInfo,
+    unicode: options.unicode
+  }));
 
   return lines.join("\n");
 }
 
 function renderHeaderLines(options) {
-  if (options.compact) {
-    return [
-      options.color.bold(options.color.primary(COMPACT_HEADER)),
-      options.color.divider(divider(options.columns))
-    ];
+  const width = panelWidth(options.columns);
+  const lines = [
+    renderBorder({
+      color: options.color,
+      title: HEADER_TITLE,
+      unicode: options.unicode,
+      width,
+      edge: "top"
+    })
+  ];
+  const logoLines = options.compact
+    ? [formatCompactHeader(options.color)]
+    : options.large
+      ? renderLargeHeader(options)
+      : renderMediumHeader(options);
+
+  for (const line of logoLines) {
+    lines.push(boxLine(line, {
+      color: options.color,
+      unicode: options.unicode,
+      width
+    }));
   }
 
-  if (options.large) {
-    return [
-      ...AGENTOS_BOOT_HEADER.split("\n").map((line, index) => options.color.gradient(line, index)),
-      options.color.muted(BOOT_TAGLINE),
-      options.color.divider(divider(options.columns))
-    ];
-  }
+  lines.push(boxLine("", {
+    color: options.color,
+    unicode: options.unicode,
+    width
+  }));
+  lines.push(boxLine(options.color.text(BOOT_PRIMARY_LINE), {
+    color: options.color,
+    unicode: options.unicode,
+    width
+  }));
+  lines.push(boxLine(options.color.muted(BOOT_SECONDARY_LINE), {
+    color: options.color,
+    unicode: options.unicode,
+    width
+  }));
+  lines.push(renderBorder({
+    color: options.color,
+    unicode: options.unicode,
+    width,
+    edge: "bottom"
+  }));
 
-  return renderMediumHeader(options);
+  return lines;
 }
 
 function createColor(enabled) {
-  const wrap = (code, value) => enabled ? `\u001B[${code}m${value}\u001B[0m` : value;
+  const ansi = (codes, value) => enabled ? `\u001B[${codes}m${value}\u001B[0m` : value;
+  const rgbCode = (value) => {
+    const [red, green, blue] = parseHex(value);
+    return `38;2;${red};${green};${blue}`;
+  };
   const hex = (value, text) => {
     if (!enabled) {
       return text;
     }
 
-    const [red, green, blue] = parseHex(value);
-    return `\u001B[38;2;${red};${green};${blue}m${text}\u001B[0m`;
+    return ansi(rgbCode(value), text);
   };
 
   return {
-    bold: (value) => wrap("1", value),
-    dim: (value) => wrap("2", value),
-    primary: (value) => hex(TERMINAL_THEME.primaryCyan, value),
-    soft: (value) => hex(TERMINAL_THEME.softCyan, value),
+    bold: (value) => ansi("1", value),
+    dim: (value) => ansi("2", value),
+    underline: (value) => ansi("4", value),
+    brand: (value) => hex(TERMINAL_THEME.neonRed, value),
+    accent: (value) => hex(TERMINAL_THEME.softRed, value),
+    primary: (value) => hex(TERMINAL_THEME.neonRed, value),
+    soft: (value) => hex(TERMINAL_THEME.softRed, value),
     success: (value) => hex(TERMINAL_THEME.successGreen, value),
     warning: (value) => hex(TERMINAL_THEME.warningAmber, value),
     danger: (value) => hex(TERMINAL_THEME.dangerRed, value),
     muted: (value) => hex(TERMINAL_THEME.mutedGray, value),
     text: (value) => hex(TERMINAL_THEME.textWhite, value),
+    bright: (value) => hex(TERMINAL_THEME.brightWhite, value),
     divider: (value) => hex(TERMINAL_THEME.dividerGray, value),
-    cyan: (value) => hex(TERMINAL_THEME.primaryCyan, value),
+    url: (value) => enabled ? ansi(`4;${rgbCode(TERMINAL_THEME.brightWhite)}`, value) : value,
+    cyan: (value) => hex(TERMINAL_THEME.neonRed, value),
     green: (value) => hex(TERMINAL_THEME.successGreen, value),
     yellow: (value) => hex(TERMINAL_THEME.warningAmber, value),
     red: (value) => hex(TERMINAL_THEME.dangerRed, value),
     gradient: (value, index) => {
       const palette = [
-        TERMINAL_THEME.softCyan,
-        TERMINAL_THEME.primaryCyan,
-        TERMINAL_THEME.softCyan,
-        TERMINAL_THEME.primaryCyan,
-        TERMINAL_THEME.softCyan,
-        TERMINAL_THEME.primaryCyan
+        TERMINAL_THEME.textWhite,
+        TERMINAL_THEME.textWhite,
+        TERMINAL_THEME.textWhite,
+        TERMINAL_THEME.textWhite,
+        TERMINAL_THEME.neonRed,
+        TERMINAL_THEME.neonRed
       ];
       return hex(palette[index % palette.length], value);
     }
@@ -558,14 +681,181 @@ function formatDetail(value, color) {
   }
 
   if (/^https?:\/\//i.test(value)) {
-    return color.soft(value);
+    return color.url(value);
   }
 
   return color.text(value);
 }
 
-function divider(columns) {
-  return "─".repeat(Math.max(24, Math.min(normalizeColumns(columns), 96)));
+function renderCompactStatusSection(options) {
+  const width = panelWidth(options.columns);
+  const lines = [
+    options.color.bold(options.color.brand(options.title)),
+    options.color.divider(divider(width, options.unicode))
+  ];
+
+  for (const row of options.rows) {
+    const badge = formatStatusBadge(row.state || "pending", {
+      color: options.color,
+      unicode: options.unicode,
+      width: 0
+    }).trimEnd();
+    const detail = row.message || row.detail || "";
+
+    lines.push(`${options.color.text(truncate(row.label, Math.max(8, width - 18)))}  ${badge}`);
+
+    if (detail) {
+      lines.push(`  ${formatDetail(truncate(String(detail), Math.max(8, width - 2)), options.color)}`);
+    }
+  }
+
+  lines.push(options.color.divider(divider(width, options.unicode)));
+
+  return lines;
+}
+
+function formatDashboardHeader(options) {
+  return [
+    options.color.muted("SUBSYSTEM".padEnd(options.labelWidth)),
+    options.color.muted("STATUS".padEnd(options.badgeWidth)),
+    options.color.muted("DETAIL".padEnd(options.detailWidth))
+  ].join("  ");
+}
+
+function formatDashboardRow(row, options) {
+  const state = row.state || "pending";
+  const detail = row.message || row.detail || "";
+  const label = options.color.text(truncate(row.label, options.labelWidth).padEnd(options.labelWidth));
+  const badge = formatStatusBadge(state, {
+    color: options.color,
+    unicode: options.unicode,
+    width: options.badgeWidth
+  });
+  const detailText = truncate(String(detail), options.detailWidth);
+  const formattedDetail = formatDetail(detailText, options.color);
+  const content = `${label}  ${badge}  ${formattedDetail}`;
+
+  return boxLine(content, {
+    color: options.color,
+    unicode: options.unicode,
+    width: options.width
+  });
+}
+
+function renderLargeHeader(options) {
+  return LARGE_AGENT_WORDMARK.map((line, index) => {
+    const agent = options.color.bold(options.color.text(line));
+    const os = options.color.bold(options.color.brand(LARGE_OS_WORDMARK[index]));
+
+    return `${options.color.dim(options.color.brand("▌"))} ${agent}  ${os}`;
+  });
+}
+
+function formatCompactHeader(color) {
+  return `${color.bold(color.text("Agent"))}${color.bold(color.brand("OS"))}`;
+}
+
+function renderReadyBlock(options) {
+  const width = panelWidth(options.columns);
+  const readyLine = options.color.bold(options.color.success("✓ AgentOS ready"));
+  const localUiLine = options.finalInfo
+    ? `${options.color.text("Local UI:")} ${formatDetail(options.finalInfo, options.color)}`
+    : "";
+
+  if (width < DASHBOARD_MIN_COLUMNS) {
+    return localUiLine ? [readyLine, localUiLine] : [readyLine];
+  }
+
+  const lines = [
+    renderBorder({
+      color: options.color,
+      title: "READY",
+      unicode: options.unicode,
+      width,
+      edge: "top"
+    }),
+    boxLine(readyLine, {
+      color: options.color,
+      unicode: options.unicode,
+      width
+    })
+  ];
+
+  if (localUiLine) {
+    lines.push(boxLine(localUiLine, {
+      color: options.color,
+      unicode: options.unicode,
+      width
+    }));
+  }
+
+  lines.push(renderBorder({
+    color: options.color,
+    unicode: options.unicode,
+    width,
+    edge: "bottom"
+  }));
+
+  return lines;
+}
+
+function renderBorder(options) {
+  const chars = boxChars(options.unicode);
+  const left = options.edge === "bottom" ? chars.bottomLeft : options.edge === "middle" ? chars.middleLeft : chars.topLeft;
+  const right = options.edge === "bottom" ? chars.bottomRight : options.edge === "middle" ? chars.middleRight : chars.topRight;
+  const horizontal = options.edge === "middle" ? chars.middle : chars.horizontal;
+  const innerWidth = Math.max(0, options.width - 2);
+
+  if (options.title && options.edge === "top") {
+    const title = ` ${options.title} `;
+    const safeTitle = truncate(title, Math.max(0, innerWidth - 2));
+    const remaining = Math.max(0, innerWidth - safeTitle.length - 1);
+
+    return options.color.brand(`${left}${horizontal}${safeTitle}${horizontal.repeat(remaining)}${right}`);
+  }
+
+  return options.color.divider(`${left}${horizontal.repeat(innerWidth)}${right}`);
+}
+
+function boxLine(value, options) {
+  const chars = boxChars(options.unicode);
+  const innerWidth = Math.max(0, options.width - 4);
+  const safeValue = stripAnsi(value).length > innerWidth ? truncate(stripAnsi(value), innerWidth) : value;
+  const padded = padAnsi(safeValue, innerWidth);
+
+  return `${options.color.brand(chars.vertical)} ${padded} ${options.color.brand(chars.vertical)}`;
+}
+
+function boxChars(unicode) {
+  if (!unicode) {
+    return {
+      topLeft: "+",
+      topRight: "+",
+      bottomLeft: "+",
+      bottomRight: "+",
+      middleLeft: "+",
+      middleRight: "+",
+      horizontal: "-",
+      middle: "-",
+      vertical: "|"
+    };
+  }
+
+  return {
+    topLeft: "┌",
+    topRight: "┐",
+    bottomLeft: "└",
+    bottomRight: "┘",
+    middleLeft: "├",
+    middleRight: "┤",
+    horizontal: "─",
+    middle: "─",
+    vertical: "│"
+  };
+}
+
+function divider(columns, unicode = true) {
+  return (unicode ? "─" : "-").repeat(Math.max(24, Math.min(normalizeColumns(columns), 96)));
 }
 
 function parseHex(value) {
@@ -594,6 +884,20 @@ function truncate(value, width) {
 
 function normalizeColumns(columns) {
   return typeof columns === "number" && Number.isFinite(columns) && columns > 0 ? columns : 80;
+}
+
+function panelWidth(columns) {
+  return Math.max(24, Math.min(normalizeColumns(columns), 96));
+}
+
+function padAnsi(value, width) {
+  const visibleLength = stripAnsi(value).length;
+
+  if (visibleLength >= width) {
+    return value;
+  }
+
+  return `${value}${" ".repeat(width - visibleLength)}`;
 }
 
 function countTerminalLines(value, columns) {

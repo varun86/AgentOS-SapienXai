@@ -209,21 +209,25 @@ test("terminal boot renders refined large, medium, compact, and complete frames"
   const narrow = terminalBoot.narrow;
   const complete = terminalBoot.complete;
 
-  assert.match(medium, /^\n  ▄▀█ █▀▀ █▀▀/m);
-  assert.match(medium, /Built on OpenClaw · Human operating layer for AI agents/);
+  assert.match(medium, /AGENTOS CONTROL ROOM/);
+  assert.match(medium, /▄▀█ █▀▀ █▀▀ █▄░█ ▀█▀/);
+  assert.match(medium, /Built on OpenClaw/);
+  assert.match(medium, /Human operating layer for AI agents/);
   assert.match(medium, /AgentOS\s+✓ READY/);
   assert.match(medium, /Update\s+– PENDING/);
   assert.match(medium, /OpenClaw Gateway\s+… CHECKING/);
-  assert.match(medium, /Workspace .* Agent .* Channel/);
+  assert.match(medium, /OpenClaw Gateway .* AgentOS Runtime .* Local UI/);
   assert.doesNotMatch(medium, /█████╗/);
   assert.match(wideDefault, /█████╗/);
   assert.match(large, /█████╗/);
   assert.ok(large.includes(terminalBoot.header.split("\n")[0]));
-  assert.match(narrow, /AgentOS · Built on OpenClaw/);
+  assert.match(narrow, /AgentOS/);
+  assert.match(narrow, /Built on OpenClaw/);
   assert.doesNotMatch(narrow, /█████╗/);
   assert.match(complete, /█████╗/);
   assert.match(complete, /OpenClaw Gateway\s+… CHECKING/);
-  assert.match(complete, /AgentOS ready · http:\/\/localhost:3000/);
+  assert.match(complete, /AgentOS ready/);
+  assert.match(complete, /Local UI:\s+http:\/\/localhost:3000/);
   assert.doesNotMatch(complete, /Workspace .* Agent .* Channel/);
 });
 

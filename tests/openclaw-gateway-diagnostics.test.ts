@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildGatewayDiagnostics } from "@/lib/openclaw/adapter/diagnostics-adapter";
+import {
+  buildGatewayDiagnostics,
+  buildVersionDiagnostics
+} from "@/lib/openclaw/adapter/diagnostics-adapter";
 import type { MissionControlSnapshot, ModelReadiness, OpenClawBinarySelection } from "@/lib/openclaw/types";
 
 const runtimeDiagnostics: MissionControlSnapshot["diagnostics"]["runtime"] = {
@@ -138,4 +141,36 @@ test("gateway diagnostics surface pending device access instead of native timeou
   assert.match(diagnostics.issues[0] ?? "", /90f256bb-2bb4-474e-90e5-6a3b95f79f92/);
   assert.equal(diagnostics.issues.some((issue) => /agents\.list/.test(issue)), false);
   assert.equal(diagnostics.issues.includes("runtime state is writable"), true);
+});
+
+test("version diagnostics use update.status when status lacks registry details", () => {
+  const diagnostics = buildVersionDiagnostics({
+    status: { version: "2026.5.22" },
+    updateStatus: {
+      result: {
+        update: {
+          registry: {
+            latestVersion: "2026.5.28"
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(diagnostics.currentVersion, "2026.5.22");
+  assert.equal(diagnostics.latestVersion, "2026.5.28");
+  assert.equal(diagnostics.updateAvailable, true);
+  assert.match(diagnostics.updateInfo ?? "", /Update available/);
+});
+
+test("version diagnostics expose update.status errors instead of reporting loading", () => {
+  const diagnostics = buildVersionDiagnostics({
+    status: { version: "2026.5.22" },
+    updateStatusError: "scope upgrade pending approval"
+  });
+
+  assert.equal(diagnostics.latestVersion, undefined);
+  assert.equal(diagnostics.updateAvailable, undefined);
+  assert.equal(diagnostics.updateError, "scope upgrade pending approval");
+  assert.match(diagnostics.updateInfo ?? "", /Update registry check failed/);
 });

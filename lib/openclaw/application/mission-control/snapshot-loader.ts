@@ -6,7 +6,9 @@ import { probeLocalGatewayStatus } from "@/lib/openclaw/client/local-gateway-pro
 import {
   settleGatewayStatusPayloadFromOpenClaw,
   settleModelStatusPayloadFromOpenClaw,
-  settleStatusPayloadFromOpenClaw
+  settleStatusPayloadFromOpenClaw,
+  settleUpdateStatusPayloadFromOpenClaw,
+  type UpdateStatusPayload
 } from "@/lib/openclaw/adapter/gateway-payloads";
 import { GatewayStatusCache } from "@/lib/openclaw/client/gateway-status-cache";
 import { settleAgentConfigFromStateFile } from "@/lib/openclaw/state/agent-config-payload";
@@ -108,6 +110,7 @@ let runtimeSnapshotPayloadCache: CachedPayload<OpenClawRuntimeSnapshotPayload> |
 let presencePayloadCache: CachedPayload<PresencePayload> | null = null;
 const runtimeHistoryStore = createMissionControlRuntimeHistoryStore();
 const statusPayloadCache = new CachedPayloadController<StatusPayload>();
+const updateStatusPayloadCache = new CachedPayloadController<UpdateStatusPayload>();
 const gatewayStatusCache = new GatewayStatusCache(MISSION_CONTROL_GATEWAY_STATUS_STALE_GRACE_MS);
 const missionControlCacheService = new MissionControlCacheService<MissionControlSnapshot>({
   ttlMs: MISSION_CONTROL_SNAPSHOT_TTL_MS,
@@ -135,6 +138,7 @@ export function clearMissionControlCaches() {
   runtimeDiagnosticsStateCache.clear();
   gatewayStatusCache.clear();
   statusPayloadCache.clear();
+  updateStatusPayloadCache.clear();
   agentPayloadCache = null;
   agentConfigPayloadCache = null;
   modelsPayloadCache = null;
@@ -202,6 +206,7 @@ async function loadMissionControlSnapshots({
       : await readGatewayRemoteUrlConfig();
     let gatewayStatusResult: PromiseSettledResult<GatewayStatusPayload>;
     let statusResult: PromiseSettledResult<StatusPayload>;
+    let updateStatusResult: PromiseSettledResult<UpdateStatusPayload> = createDeferredPayloadResult();
     let agentsResult: PromiseSettledResult<AgentPayload>;
     let agentConfigResult: PromiseSettledResult<AgentConfigPayload>;
     let modelsResult: PromiseSettledResult<ModelsPayload>;
@@ -319,6 +324,15 @@ async function loadMissionControlSnapshots({
       presencePayloadCache = entry;
     });
     const status = resolvedStatus.value;
+    const statusHasUpdateRegistry = hasStatusUpdateRegistry(status);
+    if (!systemProfile && !statusHasUpdateRegistry && profile === "refresh") {
+      updateStatusResult = await settleUpdateStatusPayloadFromOpenClaw(20_000);
+    } else if (!systemProfile && !statusHasUpdateRegistry && updateStatusPayloadCache.shouldRefresh()) {
+      updateStatusPayloadCache.scheduleRefresh(() => settleUpdateStatusPayloadFromOpenClaw(15_000));
+    }
+    const resolvedUpdateStatus = statusHasUpdateRegistry
+      ? { value: undefined, reusedCachedValue: false, failed: false }
+      : updateStatusPayloadCache.resolve(updateStatusResult);
     const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig, openClawStateRootPath);
     const modelStatus = mergeModelStatusWithAgentConfigDefaults(resolvedModelStatus.value, agentConfig, agentsList);
     const localModels = buildFallbackModels({ agentConfig, modelStatus });
@@ -333,6 +347,7 @@ async function loadMissionControlSnapshots({
       modelStatusResult.status === "fulfilled" ||
       sessionsResult.status === "fulfilled" ||
       runtimeSnapshotResult.status === "fulfilled" ||
+      updateStatusResult.status === "fulfilled" ||
       presenceResult.status === "fulfilled";
     const runtimeDiagnosticsPromise = buildMissionControlRuntimeDiagnostics(
       agentsList.map((agent) => ({
@@ -396,6 +411,7 @@ async function loadMissionControlSnapshots({
       configuredGatewayUrl,
       gatewayStatus,
       status,
+      updateStatus: resolvedUpdateStatus.value,
       hasOpenClawSignal,
       runtimeDiagnostics,
       models,
@@ -404,6 +420,7 @@ async function loadMissionControlSnapshots({
       payloadResults: {
         gatewayStatus: gatewayStatusResult,
         status: statusResult,
+        updateStatus: updateStatusResult,
         agents: agentsResult,
         agentConfig: agentConfigResult,
         models: modelsResult,
@@ -415,6 +432,7 @@ async function loadMissionControlSnapshots({
         gatewayStatusResult.status === "rejected" && resolvedGatewayStatus.reusedCachedValue,
       payloadReuse: {
         status: resolvedStatus,
+        updateStatus: resolvedUpdateStatus,
         agents: resolvedAgents,
         agentConfig: resolvedAgentConfig,
         models: resolvedModels,
@@ -470,4 +488,8 @@ async function loadMissionControlSnapshots({
       )
     );
   }
+}
+
+function hasStatusUpdateRegistry(status: StatusPayload | undefined) {
+  return Boolean(status?.update?.registry?.latestVersion || status?.update?.registry?.error);
 }

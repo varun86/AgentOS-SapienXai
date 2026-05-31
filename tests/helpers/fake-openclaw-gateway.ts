@@ -218,6 +218,7 @@ export class RecordingFallbackGatewayClient implements OpenClawGatewayClient {
   configCalls: string[] = [];
   config = new Map<string, unknown>();
   statusPayload: Record<string, unknown> = {};
+  updateStatusPayload: Record<string, unknown> = {};
 
   async getHealth(options: OpenClawCommandOptions = {}) {
     this.calls.push({ method: "getHealth", options });
@@ -227,6 +228,11 @@ export class RecordingFallbackGatewayClient implements OpenClawGatewayClient {
   async getStatus(options: OpenClawCommandOptions = {}) {
     this.calls.push({ method: "getStatus", options });
     return this.statusPayload;
+  }
+
+  async getUpdateStatus(options: OpenClawCommandOptions = {}) {
+    this.calls.push({ method: "getUpdateStatus", options });
+    return this.updateStatusPayload;
   }
 
   async getGatewayStatus(options: OpenClawCommandOptions = {}) {

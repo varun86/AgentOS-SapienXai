@@ -25,6 +25,9 @@ function createSettingsAdapter(config: Record<string, unknown> = {}): OpenClawAd
     async getStatus() {
       return {};
     },
+    async getUpdateStatus() {
+      return {};
+    },
     async getGatewayStatus() {
       return {};
     },

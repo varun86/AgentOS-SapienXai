@@ -48,6 +48,7 @@ test("adding provider models does not silently fall back to OpenClaw file writes
 
 test("adding provider models retries transient Gateway restart during config update", async () => {
   const calls: string[] = [];
+  const values = new Map<string, unknown>();
   let modelSetCalls = 0;
 
   setOpenClawAdapterForTesting({
@@ -61,6 +62,7 @@ test("adding provider models retries transient Gateway restart during config upd
     },
     async setConfig(path: string, value: unknown) {
       calls.push(`set:${path}`);
+      values.set(path, value);
       if (path === "agents.defaults") {
         modelSetCalls += 1;
       }
@@ -82,6 +84,18 @@ test("adding provider models retries transient Gateway restart during config upd
     "set:agents.defaults",
     "set:plugins.entries.codex.enabled"
   ]);
+  assert.deepEqual(values.get("agents.defaults"), {
+    models: {
+      "openai/gpt-5.5": {
+        agentRuntime: {
+          id: "codex"
+        }
+      }
+    },
+    model: {
+      primary: "openai/gpt-5.5"
+    }
+  });
 });
 
 test("setting the default model retries and starts Gateway after transient connect failures", async () => {
@@ -130,6 +144,7 @@ test("setting the default model retries and starts Gateway after transient conne
 
 test("setting the default model retries while Gateway is still starting", async () => {
   const calls: string[] = [];
+  const values = new Map<string, unknown>();
   let defaultsWrites = 0;
 
   setOpenClawAdapterForTesting({
@@ -143,6 +158,7 @@ test("setting the default model retries while Gateway is still starting", async 
     },
     async setConfig(path: string, value: unknown) {
       calls.push(`set:${path}`);
+      values.set(path, value);
       if (path === "agents.defaults") {
         defaultsWrites += 1;
       }
@@ -172,6 +188,18 @@ test("setting the default model retries while Gateway is still starting", async 
     "get:agents.defaults",
     "set:agents.defaults"
   ]);
+  assert.deepEqual(values.get("agents.defaults"), {
+    models: {
+      "openai/gpt-5.4-mini": {
+        agentRuntime: {
+          id: "openclaw"
+        }
+      }
+    },
+    model: {
+      primary: "openai/gpt-5.4-mini"
+    }
+  });
 });
 
 test("setting the default model writes OpenClaw Gateway config", async () => {
@@ -223,7 +251,7 @@ test("setting a Codex default model normalizes the model ref and enables Codex r
   setOpenClawAdapterForTesting({
     async getConfig(path: string) {
       calls.push(`get:${path}`);
-      return path === "agents.defaults" ? { models: {} } : null;
+      return path === "agents.defaults" ? { models: {}, agentRuntime: { id: "pi" } } : null;
     },
     async setConfig(path: string, value: unknown) {
       calls.push(`set:${path}`);
@@ -248,13 +276,14 @@ test("setting a Codex default model normalizes the model ref and enables Codex r
   ]);
   assert.deepEqual(values.get("agents.defaults"), {
     models: {
-      "openai/gpt-5.5": {}
+      "openai/gpt-5.5": {
+        agentRuntime: {
+          id: "codex"
+        }
+      }
     },
     model: {
       primary: "openai/gpt-5.5"
-    },
-    agentRuntime: {
-      id: "codex"
     }
   });
   assert.equal(values.get("plugins.entries.codex.enabled"), true);

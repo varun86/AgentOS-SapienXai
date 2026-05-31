@@ -468,6 +468,9 @@ function createContractAdapter(overrides: Partial<OpenClawAdapter> = {}): OpenCl
     async getStatus() {
       return { version: "9.9.9" };
     },
+    async getUpdateStatus() {
+      return {};
+    },
     async getGatewayStatus() {
       return {};
     },

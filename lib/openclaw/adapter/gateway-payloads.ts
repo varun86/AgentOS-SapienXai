@@ -4,9 +4,12 @@ import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import type {
   GatewayStatusPayload,
   ModelsStatusPayload,
+  OpenClawUpdateStatusPayload,
   StatusPayload
 } from "@/lib/openclaw/client/gateway-client";
 import type { OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+
+export type UpdateStatusPayload = OpenClawUpdateStatusPayload;
 
 export async function settleStatusPayloadFromOpenClaw(
   timeoutMs = 20_000,
@@ -14,6 +17,25 @@ export async function settleStatusPayloadFromOpenClaw(
 ): Promise<PromiseSettledResult<StatusPayload>> {
   try {
     const value = await adapter.getStatus({ timeoutMs });
+
+    return {
+      status: "fulfilled",
+      value
+    };
+  } catch (error) {
+    return {
+      status: "rejected",
+      reason: error
+    };
+  }
+}
+
+export async function settleUpdateStatusPayloadFromOpenClaw(
+  timeoutMs = 20_000,
+  adapter: OpenClawAdapter = getOpenClawAdapter()
+): Promise<PromiseSettledResult<UpdateStatusPayload>> {
+  try {
+    const value = await adapter.getUpdateStatus({ timeoutMs });
 
     return {
       status: "fulfilled",
