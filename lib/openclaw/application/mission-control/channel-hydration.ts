@@ -1,5 +1,6 @@
 import "server-only";
 
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { settleChannelRegistryFromLocalFile } from "@/lib/openclaw/state/channel-registry-payload";
 import { channelRegistryPath } from "@/lib/openclaw/state/paths";
 import {
@@ -11,8 +12,17 @@ import {
 import { normalizeChannelRegistry } from "@/lib/openclaw/domains/workspace-manifest";
 import type { ChannelAccountRecord } from "@/lib/openclaw/types";
 import type { SnapshotLoadProfile } from "@/lib/openclaw/state/snapshot-cache";
+import {
+  buildSurfaceDriftSnapshot,
+  loadSurfaceRuntimeSnapshot
+} from "@/lib/openclaw/surface-runtime";
 
-export async function hydrateMissionControlChannels(profile: SnapshotLoadProfile) {
+export async function hydrateMissionControlChannels(
+  profile: SnapshotLoadProfile,
+  options: {
+    workspaceId?: string | null;
+  } = {}
+) {
   const channelRegistryResult = await settleChannelRegistryFromLocalFile(channelRegistryPath);
   const channelRegistry =
     channelRegistryResult.status === "fulfilled"
@@ -32,9 +42,33 @@ export async function hydrateMissionControlChannels(profile: SnapshotLoadProfile
     ]),
     channelRegistry
   );
+  const surfaceRuntime = await loadSurfaceRuntimeSnapshot({
+    profile,
+    channelAccounts: channelAccountsRaw,
+    channelRegistry
+  });
+  const currentBindings = profile === "interactive" ? null : await readOpenClawBindings();
+  const surfaceDrift = buildSurfaceDriftSnapshot({
+    registry: channelRegistry,
+    currentBindings,
+    surfaceRuntime,
+    configuredAccounts: channelAccountsRaw,
+    workspaceId: options.workspaceId
+  });
 
   return {
     channelRegistry,
-    channelAccounts
+    channelAccounts,
+    surfaceRuntime,
+    surfaceDrift
   };
+}
+
+async function readOpenClawBindings() {
+  try {
+    const bindings = await getOpenClawAdapter().getConfig<unknown[]>("bindings", { timeoutMs: 5_000 });
+    return Array.isArray(bindings) ? bindings : [];
+  } catch {
+    return null;
+  }
 }

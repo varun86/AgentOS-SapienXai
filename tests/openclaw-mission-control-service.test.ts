@@ -23,6 +23,8 @@ const snapshotResponseKeys = [
   "relationships",
   "revision",
   "runtimes",
+  "surfaceDrift",
+  "surfaceRuntime",
   "tasks",
   "workspaces"
 ];

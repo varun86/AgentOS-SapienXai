@@ -1,7 +1,8 @@
 import type {
   ChannelAccountRecord,
   MissionControlSurfaceKind,
-  MissionControlSurfaceProvider
+  MissionControlSurfaceProvider,
+  SurfaceRuntimeSnapshot
 } from "@/lib/openclaw/types";
 
 export type SurfaceProvisionField = {
@@ -496,4 +497,63 @@ export function sortSurfaceAccounts(accounts: ChannelAccountRecord[]) {
 
     return left.name.localeCompare(right.name);
   });
+}
+
+export function buildSurfaceCatalogEntries(input: {
+  channelAccounts?: ChannelAccountRecord[];
+  surfaceRuntime?: SurfaceRuntimeSnapshot | null;
+} = {}) {
+  const entriesByProvider = new Map(
+    OPENCLAW_SURFACE_CATALOG.map((entry) => [entry.provider, entry] as const)
+  );
+  const dynamicProviders = new Set<MissionControlSurfaceProvider>();
+
+  for (const account of input.channelAccounts ?? []) {
+    dynamicProviders.add(account.type);
+  }
+
+  for (const provider of input.surfaceRuntime?.providerOrder ?? []) {
+    dynamicProviders.add(provider);
+  }
+
+  for (const provider of Object.keys(input.surfaceRuntime?.accountsByProvider ?? {})) {
+    dynamicProviders.add(provider);
+  }
+
+  for (const provider of dynamicProviders) {
+    if (entriesByProvider.has(provider)) {
+      continue;
+    }
+
+    entriesByProvider.set(provider, {
+      provider,
+      label: input.surfaceRuntime?.providerLabels[provider] ?? formatSurfaceProviderLabel(provider),
+      kind: inferDynamicSurfaceKind(provider),
+      description: "OpenClaw-managed channel exposed through Gateway status or configuration.",
+      supportsProvisioning: false,
+      provisionFields: [],
+      supportsRouteDiscovery: false,
+      providerManagedByOpenClaw: true
+    });
+  }
+
+  return Array.from(entriesByProvider.values()).sort((left, right) => {
+    if (left.kind !== right.kind) {
+      return left.kind.localeCompare(right.kind);
+    }
+
+    return left.label.localeCompare(right.label);
+  });
+}
+
+function inferDynamicSurfaceKind(provider: string): MissionControlSurfaceKind {
+  if (/gmail|mail|email|inbox/i.test(provider)) {
+    return "inbox";
+  }
+
+  if (/cron|hook|webhook|trigger|event/i.test(provider)) {
+    return "trigger";
+  }
+
+  return "chat";
 }

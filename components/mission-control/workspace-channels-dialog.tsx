@@ -27,9 +27,10 @@ import {
   upsertSnapshotChannelAccount
 } from "@/lib/openclaw/channel-bindings";
 import {
+  buildSurfaceCatalogEntries,
   getSurfaceCatalogEntry,
-  OPENCLAW_SURFACE_CATALOG,
   sortSurfaceAccounts,
+  type SurfaceCatalogEntry,
   type SurfaceProvisionField
 } from "@/lib/openclaw/surface-catalog";
 import {
@@ -43,6 +44,10 @@ import {
   resolveGatewayAuthRepairAction,
   type GatewayAuthRepairAction
 } from "@/lib/openclaw/gateway-auth-actions";
+import {
+  formatGatewayConfigRateLimitMessage,
+  isGatewayConfigRateLimitMessage
+} from "@/lib/openclaw/gateway-config-errors";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type {
   ChannelAccountRecord,
@@ -50,6 +55,9 @@ import type {
   MissionControlSnapshot,
   MissionControlSurfaceKind,
   MissionControlSurfaceProvider,
+  SurfaceAccountRuntimeStatus,
+  SurfaceBindingDriftIssue,
+  SurfaceBindingRepairResult,
   WorkspaceChannelGroupAssignment
 } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
@@ -58,6 +66,13 @@ type ChannelMutationResult = {
   error?: string;
   registry?: MissionControlSnapshot["channelRegistry"];
   account?: MissionControlSnapshot["channelAccounts"][number];
+  snapshot?: MissionControlSnapshot;
+};
+
+type SurfaceReconcileResult = {
+  error?: string;
+  repair?: SurfaceBindingRepairResult;
+  snapshot?: MissionControlSnapshot;
 };
 
 type GatewayAuthStatusResult = {
@@ -103,10 +118,22 @@ export function WorkspaceChannelsDialog({
     [snapshot, workspace]
   );
   const allAccounts = useMemo(() => sortSurfaceAccounts(snapshot.channelAccounts), [snapshot.channelAccounts]);
+  const surfaceCatalogEntries = useMemo(
+    () =>
+      buildSurfaceCatalogEntries({
+        channelAccounts: allAccounts,
+        surfaceRuntime: snapshot.surfaceRuntime
+      }),
+    [allAccounts, snapshot.surfaceRuntime]
+  );
+  const surfaceCatalogByProvider = useMemo(
+    () => new Map(surfaceCatalogEntries.map((entry) => [entry.provider, entry] as const)),
+    [surfaceCatalogEntries]
+  );
   const availableKinds = useMemo(() => {
-    const catalogKinds = new Set(OPENCLAW_SURFACE_CATALOG.map((entry) => entry.kind));
+    const catalogKinds = new Set(surfaceCatalogEntries.map((entry) => entry.kind));
     return SURFACE_KIND_ORDER.filter((kind) => catalogKinds.has(kind));
-  }, []);
+  }, [surfaceCatalogEntries]);
 
   const [activeKind, setActiveKind] = useState<MissionControlSurfaceKind>("chat");
   const [activeProvider, setActiveProvider] = useState<MissionControlSurfaceProvider>("telegram");
@@ -131,21 +158,41 @@ export function WorkspaceChannelsDialog({
       return;
     }
 
-    const entry = getSurfaceCatalogEntry(initialProvider);
+    const entry = surfaceCatalogByProvider.get(initialProvider) ?? getSurfaceCatalogEntry(initialProvider);
     setActiveKind(entry.kind);
     setActiveProvider(initialProvider);
     setProvisionDraft(buildEmptyProvisionDraft(entry));
-  }, [initialProvider, open]);
+  }, [initialProvider, open, surfaceCatalogByProvider]);
 
   const providerAccounts = useMemo(
-    () => allAccounts.filter((account) => account.type === activeProvider),
-    [activeProvider, allAccounts]
+    () =>
+      mergeRuntimeSurfaceAccounts(
+        allAccounts.filter((account) => account.type === activeProvider),
+        Object.values(snapshot.surfaceRuntime.accountsByProvider[activeProvider] ?? {})
+      ),
+    [activeProvider, allAccounts, snapshot.surfaceRuntime.accountsByProvider]
   );
   const providerWorkspaceSurfaces = useMemo(
     () => workspaceSurfaces.filter((surface) => surface.type === activeProvider),
     [activeProvider, workspaceSurfaces]
   );
-  const currentCatalogEntry = useMemo(() => getSurfaceCatalogEntry(activeProvider), [activeProvider]);
+  const currentCatalogEntry = useMemo(
+    () => surfaceCatalogByProvider.get(activeProvider) ?? getSurfaceCatalogEntry(activeProvider),
+    [activeProvider, surfaceCatalogByProvider]
+  );
+  const surfaceGatewayAccess = snapshot.surfaceRuntime.gatewayAccess;
+  const workspaceDriftIssues = useMemo(
+    () => filterWorkspaceDriftIssues(snapshot.surfaceDrift.issues, workspace?.id ?? null),
+    [snapshot.surfaceDrift.issues, workspace?.id]
+  );
+  const workspaceDriftSummary = useMemo(
+    () => summarizeSurfaceDriftIssues(workspaceDriftIssues),
+    [workspaceDriftIssues]
+  );
+  const activeProviderDriftIssues = useMemo(
+    () => workspaceDriftIssues.filter((issue) => issue.provider === activeProvider),
+    [activeProvider, workspaceDriftIssues]
+  );
   const basicProvisionFields = currentCatalogEntry.provisionFields.filter((field) => field.section !== "advanced");
   const advancedProvisionFields = currentCatalogEntry.provisionFields.filter((field) => field.section === "advanced");
   const isLinkedAccountId = useCallback(
@@ -172,17 +219,8 @@ export function WorkspaceChannelsDialog({
   );
 
   const providerOptions = useMemo(() => {
-    const providersForKind = OPENCLAW_SURFACE_CATALOG.filter((entry) => entry.kind === activeKind);
-    const knownProviders = new Set(providersForKind.map((entry) => entry.provider));
-    const dynamicProviders = allAccounts
-      .filter((account) => getSurfaceCatalogEntry(account.type).kind === activeKind && !knownProviders.has(account.type))
-      .map((account) => account.type);
-
-    return [
-      ...providersForKind.map((entry) => entry.provider),
-      ...Array.from(new Set(dynamicProviders))
-    ];
-  }, [activeKind, allAccounts]);
+    return surfaceCatalogEntries.filter((entry) => entry.kind === activeKind).map((entry) => entry.provider);
+  }, [activeKind, surfaceCatalogEntries]);
 
   const refreshSurfaceRoutes = useCallback(
     async (surfaceId: string, provider: MissionControlSurfaceProvider) => {
@@ -311,7 +349,7 @@ export function WorkspaceChannelsDialog({
       setSavingMessage(null);
       setDeleteTarget(null);
       setDeleteConfirmText("");
-      setProvisionDraft(buildEmptyProvisionDraft(getSurfaceCatalogEntry(activeProvider)));
+      setProvisionDraft(buildEmptyProvisionDraft(currentCatalogEntry));
       setDelegateDraftBySurfaceId({});
       setDelegateRouteDraftBySurfaceId({});
       setDiscoveredRoutesBySurfaceId({});
@@ -323,7 +361,7 @@ export function WorkspaceChannelsDialog({
     if (!newPrimaryAgentId) {
       setNewPrimaryAgentId(workspaceAgents[0]?.id ?? "");
     }
-  }, [activeProvider, newPrimaryAgentId, open, workspaceAgents]);
+  }, [currentCatalogEntry, newPrimaryAgentId, open, workspaceAgents]);
 
   useEffect(() => {
     setProvisionDraft(buildEmptyProvisionDraft(currentCatalogEntry));
@@ -470,7 +508,8 @@ export function WorkspaceChannelsDialog({
 
   const repairGatewayAccessAndRetry = async (
     action: GatewayAuthRepairAction,
-    retry: () => Promise<void>
+    retry: () => Promise<void>,
+    scopes: string[] = ["operator.admin"]
   ) => {
     beginSaving(`${action.label} repair...`);
 
@@ -480,7 +519,7 @@ export function WorkspaceChannelsDialog({
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ action: action.apiAction })
+        body: JSON.stringify({ action: action.apiAction, scopes })
       });
       const result = (await response.json().catch(() => null)) as GatewayAuthStatusResult | null;
 
@@ -509,9 +548,23 @@ export function WorkspaceChannelsDialog({
   const showSurfaceMutationError = async (
     title: string,
     error: unknown,
-    retry?: () => Promise<void>
+    retry?: () => Promise<void>,
+    repairScopes: string[] = ["operator.admin"]
   ) => {
     const message = readSurfaceErrorMessage(error);
+
+    if (isGatewayConfigRateLimitMessage(message) && retry) {
+      toast.error(title, {
+        description: formatGatewayConfigRateLimitMessage(message, "the surface operation"),
+        duration: 12_000,
+        action: {
+          label: "Retry",
+          onClick: () => void retry()
+        }
+      });
+      return;
+    }
+
     const repairAction =
       (await resolveSurfaceGatewayRepairAction(message)) ??
       (isGatewayRecoveryCandidate(message) ? buildFallbackGatewayRepairAction() : null);
@@ -522,7 +575,7 @@ export function WorkspaceChannelsDialog({
         duration: 12_000,
         action: {
           label: "Repair & retry",
-          onClick: () => void repairGatewayAccessAndRetry(repairAction, retry)
+          onClick: () => void repairGatewayAccessAndRetry(repairAction, retry, repairScopes)
         }
       });
       return;
@@ -826,6 +879,45 @@ export function WorkspaceChannelsDialog({
     }
   };
 
+  const handleRepairSurfaceDrift = async () => {
+    if (!workspace) {
+      return;
+    }
+
+    beginSaving("Repairing OpenClaw bindings...");
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace.id)}/surfaces/reconcile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ scope: "workspace" })
+      });
+      const result = (await response.json()) as SurfaceReconcileResult;
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error || "OpenClaw bindings could not be reconciled.");
+      }
+
+      if (result.snapshot && onSnapshotChange) {
+        onSnapshotChange(() => result.snapshot!);
+      }
+
+      const repair = result.repair;
+      toast.success("OpenClaw bindings repaired.", {
+        description: repair
+          ? `${repair.addedBindingCount} added, ${repair.removedBindingCount} removed.`
+          : "Managed bindings were rewritten from the AgentOS registry."
+      });
+      void onRefresh().catch(() => {});
+    } catch (error) {
+      await showSurfaceMutationError("Binding repair failed.", error, handleRepairSurfaceDrift, ["operator.admin"]);
+    } finally {
+      endSaving();
+    }
+  };
+
   const deleteConfirmationValid = deleteTarget
     ? deleteConfirmText.trim().toLowerCase() === deleteTarget.name.trim().toLowerCase()
     : false;
@@ -969,6 +1061,50 @@ export function WorkspaceChannelsDialog({
           </div>
         ) : null}
 
+        {surfaceGatewayAccess.blocked ? (
+          <div className="mx-4 mt-4 rounded-2xl border border-amber-300/25 bg-amber-400/[0.08] px-3 py-3 sm:mx-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 gap-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-amber-50">Gateway access blocked</p>
+                  <p className="mt-1 text-xs leading-5 text-amber-100/80">
+                    {surfaceGatewayAccess.issue ??
+                      "OpenClaw Gateway pairing or scope approval is blocking live channel status."}
+                  </p>
+                  {surfaceGatewayAccess.missingScopes.length > 0 ? (
+                    <p className="mt-1 text-[11px] text-amber-100/70">
+                      Missing scopes: {surfaceGatewayAccess.missingScopes.join(", ")}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              {surfaceGatewayAccess.repairAction ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-8 rounded-full px-3 text-[11px] sm:shrink-0"
+                  disabled={isSaving}
+                  onClick={() =>
+                    void repairGatewayAccessAndRetry(
+                      surfaceGatewayAccess.repairAction!,
+                      async () => {
+                        await onRefresh();
+                      },
+                      surfaceGatewayAccess.missingScopes.length > 0
+                        ? surfaceGatewayAccess.missingScopes
+                        : ["operator.read"]
+                    )
+                  }
+                >
+                  Repair Gateway Access
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
         <div className="grid min-h-0 gap-4 sm:grid-cols-[220px_minmax(0,1fr)]">
           <aside className="h-fit rounded-2xl border border-white/10 bg-white/[0.025] p-2.5 sm:sticky sm:top-0">
@@ -984,9 +1120,12 @@ export function WorkspaceChannelsDialog({
 
             <div className="mt-2.5 space-y-1.5">
               {providerOptions.map((provider) => {
-                const entry = getSurfaceCatalogEntry(provider);
+                const entry = surfaceCatalogByProvider.get(provider) ?? getSurfaceCatalogEntry(provider);
                 const providerSurfaceCount = workspaceSurfaces.filter((surface) => surface.type === provider).length;
                 const providerAccountCount = allAccounts.filter((account) => account.type === provider).length;
+                const providerRuntimeCount = Object.keys(
+                  snapshot.surfaceRuntime.accountsByProvider[provider] ?? {}
+                ).length;
 
                 return (
                   <button
@@ -1005,7 +1144,9 @@ export function WorkspaceChannelsDialog({
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-white">{entry.label}</p>
                         <p className="mt-0.5 truncate text-[10px] text-slate-500">
-                          {providerAccountCount} account{providerAccountCount === 1 ? "" : "s"}
+                          {Math.max(providerAccountCount, providerRuntimeCount)} account
+                          {Math.max(providerAccountCount, providerRuntimeCount) === 1 ? "" : "s"} ·{" "}
+                          {formatSurfaceRuntimeSource(snapshot.surfaceRuntime.source)}
                         </p>
                       </div>
                     </div>
@@ -1019,6 +1160,66 @@ export function WorkspaceChannelsDialog({
           </aside>
 
           <div className="min-w-0 space-y-4">
+            {workspaceDriftIssues.length > 0 ? (
+              <section className="rounded-2xl border border-amber-300/20 bg-amber-400/[0.06] p-3.5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-amber-50">OpenClaw binding drift</p>
+                      <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                        {workspaceDriftIssues.length} issue{workspaceDriftIssues.length === 1 ? "" : "s"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-amber-100/75">
+                      AgentOS registry and OpenClaw runtime bindings differ for this workspace.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {formatSurfaceDriftSummary(workspaceDriftSummary).map((item) => (
+                        <Badge key={item} variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                          {item}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 rounded-full px-3 text-[11px] sm:shrink-0"
+                    disabled={isSaving || !snapshot.surfaceDrift.checked}
+                    onClick={() => void handleRepairSurfaceDrift()}
+                  >
+                    Repair bindings
+                  </Button>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  {workspaceDriftIssues.slice(0, 4).map((issue) => (
+                    <div key={issue.id} className="rounded-xl border border-white/8 bg-black/15 px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                          {formatSurfaceProviderLabelFromCatalog(issue.provider, surfaceCatalogByProvider)}
+                        </Badge>
+                        <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                          {formatSurfaceDriftKind(issue.kind)}
+                        </Badge>
+                        <p className="min-w-0 flex-1 truncate text-xs font-medium text-white">{issue.title}</p>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-4 text-amber-100/75">
+                        {formatSurfaceDriftIssueDetail(issue, resolveAgentDisplayName)}
+                      </p>
+                    </div>
+                  ))}
+                  {workspaceDriftIssues.length > 4 ? (
+                    <p className="text-[11px] text-amber-100/65">
+                      {workspaceDriftIssues.length - 4} more drift issue
+                      {workspaceDriftIssues.length - 4 === 1 ? "" : "s"} hidden.
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+
             <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-3.5">
               <div className="flex items-center justify-between gap-3">
                 <p className="min-w-0 truncate text-sm font-medium text-white">{currentCatalogEntry.label} surfaces</p>
@@ -1080,6 +1281,10 @@ export function WorkspaceChannelsDialog({
                     const primaryAgentIsInWorkspace = workspaceAgents.some(
                       (agent) => agent.id === surface.primaryAgentId
                     );
+                    const runtimeStatus = getSurfaceAccountRuntime(snapshot, surface.type, surface.id);
+                    const surfaceDriftIssues = activeProviderDriftIssues.filter(
+                      (issue) => issue.accountId === surface.id || issue.accountId === toLegacySurfaceId(surface.id)
+                    );
 
                     return (
                       <div
@@ -1095,8 +1300,24 @@ export function WorkspaceChannelsDialog({
                                 <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
                                   {formatSurfaceKindLabel(currentCatalogEntry.kind)}
                                 </Badge>
+                                <Badge
+                                  variant="muted"
+                                  className={cn(
+                                    "h-5 rounded-full px-2 text-[10px]",
+                                    getSurfaceRuntimeBadgeClass(runtimeStatus, surfaceGatewayAccess.blocked)
+                                  )}
+                                >
+                                  {formatSurfaceAccountStatus(runtimeStatus, surfaceGatewayAccess.blocked)}
+                                </Badge>
+                                {surfaceDriftIssues.length > 0 ? (
+                                  <Badge className="h-5 rounded-full border-amber-300/25 bg-amber-400/10 px-2 text-[10px] text-amber-100">
+                                    Drift
+                                  </Badge>
+                                ) : null}
                               </div>
-                              <p className="mt-1 truncate text-[11px] text-slate-500">{surface.id}</p>
+                              <p className="mt-1 truncate text-[11px] text-slate-500">
+                                {surface.type}:{surface.id} · {formatSurfaceRuntimeSource(runtimeStatus?.source ?? snapshot.surfaceRuntime.source)}
+                              </p>
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
@@ -1137,6 +1358,16 @@ export function WorkspaceChannelsDialog({
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 text-[11px] text-slate-400 sm:grid-cols-4">
+                          <SurfaceMetric label="Primary" value={resolveAgentDisplayName(surface.primaryAgentId)} />
+                          <SurfaceMetric label="Assistants" value={String(assistantIds.length)} />
+                          <SurfaceMetric label="Routes" value={String(currentAssignments.length)} />
+                          <SurfaceMetric
+                            label="Health"
+                            value={formatSurfaceAccountStatus(runtimeStatus, surfaceGatewayAccess.blocked)}
+                          />
                         </div>
 
                         <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -1411,6 +1642,7 @@ export function WorkspaceChannelsDialog({
                   {providerAccounts.length > 0 ? (
                     providerAccounts.map((account) => {
                       const linked = isLinkedAccountId(account.id);
+                      const runtimeStatus = getSurfaceAccountRuntime(snapshot, account.type, account.id);
                       return (
                         <div
                           key={account.id}
@@ -1419,8 +1651,21 @@ export function WorkspaceChannelsDialog({
                           <div className="flex min-w-0 items-center gap-3">
                             <SurfaceIcon provider={account.type} className="h-8 w-8 shrink-0" />
                             <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-white">{account.name}</p>
-                              <p className="mt-1 truncate text-[11px] text-slate-500">{account.id}</p>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate text-sm font-medium text-white">{account.name}</p>
+                                <Badge
+                                  variant="muted"
+                                  className={cn(
+                                    "h-5 rounded-full px-2 text-[10px]",
+                                    getSurfaceRuntimeBadgeClass(runtimeStatus, surfaceGatewayAccess.blocked)
+                                  )}
+                                >
+                                  {formatSurfaceAccountStatus(runtimeStatus, surfaceGatewayAccess.blocked)}
+                                </Badge>
+                              </div>
+                              <p className="mt-1 truncate text-[11px] text-slate-500">
+                                {account.id} · {formatSurfaceRuntimeSource(runtimeStatus?.source ?? snapshot.surfaceRuntime.source)}
+                              </p>
                             </div>
                           </div>
                           <Button
@@ -1456,83 +1701,92 @@ export function WorkspaceChannelsDialog({
                     </Badge>
                   </div>
 
-                  <FormField label="Surface name" htmlFor="surface-name">
-                    <Input
-                      id="surface-name"
-                      value={getProvisionDraftText(provisionDraft, "name")}
-                      onChange={(event) =>
-                        setProvisionDraft((current) => ({ ...current, name: event.target.value }))
-                      }
-                      placeholder={`${currentCatalogEntry.label} workspace surface`}
-                      className="h-10 rounded-xl px-3"
-                    />
-                  </FormField>
+                  {currentCatalogEntry.supportsProvisioning ? (
+                    <>
+                      <FormField label="Surface name" htmlFor="surface-name">
+                        <Input
+                          id="surface-name"
+                          value={getProvisionDraftText(provisionDraft, "name")}
+                          onChange={(event) =>
+                            setProvisionDraft((current) => ({ ...current, name: event.target.value }))
+                          }
+                          placeholder={`${currentCatalogEntry.label} workspace surface`}
+                          className="h-10 rounded-xl px-3"
+                        />
+                      </FormField>
 
-                  {basicProvisionFields.length > 0 ? (
-                    <div className="grid gap-3 md:grid-cols-2">{basicProvisionFields.map(renderProvisionField)}</div>
-                  ) : null}
-
-                  {advancedProvisionFields.length > 0 ? (
-                    <details className="rounded-xl border border-white/8 bg-white/[0.015] p-3">
-                      <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                        Advanced settings
-                      </summary>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {advancedProvisionFields.map(renderProvisionField)}
-                      </div>
-                    </details>
-                  ) : null}
-
-                  {provisionPreviewConfig && provisionPreviewPath ? (
-                    <details className="rounded-xl border border-cyan-300/15 bg-cyan-400/[0.04] p-3">
-                      <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-cyan-100">
-                        Config preview
-                      </summary>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Badge variant="muted" className="h-6 rounded-full px-2 text-[10px]">
-                          {provisionPreviewPath}
-                        </Badge>
-                      </div>
-                      {currentCatalogEntry.provider === "gmail" ? (
-                        <p className="mt-2 text-[11px] leading-5 text-cyan-100/70">Includes Gmail hook enablement.</p>
+                      {basicProvisionFields.length > 0 ? (
+                        <div className="grid gap-3 md:grid-cols-2">{basicProvisionFields.map(renderProvisionField)}</div>
                       ) : null}
-                      <pre className="mt-3 max-h-52 overflow-auto rounded-xl border border-white/10 bg-slate-950/80 p-3 text-[11px] leading-5 text-slate-100">
-                        {JSON.stringify(provisionPreviewConfig, null, 2)}
-                      </pre>
-                    </details>
-                  ) : null}
 
-                  <FormField label="Primary agent" htmlFor="surface-primary-agent">
-                    <select
-                      id="surface-primary-agent"
-                      value={newPrimaryAgentId}
-                      onChange={(event) => setNewPrimaryAgentId(event.target.value)}
-                      className="flex h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
-                    >
-                      <option value="">Select agent</option>
-                      {workspaceAgents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {formatAgentDisplayName(agent)}
-                        </option>
-                      ))}
-                    </select>
-                  </FormField>
+                      {advancedProvisionFields.length > 0 ? (
+                        <details className="rounded-xl border border-white/8 bg-white/[0.015] p-3">
+                          <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                            Advanced settings
+                          </summary>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            {advancedProvisionFields.map(renderProvisionField)}
+                          </div>
+                        </details>
+                      ) : null}
 
-                  <Button
-                    type="button"
-                    className="h-10 rounded-full px-4 text-sm"
-                    disabled={!canProvisionSurface}
-                    onClick={() => void handleProvisionSurface()}
-                  >
-                    {isSaving ? (
-                      "Provisioning..."
-                    ) : (
-                      <>
-                        <Plus className="mr-1.5 h-4 w-4" />
-                        Provision
-                      </>
-                    )}
-                  </Button>
+                      {provisionPreviewConfig && provisionPreviewPath ? (
+                        <details className="rounded-xl border border-cyan-300/15 bg-cyan-400/[0.04] p-3">
+                          <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-cyan-100">
+                            Config preview
+                          </summary>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Badge variant="muted" className="h-6 rounded-full px-2 text-[10px]">
+                              {provisionPreviewPath}
+                            </Badge>
+                          </div>
+                          {currentCatalogEntry.provider === "gmail" ? (
+                            <p className="mt-2 text-[11px] leading-5 text-cyan-100/70">Includes Gmail hook enablement.</p>
+                          ) : null}
+                          <pre className="mt-3 max-h-52 overflow-auto rounded-xl border border-white/10 bg-slate-950/80 p-3 text-[11px] leading-5 text-slate-100">
+                            {JSON.stringify(provisionPreviewConfig, null, 2)}
+                          </pre>
+                        </details>
+                      ) : null}
+
+                      <FormField label="Primary agent" htmlFor="surface-primary-agent">
+                        <select
+                          id="surface-primary-agent"
+                          value={newPrimaryAgentId}
+                          onChange={(event) => setNewPrimaryAgentId(event.target.value)}
+                          className="flex h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                        >
+                          <option value="">Select agent</option>
+                          {workspaceAgents.map((agent) => (
+                            <option key={agent.id} value={agent.id}>
+                              {formatAgentDisplayName(agent)}
+                            </option>
+                          ))}
+                        </select>
+                      </FormField>
+
+                      <Button
+                        type="button"
+                        className="h-10 rounded-full px-4 text-sm"
+                        disabled={!canProvisionSurface}
+                        onClick={() => void handleProvisionSurface()}
+                      >
+                        {isSaving ? (
+                          "Provisioning..."
+                        ) : (
+                          <>
+                            <Plus className="mr-1.5 h-4 w-4" />
+                            Provision
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="rounded-xl border border-white/8 bg-white/[0.02] px-3 py-3 text-sm leading-5 text-slate-400">
+                      Provisioning is not exposed for this OpenClaw provider in AgentOS. Existing OpenClaw accounts can
+                      still be attached, monitored, and routed from this workspace.
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
@@ -1626,11 +1880,24 @@ function FormField({
   );
 }
 
+function SurfaceMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/[0.018] px-3 py-2">
+      <p className="truncate text-[9px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-[11px] text-slate-200">{value}</p>
+    </div>
+  );
+}
+
 function readSurfaceErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown surface error.";
 }
 
 function isGatewayRecoveryCandidate(message: string) {
+  if (isGatewayConfigRateLimitMessage(message)) {
+    return false;
+  }
+
   return /gateway|websocket|connection closed|service restart|ECONNREFUSED|ECONNRESET|socket hang up|unreachable|not reachable|timed out|timeout|scope upgrade|scope mismatch|missing operator/i.test(
     message
   );
@@ -1643,6 +1910,203 @@ function buildFallbackGatewayRepairAction(): GatewayAuthRepairAction {
     label: "Gateway access",
     detail: "Approve any pending local AgentOS Gateway scope request, then retry."
   };
+}
+
+function mergeRuntimeSurfaceAccounts(
+  configuredAccounts: ChannelAccountRecord[],
+  runtimeAccounts: SurfaceAccountRuntimeStatus[]
+) {
+  const accountsById = new Map(configuredAccounts.map((account) => [account.id, account]));
+
+  for (const runtimeAccount of runtimeAccounts) {
+    if (accountsById.has(runtimeAccount.accountId)) {
+      continue;
+    }
+
+    accountsById.set(runtimeAccount.accountId, {
+      id: runtimeAccount.accountId,
+      type: runtimeAccount.provider,
+      name: runtimeAccount.name || runtimeAccount.label || runtimeAccount.accountId,
+      enabled: runtimeAccount.enabled,
+      kind: getSurfaceCatalogEntry(runtimeAccount.provider).kind,
+      metadata: {
+        runtimeOnly: true
+      }
+    });
+  }
+
+  return sortSurfaceAccounts(Array.from(accountsById.values()));
+}
+
+function getSurfaceAccountRuntime(
+  snapshot: MissionControlSnapshot,
+  provider: MissionControlSurfaceProvider,
+  accountId: string
+) {
+  return (
+    snapshot.surfaceRuntime.accountsByKey[`${provider}:${accountId}`] ??
+    snapshot.surfaceRuntime.accountsByKey[`${provider}:${toLegacySurfaceId(accountId)}`] ??
+    null
+  );
+}
+
+function formatSurfaceRuntimeSource(source: MissionControlSnapshot["surfaceRuntime"]["source"]) {
+  switch (source) {
+    case "gateway-probe":
+      return "Gateway probe";
+    case "gateway-status":
+      return "Gateway status";
+    case "config-only":
+      return "Config only";
+    case "unavailable":
+      return "Unavailable";
+  }
+}
+
+function formatSurfaceAccountStatus(
+  runtimeStatus: SurfaceAccountRuntimeStatus | null,
+  gatewayBlocked: boolean
+) {
+  if (gatewayBlocked && !runtimeStatus) {
+    return "Gateway blocked";
+  }
+
+  if (!runtimeStatus) {
+    return "Unknown";
+  }
+
+  switch (runtimeStatus.status) {
+    case "connected":
+      return "Connected";
+    case "running":
+      return "Running";
+    case "linked":
+      return "Linked";
+    case "configured":
+      return "Configured";
+    case "disabled":
+      return "Disabled";
+    case "failed":
+      return "Failed";
+    case "gateway-blocked":
+      return "Gateway blocked";
+    case "unknown":
+      return "Unknown";
+  }
+}
+
+function getSurfaceRuntimeBadgeClass(
+  runtimeStatus: SurfaceAccountRuntimeStatus | null,
+  gatewayBlocked: boolean
+) {
+  if (gatewayBlocked && !runtimeStatus) {
+    return "border-amber-300/25 bg-amber-400/10 text-amber-100";
+  }
+
+  switch (runtimeStatus?.status) {
+    case "connected":
+    case "running":
+    case "linked":
+      return "border-emerald-300/25 bg-emerald-400/10 text-emerald-100";
+    case "configured":
+      return "border-cyan-300/25 bg-cyan-400/10 text-cyan-100";
+    case "disabled":
+      return "border-slate-300/15 bg-slate-400/10 text-slate-300";
+    case "failed":
+      return "border-rose-300/25 bg-rose-400/10 text-rose-100";
+    default:
+      return "border-white/10 bg-white/[0.04] text-slate-300";
+  }
+}
+
+function filterWorkspaceDriftIssues(issues: SurfaceBindingDriftIssue[], workspaceId: string | null) {
+  if (!workspaceId) {
+    return issues;
+  }
+
+  return issues.filter((issue) => !issue.workspaceId || issue.workspaceId === workspaceId);
+}
+
+function summarizeSurfaceDriftIssues(issues: SurfaceBindingDriftIssue[]) {
+  return issues.reduce(
+    (summary, issue) => {
+      if (issue.kind === "missing-binding") {
+        summary.missingBindings += 1;
+      } else if (issue.kind === "extra-binding") {
+        summary.extraBindings += 1;
+      } else if (issue.kind === "agent-mismatch") {
+        summary.agentMismatch += 1;
+      } else if (issue.kind === "account-missing") {
+        summary.accountMissing += 1;
+      } else if (issue.kind === "provider-disabled") {
+        summary.providerDisabled += 1;
+      }
+      return summary;
+    },
+    {
+      missingBindings: 0,
+      extraBindings: 0,
+      agentMismatch: 0,
+      accountMissing: 0,
+      providerDisabled: 0
+    }
+  );
+}
+
+function formatSurfaceDriftSummary(summary: ReturnType<typeof summarizeSurfaceDriftIssues>) {
+  return [
+    summary.missingBindings > 0 ? `${summary.missingBindings} missing` : null,
+    summary.extraBindings > 0 ? `${summary.extraBindings} extra` : null,
+    summary.agentMismatch > 0 ? `${summary.agentMismatch} mismatch` : null,
+    summary.accountMissing > 0 ? `${summary.accountMissing} account missing` : null,
+    summary.providerDisabled > 0 ? `${summary.providerDisabled} disabled` : null
+  ].filter((entry): entry is string => Boolean(entry));
+}
+
+function formatSurfaceDriftKind(kind: SurfaceBindingDriftIssue["kind"]) {
+  switch (kind) {
+    case "missing-binding":
+      return "Missing";
+    case "extra-binding":
+      return "Extra";
+    case "agent-mismatch":
+      return "Mismatch";
+    case "account-missing":
+      return "Account";
+    case "provider-disabled":
+      return "Disabled";
+  }
+}
+
+function formatSurfaceProviderLabelFromCatalog(
+  provider: MissionControlSurfaceProvider,
+  catalog: Map<MissionControlSurfaceProvider, SurfaceCatalogEntry>
+) {
+  return catalog.get(provider)?.label ?? getSurfaceCatalogEntry(provider).label;
+}
+
+function formatSurfaceDriftIssueDetail(
+  issue: SurfaceBindingDriftIssue,
+  resolveAgentDisplayName: (agentId: string | null | undefined, fallback?: string) => string
+) {
+  const route = issue.routeId ? ` route ${issue.routeId}` : "";
+  const account = issue.accountId ? `${issue.provider}:${issue.accountId}` : issue.provider;
+  const expected = issue.expectedAgentId ? resolveAgentDisplayName(issue.expectedAgentId, issue.expectedAgentId) : null;
+  const actual = issue.actualAgentId ? resolveAgentDisplayName(issue.actualAgentId, issue.actualAgentId) : null;
+
+  if (expected && actual) {
+    return `${account}${route}: expected ${expected}, OpenClaw has ${actual}.`;
+  }
+
+  if (expected) {
+    return `${account}${route}: expected ${expected}. ${issue.detail}`;
+  }
+
+  if (actual) {
+    return `${account}${route}: OpenClaw has ${actual}. ${issue.detail}`;
+  }
+
+  return `${account}${route}: ${issue.detail}`;
 }
 
 function buildSurfaceRouteOptions(

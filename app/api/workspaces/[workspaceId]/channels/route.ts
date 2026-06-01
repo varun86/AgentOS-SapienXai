@@ -11,14 +11,15 @@ import {
   bindWorkspaceChannelAgent,
   unbindWorkspaceChannelAgent
 } from "@/lib/agentos/control-plane";
+import { hydrateMissionControlChannels } from "@/lib/openclaw/application/mission-control/channel-hydration";
+import type {
+  MissionControlSurfaceProvider,
+  WorkspaceChannelGroupAssignment
+} from "@/lib/agentos/contracts";
 import {
-  buildLegacyRegistrySurfaceAccounts,
-  applyChannelAccountDisplayNames,
-  getChannelRegistry,
-  mergeMissionControlSurfaceAccounts,
-  readChannelAccounts
-} from "@/lib/openclaw/domains/channels";
-import type { MissionControlSurfaceProvider, WorkspaceChannelGroupAssignment } from "@/lib/agentos/contracts";
+  formatGatewayConfigRateLimitMessage,
+  isGatewayConfigRateLimitMessage
+} from "@/lib/openclaw/gateway-config-errors";
 import { createTimingCollector, formatTimingSummary, measureTiming } from "@/lib/openclaw/timing";
 import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
@@ -62,22 +63,22 @@ const deleteChannelSchema = z.object({
 
 export async function GET(_request: Request, context: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = await context.params;
-  const [registry, channelAccounts] = await Promise.all([getChannelRegistry(), readChannelAccounts()]);
+  const {
+    channelRegistry: registry,
+    channelAccounts,
+    surfaceRuntime,
+    surfaceDrift
+  } = await hydrateMissionControlChannels("refresh", { workspaceId });
   const channels = registry.channels.filter((channel) =>
     channel.workspaces.some((binding) => binding.workspaceId === workspaceId)
-  );
-  const accounts = applyChannelAccountDisplayNames(
-    mergeMissionControlSurfaceAccounts([
-      ...channelAccounts,
-      ...buildLegacyRegistrySurfaceAccounts(registry)
-    ]),
-    registry
   );
 
   return NextResponse.json(redactSecrets({
     workspaceId,
     channels,
-    channelAccounts: accounts
+    channelAccounts,
+    surfaceRuntime,
+    surfaceDrift
   }));
 }
 
@@ -165,7 +166,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
 
     return NextResponse.json(
       {
-        error: redactErrorMessage(error, "Unable to create channel."),
+        error: formatChannelMutationError(error, "Unable to create channel.", "surface provisioning"),
         timings: summary
       },
       { status: 400 }
@@ -231,7 +232,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
   } catch (error) {
     return NextResponse.json(
       {
-        error: redactErrorMessage(error, "Unable to update channel.")
+        error: formatChannelMutationError(error, "Unable to update channel.", "surface update")
       },
       { status: 400 }
     );
@@ -276,7 +277,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ work
 
     return NextResponse.json(
       {
-        error: redactErrorMessage(error, "Unable to delete channel."),
+        error: formatChannelMutationError(error, "Unable to delete channel.", "surface deletion"),
         timings: summary
       },
       { status: 400 }
@@ -291,4 +292,11 @@ function normalizeGroupAssignments(assignments: Array<z.infer<typeof groupAssign
     title: assignment.title ?? null,
     enabled: assignment.enabled !== false
   }));
+}
+
+function formatChannelMutationError(error: unknown, fallback: string, actionLabel: string) {
+  const message = redactErrorMessage(error, fallback);
+  return isGatewayConfigRateLimitMessage(message)
+    ? formatGatewayConfigRateLimitMessage(message, actionLabel)
+    : message;
 }

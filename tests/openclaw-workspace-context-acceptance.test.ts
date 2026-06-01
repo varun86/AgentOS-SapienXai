@@ -460,6 +460,42 @@ function createSnapshot(input: {
     channelRegistry: {
       version: 1,
       channels: []
+    },
+    surfaceRuntime: {
+      source: "unavailable",
+      checkedAt: null,
+      gatewayAccess: {
+        ok: true,
+        blocked: false,
+        role: null,
+        scopes: [],
+        missingScopes: [],
+        requestId: null,
+        issue: null,
+        repairAvailable: false,
+        repairAction: null
+      },
+      providerOrder: [],
+      providerLabels: {},
+      accountsByProvider: {},
+      accountsByKey: {},
+      issue: null
+    },
+    surfaceDrift: {
+      checked: false,
+      source: "unavailable",
+      checkedAt: null,
+      expectedBindingCount: 0,
+      currentBindingCount: 0,
+      summary: {
+        ok: 0,
+        missingBindings: 0,
+        extraBindings: 0,
+        agentMismatch: 0,
+        accountMissing: 0,
+        providerDisabled: 0
+      },
+      issues: []
     }
   };
 }

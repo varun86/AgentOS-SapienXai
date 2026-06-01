@@ -383,6 +383,123 @@ export interface ChannelAccountRecord {
   metadata?: Record<string, unknown>;
 }
 
+export type SurfaceRuntimeSource = "gateway-probe" | "gateway-status" | "config-only" | "unavailable";
+
+export type SurfaceAccountHealthStatus =
+  | "connected"
+  | "running"
+  | "linked"
+  | "configured"
+  | "disabled"
+  | "failed"
+  | "unknown"
+  | "gateway-blocked";
+
+export interface SurfaceAccountRuntimeStatus {
+  key: string;
+  provider: MissionControlSurfaceProvider;
+  accountId: string;
+  name: string;
+  label: string;
+  enabled: boolean;
+  configured: boolean;
+  linked: boolean;
+  running: boolean;
+  connected: boolean;
+  disabled: boolean;
+  failed: boolean;
+  status: SurfaceAccountHealthStatus;
+  healthState: string | null;
+  errorMessage: string | null;
+  source: SurfaceRuntimeSource;
+  checkedAt: string | null;
+  raw?: Record<string, unknown>;
+}
+
+export interface SurfaceGatewayRepairAction {
+  apiAction: "generateLocalToken" | "repairDeviceAccess";
+  cta: string;
+  label: string;
+  detail: string;
+}
+
+export interface SurfaceGatewayAccessState {
+  ok: boolean;
+  blocked: boolean;
+  role: string | null;
+  scopes: string[];
+  missingScopes: string[];
+  requestId: string | null;
+  issue: string | null;
+  repairAvailable: boolean;
+  repairAction: SurfaceGatewayRepairAction | null;
+}
+
+export interface SurfaceRuntimeSnapshot {
+  source: SurfaceRuntimeSource;
+  checkedAt: string | null;
+  gatewayAccess: SurfaceGatewayAccessState;
+  providerOrder: MissionControlSurfaceProvider[];
+  providerLabels: Record<string, string>;
+  accountsByProvider: Record<string, Record<string, SurfaceAccountRuntimeStatus>>;
+  accountsByKey: Record<string, SurfaceAccountRuntimeStatus>;
+  issue: string | null;
+}
+
+export type SurfaceBindingDriftKind =
+  | "missing-binding"
+  | "extra-binding"
+  | "agent-mismatch"
+  | "account-missing"
+  | "provider-disabled";
+
+export interface SurfaceBindingDriftIssue {
+  id: string;
+  kind: SurfaceBindingDriftKind;
+  severity: "warning" | "error";
+  title: string;
+  detail: string;
+  workspaceId: string | null;
+  workspacePath: string | null;
+  provider: MissionControlSurfaceProvider;
+  accountId: string | null;
+  routeId: string | null;
+  routeKind: string | null;
+  expectedAgentId: string | null;
+  actualAgentId: string | null;
+  bindingKey: string | null;
+}
+
+export interface SurfaceDriftSnapshot {
+  checked: boolean;
+  source: "openclaw-bindings" | "unavailable";
+  checkedAt: string | null;
+  expectedBindingCount: number;
+  currentBindingCount: number;
+  summary: {
+    ok: number;
+    missingBindings: number;
+    extraBindings: number;
+    agentMismatch: number;
+    accountMissing: number;
+    providerDisabled: number;
+  };
+  issues: SurfaceBindingDriftIssue[];
+}
+
+export interface SurfaceBindingRepairResult {
+  scope: "workspace" | "all";
+  workspaceId: string | null;
+  checkedAt: string;
+  expectedBindingCount: number;
+  previousBindingCount: number;
+  nextBindingCount: number;
+  changed: boolean;
+  removedBindingCount: number;
+  addedBindingCount: number;
+  drift: SurfaceDriftSnapshot;
+}
+
 export interface OpenClawAgent {
   id: string;
   name: string;
@@ -607,6 +724,8 @@ export interface MissionControlSnapshot {
   relationships: RelationshipRecord[];
   missionPresets: string[];
   channelRegistry: ChannelRegistry;
+  surfaceRuntime: SurfaceRuntimeSnapshot;
+  surfaceDrift: SurfaceDriftSnapshot;
 }
 
 export type MissionControlSurfaceKind = "chat" | "inbox" | "trigger";

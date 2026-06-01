@@ -72,8 +72,9 @@ type GatewayNativeAuthStatusOptions = {
 
 type GatewayNativeDeviceAccessRepairOptions = {
   nativeProbe?: () => Promise<unknown>;
-  approveLatest?: () => Promise<unknown>;
+  approveLatest?: (requiredScopes: string[]) => Promise<unknown>;
   readDeviceAuthToken?: () => Promise<GatewayDeviceAuthToken | null>;
+  requiredScopes?: string[];
 };
 
 type GatewayDeviceAuthToken = {
@@ -492,6 +493,7 @@ export async function repairGatewayNativeDeviceAccess(
   options: GatewayNativeDeviceAccessRepairOptions = {}
 ): Promise<GatewayNativeDeviceAccessRepairResult> {
   const readDeviceAuthToken = options.readDeviceAuthToken ?? readLocalOpenClawDeviceAuthToken;
+  const requiredScopes = normalizeGatewayRepairScopes(options.requiredScopes);
   let probeSucceeded = false;
 
   try {
@@ -518,14 +520,14 @@ export async function repairGatewayNativeDeviceAccess(
   };
 
   try {
-    const payload = await (options.approveLatest ?? approveLatestOpenClawDeviceAccess)();
+    const payload = await (options.approveLatest ?? approveLatestOpenClawDeviceAccess)(requiredScopes);
     result = normalizeGatewayDeviceApprovePayload(payload);
     deviceToken = await syncLocalOpenClawDeviceAuthTokenFromPairing() ?? await readDeviceAuthToken();
   } catch (error) {
     approvalIssue = redactErrorMessage(error, "OpenClaw device approval failed.");
     deviceToken = await syncLocalOpenClawDeviceAuthTokenFromPairing() ?? await readDeviceAuthToken();
 
-    if (!deviceToken?.token || !hasGatewayDeviceAccessRequiredScopes(deviceToken.scopes)) {
+    if (!deviceToken?.token || !hasGatewayDeviceAccessRequiredScopes(deviceToken.scopes, requiredScopes)) {
       throw error;
     }
 
@@ -536,7 +538,7 @@ export async function repairGatewayNativeDeviceAccess(
     };
   }
 
-  if (!result.approved && probeSucceeded && hasGatewayDeviceAccessRequiredScopes(deviceToken?.scopes ?? [])) {
+  if (!result.approved && probeSucceeded && hasGatewayDeviceAccessRequiredScopes(deviceToken?.scopes ?? [], requiredScopes)) {
     result = {
       ...result,
       approved: true,
@@ -544,14 +546,14 @@ export async function repairGatewayNativeDeviceAccess(
     };
   }
 
-  if (result.approved && hasGatewayDeviceAccessRequiredScopes(deviceToken?.scopes ?? [])) {
+  if (result.approved && hasGatewayDeviceAccessRequiredScopes(deviceToken?.scopes ?? [], requiredScopes)) {
     result = {
       ...result,
       scopes: deviceToken?.scopes ?? result.scopes
     };
   }
 
-  if (result.approved && !hasGatewayDeviceAccessRequiredScopes(deviceToken?.scopes ?? result.scopes)) {
+  if (result.approved && !hasGatewayDeviceAccessRequiredScopes(deviceToken?.scopes ?? result.scopes, requiredScopes)) {
     throw new Error(
       "OpenClaw device access was approved, but the local CLI device token was not updated with the required operator scopes."
     );
@@ -568,9 +570,9 @@ export async function repairGatewayNativeDeviceAccess(
   };
 }
 
-async function approveLatestOpenClawDeviceAccess() {
+async function approveLatestOpenClawDeviceAccess(requiredScopes: string[]) {
   return getOpenClawAdapter().approveDeviceAccess(
-    { latest: true },
+    { latest: true, scopes: requiredScopes },
     { timeoutMs: GATEWAY_DEVICE_ACCESS_REPAIR_TIMEOUT_MS }
   );
 }
@@ -1007,9 +1009,14 @@ function resolveOpenClawStateDir() {
   return join(homedir(), ".openclaw");
 }
 
-function hasGatewayDeviceAccessRequiredScopes(scopes: string[]) {
+function normalizeGatewayRepairScopes(scopes: string[] | undefined) {
+  const normalized = readStringArray(scopes).filter((scope) => /^operator\./.test(scope));
+  return normalized.length > 0 ? Array.from(new Set(normalized)).sort() : GATEWAY_DEVICE_ACCESS_REQUIRED_SCOPES;
+}
+
+function hasGatewayDeviceAccessRequiredScopes(scopes: string[], requiredScopes = GATEWAY_DEVICE_ACCESS_REQUIRED_SCOPES) {
   const available = new Set(scopes);
-  return GATEWAY_DEVICE_ACCESS_REQUIRED_SCOPES.every((scope) => available.has(scope));
+  return requiredScopes.every((scope) => available.has(scope));
 }
 
 function readOptionalString(value: unknown) {

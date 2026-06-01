@@ -363,7 +363,7 @@ async function loadMissionControlSnapshots({
       resolvedSessions.value?.sessions ?? [],
       dispatchRecords
     );
-    const { channelRegistry, channelAccounts } = await hydrateMissionControlChannels(profile);
+    const { channelRegistry, channelAccounts, surfaceRuntime, surfaceDrift } = await hydrateMissionControlChannels(profile);
     const workspaceBindings = createMissionControlWorkspaceBindings(agentsList);
     const runtimes = await reconcileMissionControlRuntimes({
       sessions,
@@ -452,6 +452,8 @@ async function loadMissionControlSnapshots({
       diagnostics,
       channelAccounts,
       channelRegistry,
+      surfaceRuntime,
+      surfaceDrift,
       presence: buildPresenceRecords(presence),
       missionPresets: MISSION_CONTROL_MISSION_PRESETS
     };

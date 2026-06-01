@@ -69,9 +69,9 @@ export const sessionsPayloadSchema = z
 
 export const channelStatusPayloadSchema = z
   .object({
-    ts: z.number(),
-    channelOrder: z.array(z.string()),
-    channelLabels: z.record(z.string(), z.string()),
+    ts: z.number().optional(),
+    channelOrder: z.array(z.string()).optional().default([]),
+    channelLabels: z.record(z.string(), z.string()).optional().default({}),
     channelDetailLabels: z.record(z.string(), z.string()).optional(),
     channelSystemImages: z.record(z.string(), z.string()).optional(),
     channelMeta: z.array(
@@ -90,20 +90,12 @@ export const channelStatusPayloadSchema = z
       z.array(
         z
           .object({
-            accountId: z.string(),
-            name: z.string().optional(),
-            enabled: z.boolean().optional(),
-            configured: z.boolean().optional(),
-            linked: z.boolean().optional(),
-            running: z.boolean().optional(),
-            connected: z.boolean().optional(),
-            lastError: z.string().optional(),
-            healthState: z.string().optional()
+            accountId: z.string()
           })
           .passthrough()
       )
     ),
-    channelDefaultAccountId: z.record(z.string(), z.string())
+    channelDefaultAccountId: z.record(z.string(), z.union([z.string(), z.null()])).optional().default({})
   })
   .passthrough();
 

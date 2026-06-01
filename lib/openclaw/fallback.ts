@@ -8,6 +8,10 @@ import {
   WORKSPACE_CONTEXT_CORE_PATHS,
   WORKSPACE_CONTEXT_OPTIONAL_PATHS
 } from "@/lib/openclaw/workspace-docs";
+import {
+  createEmptySurfaceDriftSnapshot,
+  createEmptySurfaceRuntimeSnapshot
+} from "@/lib/openclaw/surface-runtime";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
 function createTransientSnapshot(
@@ -83,7 +87,9 @@ function createTransientSnapshot(
     channelRegistry: {
       version: 1,
       channels: []
-    }
+    },
+    surfaceRuntime: createEmptySurfaceRuntimeSnapshot("unavailable", reason),
+    surfaceDrift: createEmptySurfaceDriftSnapshot()
   };
 }
 
@@ -428,6 +434,8 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       version: 1,
       channels: []
     },
+    surfaceRuntime: createEmptySurfaceRuntimeSnapshot("unavailable", reason),
+    surfaceDrift: createEmptySurfaceDriftSnapshot(),
     missionPresets: [
       "Plan a multi-agent release mission for the selected workspace.",
       "Stand up a builder, tester, and reviewer loop for the next milestone.",

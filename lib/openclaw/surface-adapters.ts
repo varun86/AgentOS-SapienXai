@@ -80,8 +80,13 @@ function parseChatSurfaceAccounts(channelsConfig: Record<string, unknown> | null
     const namedAccounts = isObjectRecord(config.accounts) ? (config.accounts as Record<string, unknown>) : {};
 
     for (const [accountId, account] of Object.entries(namedAccounts)) {
+      const accountConfig = isObjectRecord(account) ? account as Record<string, unknown> : {};
+      if (!hasDirectAccountConfig(accountConfig)) {
+        continue;
+      }
+
       accounts.push(
-        buildSurfaceAccount(provider, accountId, account, {
+        buildSurfaceAccount(provider, accountId, accountConfig, {
           fallbackName: buildDefaultAccountLabel(provider, accountId),
           source: "config.channels.accounts"
         })

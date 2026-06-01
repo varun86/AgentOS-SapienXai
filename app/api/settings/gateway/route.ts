@@ -28,7 +28,8 @@ const gatewayAuthGenerateSchema = z.object({
 });
 
 const gatewayAuthRepairSchema = z.object({
-  action: z.literal("repairDeviceAccess")
+  action: z.literal("repairDeviceAccess"),
+  scopes: z.array(z.string().min(1)).optional()
 });
 
 export async function GET() {
@@ -84,8 +85,11 @@ export async function POST(request: Request) {
       });
     }
 
-    if (gatewayAuthRepairSchema.safeParse(body).success) {
-      const result = await repairGatewayNativeDeviceAccess();
+    const repairInput = gatewayAuthRepairSchema.safeParse(body);
+    if (repairInput.success) {
+      const result = await repairGatewayNativeDeviceAccess({
+        requiredScopes: repairInput.data.scopes
+      });
       const authStatus = await getGatewayNativeAuthStatus();
 
       return NextResponse.json({
