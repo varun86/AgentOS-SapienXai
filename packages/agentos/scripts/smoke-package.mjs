@@ -140,6 +140,7 @@ function expectCommand(command, args, expectedOutput) {
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
+    shell: shouldUseShell(command),
     ...options,
     env: options.env ?? process.env
   });
@@ -164,4 +165,8 @@ function run(command, args, options = {}) {
 
 function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function shouldUseShell(command) {
+  return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 }
