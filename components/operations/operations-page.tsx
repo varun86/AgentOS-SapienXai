@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
+  AlertTriangle,
   BellRing,
   Bot,
   BrainCircuit,
   Check,
+  Chrome,
   CircleCheck,
   Clock3,
   ClipboardList,
@@ -15,11 +17,13 @@ import {
   FileInput,
   FilePlus2,
   FileText,
+  Fingerprint,
   Filter,
   Folder,
   Gauge,
   HardDrive,
   Import,
+  KeyRound,
   Layers3,
   ListFilter,
   MessageSquare,
@@ -35,6 +39,7 @@ import {
   SquareArrowOutUpRight,
   Star,
   Upload,
+  UserCheck,
   Workflow,
   X
 } from "lucide-react";
@@ -96,9 +101,21 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/sonner";
 import { Textarea } from "@/components/ui/textarea";
-import type { AddModelsProviderId, AgentRecord, MissionControlSnapshot } from "@/lib/agentos/contracts";
+import type {
+  AccountLoginTargetsResponse,
+  AccountLoginTargetView
+} from "@/lib/agentos/account-login-target-types";
+import type { AddModelsProviderId, AgentRecord, MissionControlSnapshot, WorkspaceRecord } from "@/lib/agentos/contracts";
+import type {
+  OpenClawBrowserDriver,
+  OpenClawBrowserProfileMutationResponse,
+  OpenClawBrowserProfilesResponse,
+  OpenClawBrowserProfileView
+} from "@/lib/openclaw/browser-profile-types";
 import type {
   WorkspaceManagedFile,
   WorkspaceManagedFileReadResponse,
@@ -107,7 +124,7 @@ import type {
 import { isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { cn } from "@/lib/utils";
 
-export type OperationsPageId = "agents" | "tasks" | "files" | "models" | "integrations";
+export type OperationsPageId = "agents" | "tasks" | "files" | "accounts" | "models" | "integrations";
 
 export function OperationsPage({
   initialSnapshot,
@@ -145,6 +162,16 @@ export function OperationsPage({
           return (
             <FilesPageContent
               snapshot={context.snapshot}
+              activeWorkspaceId={context.activeWorkspaceId}
+            />
+          );
+        }
+
+        if (page === "accounts") {
+          return (
+            <AccountsPageContent
+              snapshot={context.snapshot}
+              activeWorkspace={context.activeWorkspace}
               activeWorkspaceId={context.activeWorkspaceId}
             />
           );
@@ -1630,6 +1657,1060 @@ function FilePreviewDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function AccountsPageContent({
+  snapshot,
+  activeWorkspace,
+  activeWorkspaceId
+}: {
+  snapshot: MissionControlSnapshot;
+  activeWorkspace: WorkspaceRecord | null;
+  activeWorkspaceId: string | null;
+}) {
+  const [profiles, setProfiles] = useState<OpenClawBrowserProfileView[]>([]);
+  const [loginTargets, setLoginTargets] = useState<AccountLoginTargetView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [targetsLoading, setTargetsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [targetsError, setTargetsError] = useState<string | null>(null);
+  const [profileSearch, setProfileSearch] = useState("");
+  const [driverFilter, setDriverFilter] = useState<"all" | OpenClawBrowserDriver>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "running" | "stopped">("all");
+  const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+  const [busyProfileName, setBusyProfileName] = useState<string | null>(null);
+  const [busyLoginTargetId, setBusyLoginTargetId] = useState<string | null>(null);
+  const workspaceAgents = useMemo(
+    () => snapshot.agents.filter((agent) => !activeWorkspaceId || agent.workspaceId === activeWorkspaceId),
+    [activeWorkspaceId, snapshot.agents]
+  );
+  const browserAgentCount = workspaceAgents.filter(agentHasBrowserAccess).length;
+  const runningCount = profiles.filter((profile) => profile.running).length;
+  const managedCount = profiles.filter((profile) => profile.driver === "openclaw").length;
+  const existingSessionCount = profiles.filter((profile) => profile.driver === "existing-session").length;
+  const tabCount = profiles.reduce((total, profile) => total + profile.tabCount, 0);
+  const driverFilters: Array<"all" | OpenClawBrowserDriver> = ["all", "openclaw", "existing-session"];
+  const statusFilters: Array<"all" | "running" | "stopped"> = ["all", "running", "stopped"];
+  const profileNames = useMemo(() => new Set(profiles.map((profile) => profile.name)), [profiles]);
+  const searchQuery = profileSearch.trim().toLowerCase();
+  const filteredLoginTargets = loginTargets.filter((target) => {
+    if (!searchQuery) {
+      return true;
+    }
+
+    return [
+      target.serviceName,
+      target.primaryDomain,
+      target.browserProfileName,
+      target.workspaceName,
+      target.statusLabel,
+      target.loginUrl
+    ].join(" ").toLowerCase().includes(searchQuery);
+  });
+  const filteredProfiles = profiles.filter((profile) => {
+    const matchesSearch =
+      !searchQuery ||
+      [
+        profile.name,
+        profile.driverLabel,
+        profile.transportLabel,
+        profile.statusLabel,
+        profile.cdpUrl ?? "",
+        profile.reconcileReason ?? ""
+      ].join(" ").toLowerCase().includes(searchQuery);
+    const matchesDriver = driverFilter === "all" || profile.driver === driverFilter;
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "running" ? profile.running : !profile.running);
+
+    return matchesSearch && matchesDriver && matchesStatus;
+  });
+
+  const loadProfiles = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/accounts/browser-profiles", { cache: "no-store" });
+      const payload = await response.json().catch(() => null) as OpenClawBrowserProfilesResponse | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Unable to read OpenClaw browser profiles.");
+      }
+
+      setProfiles(payload.profiles);
+    } catch (loadError) {
+      setProfiles([]);
+      setError(readBrowserProfileError(loadError, "Unable to read OpenClaw browser profiles."));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadLoginTargets = useCallback(async () => {
+    setTargetsLoading(true);
+    setTargetsError(null);
+
+    try {
+      const query = activeWorkspaceId ? `?workspaceId=${encodeURIComponent(activeWorkspaceId)}` : "";
+      const response = await fetch(`/api/accounts/login-targets${query}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => null) as AccountLoginTargetsResponse | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Unable to read account login targets.");
+      }
+
+      setLoginTargets(payload.targets);
+    } catch (loadError) {
+      setLoginTargets([]);
+      setTargetsError(readBrowserProfileError(loadError, "Unable to read account login targets."));
+    } finally {
+      setTargetsLoading(false);
+    }
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    void loadProfiles();
+  }, [loadProfiles]);
+
+  useEffect(() => {
+    void loadLoginTargets();
+  }, [loadLoginTargets]);
+
+  const postProfileMutation = async (
+    body: Record<string, unknown>,
+    fallbackError: string
+  ) => {
+    const response = await fetch("/api/accounts/browser-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => null) as OpenClawBrowserProfileMutationResponse | null;
+
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error ?? fallbackError);
+    }
+
+    return payload;
+  };
+
+  const saveLoginTarget = async (body: Record<string, unknown>) => {
+    const response = await fetch("/api/accounts/login-targets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => null) as AccountLoginTargetsResponse | null;
+
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error ?? "Unable to save account login target.");
+    }
+
+    setLoginTargets(payload.targets);
+    return payload;
+  };
+
+  const removeLoginTarget = async (target: AccountLoginTargetView) => {
+    setBusyLoginTargetId(target.id);
+
+    try {
+      const response = await fetch("/api/accounts/login-targets", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: target.id, workspaceId: activeWorkspaceId })
+      });
+      const payload = await response.json().catch(() => null) as AccountLoginTargetsResponse | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Unable to remove account login target.");
+      }
+
+      setLoginTargets(payload.targets);
+      toast.success("Login target forgotten.", {
+        description: "Only the AgentOS account list entry was removed. Browser profile sessions were not changed."
+      });
+    } catch (removeError) {
+      toast.error("Login target was not removed.", {
+        description: readBrowserProfileError(removeError, "Unable to remove account login target.")
+      });
+    } finally {
+      setBusyLoginTargetId(null);
+    }
+  };
+
+  const openLoginTarget = async (target: AccountLoginTargetView) => {
+    setBusyLoginTargetId(target.id);
+
+    try {
+      await postProfileMutation(
+        {
+          action: "open-login",
+          profileName: target.browserProfileName,
+          loginUrl: target.loginUrl,
+          label: `${slugifyClient(target.serviceName)}-login`
+        },
+        "Unable to open the login URL in OpenClaw."
+      );
+      await saveLoginTarget({
+        workspaceId: target.workspaceId,
+        workspaceName: target.workspaceName,
+        workspacePath: target.workspacePath,
+        serviceId: target.serviceId,
+        serviceName: target.serviceName,
+        primaryDomain: target.primaryDomain,
+        loginUrl: target.loginUrl,
+        browserProfileName: target.browserProfileName
+      });
+      await loadProfiles();
+      toast.success("Login browser opened.", {
+        description: `${target.serviceName} opened in ${target.browserProfileName}.`
+      });
+    } catch (openError) {
+      toast.error("Login browser did not open.", {
+        description: readBrowserProfileError(openError, "Unable to open the login URL in OpenClaw.")
+      });
+    } finally {
+      setBusyLoginTargetId(null);
+    }
+  };
+
+  const startProfile = async (profile: OpenClawBrowserProfileView) => {
+    setBusyProfileName(profile.name);
+
+    try {
+      await postProfileMutation(
+        { action: "start-profile", profileName: profile.name },
+        `Unable to start ${profile.name}.`
+      );
+      toast.success("Browser profile started.", {
+        description: `${profile.name} is now available through OpenClaw.`
+      });
+      await loadProfiles();
+    } catch (startError) {
+      toast.error("Browser profile did not start.", {
+        description: readBrowserProfileError(startError, `Unable to start ${profile.name}.`)
+      });
+    } finally {
+      setBusyProfileName(null);
+    }
+  };
+
+  const connectAccount = async (input: ConnectBrowserProfileInput) => {
+    if (!activeWorkspace) {
+      toast.error("Select a workspace before connecting an account.");
+      return;
+    }
+
+    setBusyProfileName(input.profileName);
+
+    try {
+      await postProfileMutation(
+        {
+          action: "open-login",
+          profileName: input.profileName,
+          loginUrl: input.loginUrl,
+          label: input.label
+        },
+        "Unable to open the login URL in OpenClaw."
+      );
+
+      await saveLoginTarget({
+        workspaceId: activeWorkspace.id,
+        workspaceName: activeWorkspace.name,
+        workspacePath: activeWorkspace.path ?? null,
+        serviceId: input.serviceId,
+        serviceName: input.serviceName,
+        primaryDomain: input.primaryDomain,
+        loginUrl: input.loginUrl,
+        browserProfileName: input.profileName
+      });
+
+      toast.success("Login browser opened.", {
+        description: "Complete the login in the OpenClaw browser profile. AgentOS saved only the login target."
+      });
+      setConnectDialogOpen(false);
+      await loadProfiles();
+    } catch (connectError) {
+      toast.error("Connect Account did not complete.", {
+        description: readBrowserProfileError(connectError, "Unable to open the login browser.")
+      });
+    } finally {
+      setBusyProfileName(null);
+    }
+  };
+
+  return (
+    <>
+      <OperationsPageLayout
+        main={
+          <>
+            <PageHeader
+              title="Accounts"
+              subtitle="Manage real OpenClaw browser profiles used for reusable account sessions."
+              primaryAction={{
+                label: "Connect Account",
+                icon: KeyRound,
+                onClick: () => setConnectDialogOpen(true),
+                disabled: !activeWorkspaceId,
+                title: activeWorkspaceId
+                  ? "Open a login flow in an OpenClaw browser profile for this workspace."
+                  : "Select a workspace before connecting account sessions."
+              }}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <MiniBadge>Workspace: {activeWorkspace?.name ?? "All workspaces"}</MiniBadge>
+                <MiniBadge>{activeWorkspace?.path ?? activeWorkspace?.slug ?? "Read-only overview"}</MiniBadge>
+                <MiniBadge>Source: OpenClaw profiles + AgentOS login targets</MiniBadge>
+              </div>
+            </PageHeader>
+
+            <StatGrid columns={5}>
+              <StatCard label="Profiles" value={loading ? "-" : String(profiles.length)} detail={`${managedCount} managed, ${existingSessionCount} existing-session`} icon={Chrome} tone="info" />
+              <StatCard label="Login Targets" value={targetsLoading ? "-" : String(loginTargets.length)} detail="Created through Connect Account" icon={KeyRound} tone={loginTargets.length > 0 ? "success" : "muted"} />
+              <StatCard label="Running" value={loading ? "-" : String(runningCount)} detail={`${tabCount} open browser tabs`} icon={Fingerprint} tone={runningCount > 0 ? "success" : "muted"} />
+              <StatCard label="Browser Agents" value={String(browserAgentCount)} detail="Agents with browser-capable tools" icon={Bot} tone={browserAgentCount > 0 ? "success" : "muted"} />
+              <StatCard label="Gateway State" value={error ? "Blocked" : loading ? "Checking" : "Ready"} detail={error ? "OpenClaw browser unavailable" : "Real browser profile API"} icon={Gauge} tone={error ? "warning" : "success"} />
+            </StatGrid>
+
+            <div className="rounded-[12px] border border-cyan-300/18 bg-cyan-400/10 px-3 py-2.5 text-xs leading-5 text-cyan-100">
+              AgentOS does not store raw passwords. Sessions are stored in OpenClaw browser profiles.
+            </div>
+
+            <SectionCard title="Browser Profile Access">
+              <div className="grid gap-3 p-3 text-xs leading-5 text-slate-300 lg:grid-cols-2">
+                <div>
+                  <p className="font-semibold text-white">What works here</p>
+                  <p className="mt-1 text-slate-400">AgentOS reads OpenClaw browser profiles, starts a profile, opens a login URL, and records the workspace login target after that browser action succeeds.</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-white">What is not exposed yet</p>
+                  <p className="mt-1 text-slate-400">OpenClaw does not expose verified website account identities or per-agent account access rules to AgentOS, so targets stay marked as manual verification needed.</p>
+                </div>
+              </div>
+            </SectionCard>
+
+            <SearchToolbar
+              search={profileSearch}
+              onSearchChange={setProfileSearch}
+              searchPlaceholder="Search login targets and browser profiles..."
+            >
+              <ToolbarButton
+                icon={Filter}
+                label={`State: ${formatBrowserProfileStateFilter(statusFilter)}`}
+                active={statusFilter !== "all"}
+                chevron
+                onClick={() => setStatusFilter((current) => statusFilters[(statusFilters.indexOf(current) + 1) % statusFilters.length])}
+              />
+              <ToolbarButton
+                icon={SlidersHorizontal}
+                label={`Driver: ${formatBrowserDriverFilter(driverFilter)}`}
+                active={driverFilter !== "all"}
+                chevron
+                onClick={() => setDriverFilter((current) => driverFilters[(driverFilters.indexOf(current) + 1) % driverFilters.length])}
+              />
+              <ToolbarButton
+                icon={RefreshCw}
+                label={loading || targetsLoading ? "Refreshing" : "Refresh"}
+                active={loading || targetsLoading}
+                onClick={() => {
+                  void loadProfiles();
+                  void loadLoginTargets();
+                }}
+              />
+            </SearchToolbar>
+
+            <SectionCard title="Connected Login Targets">
+              {targetsError ? (
+                <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <EntityIcon icon={AlertTriangle} label="Login targets unavailable" tone="warning" />
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-semibold text-white">Account login targets are unavailable</h2>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">{targetsError}</p>
+                    </div>
+                  </div>
+                  <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs" onClick={() => void loadLoginTargets()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : targetsLoading ? (
+                <div className="p-4 text-xs text-slate-400">Loading login targets...</div>
+              ) : filteredLoginTargets.length === 0 ? (
+                <div className="p-4">
+                  <EmptyState
+                    title={loginTargets.length === 0 ? "No login targets connected" : "No login targets match"}
+                    description={loginTargets.length === 0
+                      ? "Use Connect Account to open a login page in a real OpenClaw browser profile. AgentOS will list the target here after the browser action succeeds."
+                      : "Clear search to inspect another login target."}
+                  />
+                </div>
+              ) : (
+                <div className="grid gap-2.5 p-3 lg:grid-cols-2 min-[1500px]:grid-cols-3">
+                  {filteredLoginTargets.map((target) => (
+                    <LoginTargetCard
+                      key={target.id}
+                      target={target}
+                      profileAvailable={profileNames.has(target.browserProfileName)}
+                      busy={busyLoginTargetId === target.id}
+                      onOpen={() => void openLoginTarget(target)}
+                      onForget={() => void removeLoginTarget(target)}
+                    />
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {statusFilters.map((status) => (
+                <FilterChip
+                  key={status}
+                  label={formatBrowserProfileStateFilter(status)}
+                  count={status === "all" ? profiles.length : profiles.filter((profile) => status === "running" ? profile.running : !profile.running).length}
+                  active={statusFilter === status}
+                  tone={status === "running" ? "success" : status === "stopped" ? "muted" : "info"}
+                  onClick={() => setStatusFilter(status)}
+                />
+              ))}
+              {driverFilters.map((driver) => (
+                <FilterChip
+                  key={driver}
+                  label={formatBrowserDriverFilter(driver)}
+                  count={driver === "all" ? profiles.length : profiles.filter((profile) => profile.driver === driver).length}
+                  active={driverFilter === driver}
+                  tone={driver === "existing-session" ? "warning" : driver === "openclaw" ? "info" : "purple"}
+                  onClick={() => setDriverFilter(driver)}
+                />
+              ))}
+            </div>
+
+            {error ? (
+              <SectionCard>
+                <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <EntityIcon icon={AlertTriangle} label="OpenClaw browser unavailable" tone="warning" />
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-semibold text-white">OpenClaw browser profiles are unavailable</h2>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">{error}</p>
+                    </div>
+                  </div>
+                  <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs" onClick={() => void loadProfiles()}>
+                    Retry
+                  </Button>
+                </div>
+              </SectionCard>
+            ) : loading ? (
+              <EmptyState title="Loading browser profiles" description="Reading OpenClaw browser profile state through the Gateway." />
+            ) : filteredProfiles.length === 0 ? (
+              <EmptyState
+                title={profiles.length === 0 ? "No browser profiles reported" : "No profiles match"}
+                description={profiles.length === 0
+                  ? "Create or enable a browser profile in OpenClaw first, then use Connect Account to open a manual login flow in that profile."
+                  : "Clear search or filters to inspect another OpenClaw browser profile."}
+              />
+            ) : (
+              <div className="grid gap-2.5 lg:grid-cols-2 min-[1500px]:grid-cols-3">
+                {filteredProfiles.map((profile) => (
+                  <BrowserProfileCard
+                    key={profile.name}
+                    profile={profile}
+                    busy={busyProfileName === profile.name}
+                    onStart={() => void startProfile(profile)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        }
+        inspector={null}
+      />
+      <ConnectAccountWizard
+        open={connectDialogOpen}
+        workspace={activeWorkspace}
+        onOpenChange={setConnectDialogOpen}
+        onSubmit={connectAccount}
+        profiles={profiles}
+      />
+    </>
+  );
+}
+
+function BrowserProfileCard({
+  profile,
+  busy,
+  onStart
+}: {
+  profile: OpenClawBrowserProfileView;
+  busy: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <SectionCard>
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <EntityIcon icon={Chrome} label={profile.name} tone="info" />
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-white">{profile.name}</h2>
+            <p className="mt-1 truncate text-[0.7rem] text-slate-400">{profile.driverLabel}</p>
+          </div>
+        </div>
+        <StatusBadge label={profile.statusLabel} tone={profile.statusTone} />
+      </div>
+      <div className="grid gap-2 border-t border-white/[0.07] p-3 sm:grid-cols-2">
+        <KeyValue label="Transport" value={profile.transportLabel} />
+        <KeyValue label="Tabs" value={String(profile.tabCount)} />
+        <KeyValue label="Default" value={profile.isDefault ? "Yes" : "No"} />
+        <KeyValue label="Remote" value={profile.isRemote ? "Yes" : "No"} />
+        <KeyValue label="CDP Port" value={profile.cdpPort == null ? "Not reported" : String(profile.cdpPort)} />
+        <KeyValue label="CDP URL" value={profile.cdpUrl ?? "Not reported"} />
+      </div>
+      {profile.missingFromConfig || profile.reconcileReason ? (
+        <div className="border-t border-white/[0.07] px-3 py-2 text-[0.68rem] leading-5 text-amber-100">
+          {profile.reconcileReason ?? "This profile was reported by OpenClaw but is missing from config."}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.07] p-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 rounded-[8px] px-2 text-[0.7rem]"
+          disabled={busy}
+          onClick={onStart}
+        >
+          {profile.running ? "Restart / attach" : "Start profile"}
+        </Button>
+        <MiniBadge>{profile.driver}</MiniBadge>
+        <MiniBadge>{profile.running ? "Browser control active" : "Browser control stopped"}</MiniBadge>
+      </div>
+    </SectionCard>
+  );
+}
+
+function LoginTargetCard({
+  target,
+  profileAvailable,
+  busy,
+  onOpen,
+  onForget
+}: {
+  target: AccountLoginTargetView;
+  profileAvailable: boolean;
+  busy: boolean;
+  onOpen: () => void;
+  onForget: () => void;
+}) {
+  return (
+    <div className="rounded-[12px] border border-white/[0.08] bg-white/[0.035]">
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <EntityIcon icon={KeyRound} label={target.serviceName} tone="warning" />
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-white">{target.serviceName}</h2>
+            <p className="mt-1 truncate text-[0.7rem] text-slate-400">{target.primaryDomain}</p>
+          </div>
+        </div>
+        <StatusBadge label={target.statusLabel} tone={target.statusTone} />
+      </div>
+      <div className="grid gap-2 border-t border-white/[0.07] p-3 sm:grid-cols-2">
+        <KeyValue label="Browser profile" value={target.browserProfileName} />
+        <KeyValue label="Workspace" value={target.workspaceName} />
+        <KeyValue label="Last opened" value={formatAccountTimestamp(target.lastOpenedAt)} />
+        <KeyValue label="Opened" value={`${target.openCount} time${target.openCount === 1 ? "" : "s"}`} />
+        <KeyValue label="Login URL" value={target.loginUrl} />
+        <KeyValue label="Source" value="Connect Account" />
+      </div>
+      <div className="border-t border-white/[0.07] px-3 py-2 text-[0.68rem] leading-5 text-slate-400">
+        AgentOS records that this login target was opened in the selected browser profile. Website account identity is not verified by OpenClaw.
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.07] p-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 rounded-[8px] px-2 text-[0.7rem]"
+          disabled={busy || !profileAvailable}
+          title={profileAvailable ? "Open this login page in its OpenClaw browser profile." : "The saved browser profile is not reported by OpenClaw."}
+          onClick={onOpen}
+        >
+          <SquareArrowOutUpRight className="mr-1 h-3 w-3" />
+          Open login
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 rounded-[8px] px-2 text-[0.7rem]"
+          disabled={busy}
+          title="Remove this AgentOS list entry only. Browser profile sessions are not changed."
+          onClick={onForget}
+        >
+          <X className="mr-1 h-3 w-3" />
+          Forget
+        </Button>
+        <MiniBadge>{profileAvailable ? "Profile available" : "Profile missing"}</MiniBadge>
+      </div>
+    </div>
+  );
+}
+
+type ConnectBrowserProfileInput = {
+  mode: ConnectBrowserProfileMode;
+  profileName: string;
+  loginUrl: string;
+  label: string;
+  serviceId: string;
+  serviceName: string;
+  primaryDomain: string;
+};
+
+type ConnectBrowserProfileMode = "existing" | "signed-in-chrome";
+
+type ConnectBrowserServiceOption = {
+  id: string;
+  label: string;
+  service: string;
+  loginUrl: string;
+  domains: string[];
+  icon: LucideIcon;
+  iconTone: "success" | "info" | "warning" | "danger" | "muted" | "purple";
+};
+
+const connectBrowserServices: ConnectBrowserServiceOption[] = [
+  {
+    id: "product-hunt",
+    label: "Product Hunt",
+    service: "Product Hunt",
+    loginUrl: "https://www.producthunt.com/login",
+    domains: ["producthunt.com"],
+    icon: KeyRound,
+    iconTone: "warning"
+  },
+  {
+    id: "gmail",
+    label: "Gmail",
+    service: "Gmail",
+    loginUrl: "https://accounts.google.com/",
+    domains: ["mail.google.com", "accounts.google.com"],
+    icon: MessageSquare,
+    iconTone: "danger"
+  },
+  {
+    id: "x-twitter",
+    label: "X / Twitter",
+    service: "X / Twitter",
+    loginUrl: "https://x.com/login",
+    domains: ["x.com", "twitter.com"],
+    icon: BellRing,
+    iconTone: "muted"
+  },
+  {
+    id: "github",
+    label: "GitHub",
+    service: "GitHub",
+    loginUrl: "https://github.com/login",
+    domains: ["github.com"],
+    icon: Workflow,
+    iconTone: "muted"
+  },
+  {
+    id: "linkedin",
+    label: "LinkedIn",
+    service: "LinkedIn",
+    loginUrl: "https://www.linkedin.com/login",
+    domains: ["linkedin.com"],
+    icon: UserCheck,
+    iconTone: "info"
+  },
+  {
+    id: "discord",
+    label: "Discord",
+    service: "Discord",
+    loginUrl: "https://discord.com/login",
+    domains: ["discord.com"],
+    icon: MessageSquare,
+    iconTone: "purple"
+  },
+  {
+    id: "telegram",
+    label: "Telegram",
+    service: "Telegram",
+    loginUrl: "https://web.telegram.org/",
+    domains: ["web.telegram.org"],
+    icon: MessageSquare,
+    iconTone: "success"
+  },
+  {
+    id: "custom",
+    label: "Custom Website",
+    service: "Custom Website",
+    loginUrl: "",
+    domains: [],
+    icon: Chrome,
+    iconTone: "info"
+  }
+];
+
+function ConnectAccountWizard({
+  open,
+  workspace,
+  onOpenChange,
+  onSubmit,
+  profiles
+}: {
+  open: boolean;
+  workspace: WorkspaceRecord | null;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (input: ConnectBrowserProfileInput) => Promise<void>;
+  profiles: OpenClawBrowserProfileView[];
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open ? (
+        <ConnectAccountWizardContent
+          key={workspace?.id ?? "no-workspace"}
+          workspace={workspace}
+          profiles={profiles}
+          onCancel={() => onOpenChange(false)}
+          onSubmit={onSubmit}
+        />
+      ) : null}
+    </Dialog>
+  );
+}
+
+function ConnectAccountWizardContent({
+  workspace,
+  profiles,
+  onCancel,
+  onSubmit
+}: {
+  workspace: WorkspaceRecord | null;
+  profiles: OpenClawBrowserProfileView[];
+  onCancel: () => void;
+  onSubmit: (input: ConnectBrowserProfileInput) => Promise<void>;
+}) {
+  const initialService = connectBrowserServices[0];
+  const defaultExistingProfileName = profiles.find((profile) => profile.name === "openclaw")?.name ?? profiles[0]?.name ?? "";
+  const hasSignedInChromeProfile = profiles.some((profile) => profile.name === "user");
+  const [selectedServiceId, setSelectedServiceId] = useState(initialService.id);
+  const [customWebsiteName, setCustomWebsiteName] = useState("");
+  const [customLoginUrl, setCustomLoginUrl] = useState("");
+  const [customPrimaryDomain, setCustomPrimaryDomain] = useState("");
+  const [mode, setMode] = useState<ConnectBrowserProfileMode>("existing");
+  const [existingProfileName, setExistingProfileName] = useState(defaultExistingProfileName);
+  const [submitting, setSubmitting] = useState(false);
+  const selectedService = connectBrowserServices.find((service) => service.id === selectedServiceId) ?? initialService;
+  const isCustomService = selectedService.id === "custom";
+  const resolvedServiceName = isCustomService ? customWebsiteName.trim() || "Custom Website" : selectedService.service;
+  const resolvedLoginUrl = isCustomService ? customLoginUrl.trim() : selectedService.loginUrl;
+  const resolvedDomain = isCustomService ? customPrimaryDomain.trim() : selectedService.domains[0] ?? selectedService.service.toLowerCase();
+  const resolvedProfileName =
+    mode === "signed-in-chrome"
+      ? "user"
+      : existingProfileName.trim();
+  const validationMessage = validateConnectBrowserProfileInput({
+    workspace,
+    isCustomService,
+    customWebsiteName,
+    customLoginUrl,
+    customPrimaryDomain,
+    mode,
+    profileName: resolvedProfileName,
+    existingProfileName,
+    hasSignedInChromeProfile
+  });
+
+  const selectService = (service: ConnectBrowserServiceOption) => {
+    setSelectedServiceId(service.id);
+    if (service.id !== "custom") {
+      setCustomWebsiteName("");
+      setCustomLoginUrl("");
+      setCustomPrimaryDomain("");
+    }
+  };
+
+  const submit = async () => {
+    if (validationMessage || !workspace) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        mode,
+        profileName: resolvedProfileName,
+        loginUrl: resolvedLoginUrl,
+        label: `${slugifyClient(resolvedServiceName)}-login`,
+        serviceId: selectedService.id === "custom" ? slugifyClient(resolvedServiceName) || "custom" : selectedService.id,
+        serviceName: resolvedServiceName,
+        primaryDomain: resolvedDomain
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-[18px] border-white/[0.10] bg-[#08111f]/95 p-4">
+      <div className="border-b border-white/[0.08] p-4">
+        <DialogHeader>
+          <DialogTitle>Connect Account</DialogTitle>
+          <DialogDescription>
+            Open a login flow in a real OpenClaw browser profile for this workspace.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-3 rounded-[10px] border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          AgentOS does not store raw passwords. Use manual login inside the assigned browser profile or connect through supported integrations.
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4 p-4">
+        <WizardSectionTitle
+          title="Login Target"
+          description="Choose the website to open. AgentOS does not infer or store login success."
+        />
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {connectBrowserServices.map((service) => {
+            const selected = service.id === selectedServiceId;
+            return (
+              <button
+                key={service.id}
+                type="button"
+                onClick={() => selectService(service)}
+                className={cn(
+                  "rounded-[12px] border p-3 text-left transition hover:border-blue-300/35 hover:bg-blue-400/10",
+                  selected ? "border-blue-300/45 bg-blue-400/12" : "border-white/[0.08] bg-white/[0.035]"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <EntityIcon icon={service.icon} label={service.label} tone={service.iconTone} />
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-white">{service.label}</p>
+                    <p className="mt-0.5 truncate text-[0.66rem] text-slate-500">{service.domains[0] ?? "Manual URL"}</p>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {isCustomService ? (
+          <div className="grid gap-3 rounded-[12px] border border-white/[0.08] bg-white/[0.035] p-3 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="connect-custom-name">Website name</Label>
+              <Input id="connect-custom-name" value={customWebsiteName} onChange={(event) => {
+                setCustomWebsiteName(event.target.value);
+              }} placeholder="Example Portal" className="h-9 rounded-[10px] bg-slate-950/50 text-xs" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="connect-custom-url">Login URL</Label>
+              <Input id="connect-custom-url" value={customLoginUrl} onChange={(event) => setCustomLoginUrl(event.target.value)} placeholder="https://example.com/login" className="h-9 rounded-[10px] bg-slate-950/50 text-xs" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="connect-custom-domain">Primary domain</Label>
+              <Input id="connect-custom-domain" value={customPrimaryDomain} onChange={(event) => setCustomPrimaryDomain(event.target.value)} placeholder="example.com" className="h-9 rounded-[10px] bg-slate-950/50 text-xs" />
+            </div>
+          </div>
+        ) : null}
+
+        <WizardSectionTitle
+          title="Browser Profile"
+          description="Select a profile reported by OpenClaw. AgentOS cannot create persistent browser profiles through the current Gateway browser request API."
+        />
+        <div className="grid gap-2 md:grid-cols-2">
+          <ProfileModeOption
+            active={mode === "existing"}
+            title="Existing profile"
+            description="Use a profile reported by OpenClaw."
+            onClick={() => setMode("existing")}
+          />
+          <ProfileModeOption
+            active={mode === "signed-in-chrome"}
+            title="Signed-in Chrome"
+            description="Use OpenClaw's built-in user profile."
+            onClick={() => setMode("signed-in-chrome")}
+          />
+        </div>
+
+        {mode === "existing" ? (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="connect-existing-profile">Existing browser profile</Label>
+            <select id="connect-existing-profile" value={existingProfileName} onChange={(event) => setExistingProfileName(event.target.value)} className="h-9 rounded-[10px] border border-white/[0.10] bg-slate-950/50 px-3 text-xs text-white">
+              <option value="">Select a browser profile</option>
+              {profiles.map((profile) => (
+                <option key={profile.name} value={profile.name}>{profile.name} ({profile.driverLabel})</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        {mode === "signed-in-chrome" ? (
+          <div className="rounded-[12px] border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+            The built-in user profile attaches to the signed-in Chrome session through OpenClaw. Use it only when existing cookies matter and the operator is present to approve browser prompts.
+          </div>
+        ) : null}
+
+        <SectionCard>
+          <div className="grid gap-2 p-3 sm:grid-cols-2">
+            <KeyValue label="Workspace" value={workspace?.name ?? "No workspace selected"} />
+            <KeyValue label="Login target" value={resolvedServiceName} />
+            <KeyValue label="Login URL" value={resolvedLoginUrl || "Not set"} />
+            <KeyValue label="Primary domain" value={resolvedDomain || "Not set"} />
+            <KeyValue label="Browser profile" value={resolvedProfileName || "Not set"} />
+            <KeyValue label="Action" value="Open login URL in selected profile" />
+          </div>
+        </SectionCard>
+
+        <ValidationMessage message={validationMessage} />
+      </div>
+
+      <DialogFooter className="border-t border-white/[0.08] p-4">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[0.7rem] text-slate-500">{validationMessage ?? "Ready to open a real OpenClaw browser login flow."}</p>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="secondary" size="sm" className="h-8 rounded-[9px] text-xs" onClick={onCancel}>Cancel</Button>
+            <Button size="sm" className="h-8 rounded-[9px] bg-blue-500 text-xs text-white hover:bg-blue-400" disabled={Boolean(validationMessage) || submitting} onClick={() => void submit()}>
+              {submitting ? "Opening..." : "Connect Account"}
+            </Button>
+          </div>
+        </div>
+      </DialogFooter>
+    </DialogContent>
+  );
+}
+
+function ProfileModeOption({
+  active,
+  title,
+  description,
+  onClick
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-[12px] border p-3 text-left",
+        active ? "border-blue-300/45 bg-blue-400/12" : "border-white/[0.08] bg-white/[0.035]"
+      )}
+    >
+      <p className="text-xs font-semibold text-white">{title}</p>
+      <p className="mt-1 text-[0.68rem] leading-5 text-slate-500">{description}</p>
+    </button>
+  );
+}
+
+function WizardSectionTitle({ title, description }: { title: string; description: string }) {
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-white">{title}</h3>
+      <p className="mt-1 text-xs leading-5 text-slate-400">{description}</p>
+    </div>
+  );
+}
+
+function ValidationMessage({ message }: { message: string | null }) {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-[10px] border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+      {message}
+    </div>
+  );
+}
+
+function formatAccountTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function validateConnectBrowserProfileInput(input: {
+  workspace: WorkspaceRecord | null;
+  isCustomService: boolean;
+  customWebsiteName: string;
+  customLoginUrl: string;
+  customPrimaryDomain: string;
+  mode: ConnectBrowserProfileMode;
+  profileName: string;
+  existingProfileName: string;
+  hasSignedInChromeProfile: boolean;
+}) {
+  if (!input.workspace) {
+    return "Select a workspace before connecting accounts.";
+  }
+
+  if (input.isCustomService) {
+    if (!input.customWebsiteName.trim()) {
+      return "Website name is required for Custom Website.";
+    }
+
+    if (!isLikelyUrl(input.customLoginUrl)) {
+      return "A valid Login URL is required for Custom Website.";
+    }
+
+    if (!input.customPrimaryDomain.trim()) {
+      return "Primary domain is required for Custom Website.";
+    }
+  }
+
+  if (input.mode === "existing" && !input.existingProfileName.trim()) {
+    return "Select an existing OpenClaw browser profile.";
+  }
+
+  if (input.mode === "signed-in-chrome" && !input.hasSignedInChromeProfile) {
+    return "The signed-in Chrome profile is not reported by OpenClaw.";
+  }
+
+  return null;
+}
+
+function isLikelyUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function formatBrowserProfileStateFilter(status: "all" | "running" | "stopped") {
+  return status === "all" ? "All" : status === "running" ? "Running" : "Stopped";
+}
+
+function formatBrowserDriverFilter(driver: "all" | OpenClawBrowserDriver) {
+  return driver === "all" ? "All" : driver === "existing-session" ? "Existing session" : "Managed";
+}
+
+function readBrowserProfileError(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function agentHasBrowserAccess(agent: AgentRecord) {
+  const tools = [...(agent.tools ?? []), ...(agent.observedTools ?? [])].map((tool) => tool.toLowerCase());
+  return agent.policy.preset === "browser" || tools.some((tool) => tool === "browser" || tool.includes("chrome"));
+}
+
+function slugifyClient(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
 }
 
 function ModelsPageContent({
