@@ -74,7 +74,7 @@ export async function buildSystemReadinessSnapshot({
   const rpcOk = Boolean(gatewayStatus?.rpc?.ok);
   const loaded = Boolean(gatewayStatus?.service?.loaded || rpcOk);
   const ready = openclawInstalled && rpcOk && runtimeDiagnostics.stateWritable && runtimeDiagnostics.sessionStoreWritable;
-  const transport = getOpenClawGatewayClient().getDiagnostics?.();
+  const transport = getOpenClawGatewayClient()?.getDiagnostics?.();
   const gatewayFallbackDiagnostics = (transport?.recentFallbackDiagnostics ?? []).map((entry) => ({
     ...entry,
     operationLabel: getOpenClawGatewayOperationLabel(entry.operation)

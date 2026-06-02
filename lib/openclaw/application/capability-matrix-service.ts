@@ -10,7 +10,10 @@ import {
 } from "@/lib/openclaw/client/gateway-client";
 import {
   OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS,
-  OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS,
+  OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS,
+  OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS,
+  OPENCLAW_GATEWAY_BASELINE_VERSION,
+  OPENCLAW_GATEWAY_EXPERIMENTAL_METHODS,
   getOpenClawGatewayCompatibilityOperation,
   getOpenClawGatewayMethodCandidates,
   getOpenClawGatewayOperationLabel
@@ -130,7 +133,7 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
     return methods.some((method) => methodSet.has(method)) ? "supported" : "unsupported";
   };
   const unsupportedGatewayMethods = methodSet.size > 0
-    ? OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS.filter((method) => !methodSet.has(method))
+    ? OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.filter((method) => !methodSet.has(method))
     : [];
   const operation = (
     label: string,
@@ -205,7 +208,10 @@ async function detectOpenClawCapabilityMatrix(): Promise<OpenClawCapabilityMatri
   const operations = Object.fromEntries(
     OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS.map((definition) => [
       definition.id,
-      operation(definition.label, definition.methods, definition.events ?? [], definition.fallbackAllowed ?? true)
+      {
+        ...operation(definition.label, definition.methods, definition.events ?? [], definition.fallbackAllowed ?? true),
+        baseline: definition.baseline
+      }
     ])
   ) as Record<string, OpenClawCapabilityOperation>;
   const fallbackDiagnostics = getRecentOpenClawGatewayFallbackDiagnostics().map((entry) => ({
@@ -330,17 +336,34 @@ function buildGatewayMethodContractAudit(input: {
   operations: Record<string, OpenClawCapabilityOperation>;
   unsupportedGatewayMethods: string[];
 }): OpenClawGatewayMethodContractAudit {
+  const missingRequiredMethods = input.methodSet.size > 0
+    ? OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.filter((method) => !input.methodSet.has(method))
+    : [];
+  const missingOptionalMethods = input.methodSet.size > 0
+    ? OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS.filter((method) => !input.methodSet.has(method))
+    : [];
+  const missingExperimentalMethods = input.methodSet.size > 0
+    ? OPENCLAW_GATEWAY_EXPERIMENTAL_METHODS.filter((method) => !input.methodSet.has(method))
+    : [];
+
   if (input.source === "disabled") {
     return {
       status: "unknown",
       checkedAt: input.checkedAt,
       source: input.source,
       refreshIntervalMs: capabilityCacheTtlMs,
-      expectedMethodCount: OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS.length,
+      expectedMethodCount: OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length,
       advertisedMethodCount: 0,
       missingMethodCount: 0,
       missingMethods: [],
       missingOperations: [],
+      baselineVersion: OPENCLAW_GATEWAY_BASELINE_VERSION,
+      requiredMethodCount: OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length,
+      missingRequiredMethods: [],
+      optionalMethodCount: OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS.length,
+      missingOptionalMethods: [],
+      experimentalMethodCount: OPENCLAW_GATEWAY_EXPERIMENTAL_METHODS.length,
+      missingExperimentalMethods: [],
       reason: "Native Gateway WS is disabled by environment configuration, so AgentOS cannot compare advertised Gateway methods."
     };
   }
@@ -351,33 +374,47 @@ function buildGatewayMethodContractAudit(input: {
       checkedAt: input.checkedAt,
       source: input.source,
       refreshIntervalMs: capabilityCacheTtlMs,
-      expectedMethodCount: OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS.length,
+      expectedMethodCount: OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length,
       advertisedMethodCount: 0,
       missingMethodCount: 0,
       missingMethods: [],
       missingOperations: [],
-      reason: "OpenClaw Gateway did not advertise method metadata; AgentOS will retry on the next capability refresh."
+      baselineVersion: OPENCLAW_GATEWAY_BASELINE_VERSION,
+      requiredMethodCount: OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length,
+      missingRequiredMethods: [],
+      optionalMethodCount: OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS.length,
+      missingOptionalMethods: [],
+      experimentalMethodCount: OPENCLAW_GATEWAY_EXPERIMENTAL_METHODS.length,
+      missingExperimentalMethods: [],
+      reason: "OpenClaw Gateway did not advertise method metadata; AgentOS treats compatibility as unknown and will retry on the next capability refresh."
     };
   }
 
   const missingOperations = Object.entries(input.operations)
-    .filter(([, value]) => value.compatibility === "missing")
+    .filter(([, value]) => value.baseline === "required" && value.compatibility === "missing")
     .map(([name]) => name);
-  const status = input.unsupportedGatewayMethods.length > 0 ? "drift" : "advertised";
+  const status = missingRequiredMethods.length > 0 ? "drift" : "advertised";
 
   return {
     status,
     checkedAt: input.checkedAt,
     source: input.source,
     refreshIntervalMs: capabilityCacheTtlMs,
-    expectedMethodCount: OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS.length,
+    expectedMethodCount: OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length,
     advertisedMethodCount: input.methodSet.size,
-    missingMethodCount: input.unsupportedGatewayMethods.length,
-    missingMethods: input.unsupportedGatewayMethods,
+    missingMethodCount: missingRequiredMethods.length,
+    missingMethods: missingRequiredMethods,
     missingOperations,
+    baselineVersion: OPENCLAW_GATEWAY_BASELINE_VERSION,
+    requiredMethodCount: OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length,
+    missingRequiredMethods,
+    optionalMethodCount: OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS.length,
+    missingOptionalMethods,
+    experimentalMethodCount: OPENCLAW_GATEWAY_EXPERIMENTAL_METHODS.length,
+    missingExperimentalMethods,
     reason: status === "advertised"
-      ? "OpenClaw Gateway advertised every AgentOS Gateway-first method candidate; payload contracts still depend on live RPC behavior."
-      : "OpenClaw Gateway advertised method metadata, but one or more AgentOS Gateway-first candidates are missing."
+      ? `OpenClaw Gateway advertises every required ${OPENCLAW_GATEWAY_BASELINE_VERSION} baseline method; optional and experimental gaps are informational.`
+      : `OpenClaw Gateway advertised method metadata, but one or more required ${OPENCLAW_GATEWAY_BASELINE_VERSION} baseline methods are missing.`
   };
 }
 

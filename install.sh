@@ -47,8 +47,8 @@ detect_platform() {
 assert_node_version() {
   require_command node
 
-  if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && minor >= 9) ? 0 : 1);'; then
-    echo "AgentOS requires Node.js 20.9 or newer." >&2
+  if ! node -e 'const [major] = process.versions.node.split(".").map(Number); process.exit(major >= 24 ? 0 : 1);'; then
+    echo "AgentOS requires Node.js 24 or newer." >&2
     exit 1
   fi
 }

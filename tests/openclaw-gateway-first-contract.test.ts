@@ -16,7 +16,10 @@ import {
   startOpenClawEventBridge
 } from "@/lib/openclaw/application/event-bridge-service";
 import { setOpenClawAdapterForTesting, type OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
-import { OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS } from "@/lib/openclaw/client/gateway-compatibility";
+import {
+  OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS,
+  OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS
+} from "@/lib/openclaw/client/gateway-compatibility";
 import {
   abortMissionDispatchTask,
   submitMissionDispatch
@@ -107,7 +110,9 @@ test("capability matrix detects advertised Gateway-first methods", async () => {
   assert.equal(matrix.compatibility?.methodContract.source, "rpc.discover");
   assert.equal(matrix.compatibility?.methodContract.refreshIntervalMs, 60_000);
   assert.ok(matrix.compatibility?.methodContract.missingMethods.includes("models.list"));
-  assert.ok(matrix.compatibility?.methodContract.missingOperations.includes("agentIdentity"));
+  assert.equal(matrix.compatibility?.methodContract.baselineVersion, "2026.5.28");
+  assert.ok(matrix.compatibility?.methodContract.missingOperations.includes("runtimeSnapshot"));
+  assert.equal(matrix.compatibility?.methodContract.missingOperations.includes("agentIdentity"), false);
 });
 
 test("capability matrix reports fully advertised Gateway method contract without claiming live verification", async () => {
@@ -116,7 +121,7 @@ test("capability matrix reports fully advertised Gateway method contract without
     assert.equal(method, "rpc.discover");
     return {
       protocolVersion: 4,
-      methods: OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS
+      methods: OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS
     };
   });
 
@@ -124,12 +129,31 @@ test("capability matrix reports fully advertised Gateway method contract without
 
   assert.equal(matrix.compatibility?.methodContract.status, "advertised");
   assert.equal(matrix.compatibility?.methodContract.source, "rpc.discover");
-  assert.equal(matrix.compatibility?.methodContract.expectedMethodCount, OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS.length);
-  assert.equal(matrix.compatibility?.methodContract.advertisedMethodCount, OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS.length);
+  assert.equal(matrix.compatibility?.methodContract.expectedMethodCount, OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length);
+  assert.equal(matrix.compatibility?.methodContract.advertisedMethodCount, OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS.length);
   assert.equal(matrix.compatibility?.methodContract.missingMethodCount, 0);
   assert.deepEqual(matrix.compatibility?.methodContract.missingMethods, []);
   assert.deepEqual(matrix.compatibility?.methodContract.missingOperations, []);
-  assert.match(matrix.compatibility?.methodContract.reason ?? "", /payload contracts/);
+  assert.equal(matrix.compatibility?.methodContract.missingOptionalMethods?.length, OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS.length);
+  assert.match(matrix.compatibility?.methodContract.reason ?? "", /required 2026\.5\.28 baseline/);
+});
+
+test("capability matrix treats missing optional methods as informational", async () => {
+  setOpenClawAdapterForTesting(createContractAdapter());
+  setOpenClawCapabilityMatrixNativeCallerForTesting(async () => ({
+    protocolVersion: 4,
+    methods: [
+      ...OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS,
+      "future.method"
+    ]
+  }));
+
+  const matrix = await getOpenClawCapabilityMatrix({ force: true });
+
+  assert.equal(matrix.compatibility?.methodContract.status, "advertised");
+  assert.equal(matrix.unsupportedGatewayMethods.length, 0);
+  assert.equal(matrix.compatibility?.methodContract.missingOptionalMethods?.includes("tasks.list"), true);
+  assert.equal(matrix.compatibility?.methodContract.missingRequiredMethods?.length, 0);
 });
 
 test("capability matrix reports Gateway compatibility aliases without degrading to CLI", async () => {

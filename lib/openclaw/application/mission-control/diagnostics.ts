@@ -127,7 +127,7 @@ export async function buildLiveMissionControlDiagnostics(input: {
   if (input.profile === "interactive" && !capabilityMatrix) {
     warmOpenClawCapabilityMatrix();
   }
-  const transport = getOpenClawGatewayClient().getDiagnostics?.();
+  const transport = getOpenClawGatewayClient()?.getDiagnostics?.();
   const gatewayFallbackIssues = filterActiveOpenClawGatewayFallbackDiagnostics(
     getRecentOpenClawGatewayFallbackDiagnostics(),
     transport

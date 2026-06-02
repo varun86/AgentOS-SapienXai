@@ -147,6 +147,7 @@ export interface OpenClawCapabilityOperation {
   methods: string[];
   events: string[];
   fallbackAllowed: boolean;
+  baseline?: "required" | "optional" | "experimental";
   reason: string;
   preferredMethod?: string | null;
   supportedMethod?: string | null;
@@ -174,6 +175,13 @@ export interface OpenClawGatewayMethodContractAudit {
   missingMethodCount: number;
   missingMethods: string[];
   missingOperations: string[];
+  baselineVersion?: string;
+  requiredMethodCount?: number;
+  missingRequiredMethods?: string[];
+  optionalMethodCount?: number;
+  missingOptionalMethods?: string[];
+  experimentalMethodCount?: number;
+  missingExperimentalMethods?: string[];
   reason: string;
 }
 
@@ -497,7 +505,17 @@ export interface SurfaceBindingRepairResult {
   changed: boolean;
   removedBindingCount: number;
   addedBindingCount: number;
+  configMutations?: SurfaceConfigRepairMutation[];
   drift: SurfaceDriftSnapshot;
+}
+
+export interface SurfaceConfigRepairMutation {
+  path: string;
+  appliedVia: "config.patch" | "config.apply" | "config.set" | "cli";
+  baseHash?: string;
+  reloadKind?: string;
+  restartRequired?: boolean;
+  hotReloaded?: boolean;
 }
 
 export interface OpenClawAgent {

@@ -49,6 +49,7 @@ import type {
   MissionControlSnapshot,
   MissionControlSurfaceProvider,
   PlannerChannelType,
+  SurfaceConfigRepairMutation,
   WorkspaceChannelGroupAssignment,
   WorkspaceChannelSummary,
   WorkspaceChannelWorkspaceBinding
@@ -56,6 +57,10 @@ import type {
 
 type ManagedChatChannelProvider = "slack" | "telegram" | "discord" | "googlechat";
 type OpenClawConfigPatch = Record<string, unknown>;
+type OpenClawConfigCommandResult = {
+  stdout: string;
+  stderr?: string;
+};
 type TelegramSettingsPatchPlan = {
   patch: OpenClawConfigPatch | null;
   defaultAccountId: string | null;
@@ -301,7 +306,9 @@ export async function reconcileWorkspaceSurfaceBindings(input: {
     : { patch: null, defaultAccountId: null };
   const reconcilePatch = mergeConfigPatches({ bindings: nextBindings }, telegramPatchPlan.patch);
 
-  await measureTiming(timings, "surface-reconcile.config-write", () => patchOpenClawConfig(reconcilePatch!));
+  const configMutations = await measureTiming(timings, "surface-reconcile.config-write", () =>
+    applySurfaceConfigRepairPatch(reconcilePatch!, timings)
+  );
 
   if (scope === "all") {
     const telegramChannels = managedChannels.filter((channel) => channel.type === "telegram");
@@ -333,6 +340,7 @@ export async function reconcileWorkspaceSurfaceBindings(input: {
     registry,
     previousBindings,
     nextBindings,
+    configMutations,
     drift
   });
 }
@@ -1015,25 +1023,93 @@ function deepMergeConfigPatch(left: OpenClawConfigPatch, right: OpenClawConfigPa
   return merged;
 }
 
-async function patchOpenClawConfig(patch: OpenClawConfigPatch) {
+async function applySurfaceConfigRepairPatch(
+  patch: OpenClawConfigPatch,
+  timings?: TimingCollector
+): Promise<SurfaceConfigRepairMutation[]> {
   const adapter = getOpenClawAdapter();
-  const snapshot = await adapter.call<Record<string, unknown>>("config.get", {}, {
-    timeoutMs: 60_000
-  });
-  const baseHash = typeof snapshot?.hash === "string" && snapshot.hash.trim().length > 0
-    ? snapshot.hash
-    : undefined;
-  const params: Record<string, unknown> = {
-    raw: JSON.stringify(patch)
-  };
+  const mutations: SurfaceConfigRepairMutation[] = [];
+  const writes = flattenSurfaceConfigRepairPatch(patch);
 
-  if (baseHash) {
-    params.baseHash = baseHash;
+  for (const write of writes) {
+    const result = await measureTiming(timings, `surface-repair.set-config.${write.path}`, () =>
+      adapter.setConfig(write.path, write.value, { strictJson: true, timeoutMs: 60_000 })
+    );
+    mutations.push(readSurfaceConfigMutation(write.path, result));
   }
 
-  return adapter.call("config.patch", params, {
-    timeoutMs: 60_000
-  });
+  return mutations;
+}
+
+function flattenSurfaceConfigRepairPatch(patch: OpenClawConfigPatch): Array<{ path: string; value: unknown }> {
+  const writes: Array<{ path: string; value: unknown }> = [];
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === "bindings") {
+      writes.push({ path: "bindings", value });
+      continue;
+    }
+
+    if (key === "channels" && isObjectRecord(value)) {
+      const telegram = isObjectRecord(value.telegram) ? value.telegram : null;
+      if (!telegram) {
+        throw new Error("Surface repair only supports managed channels.telegram config paths.");
+      }
+
+      for (const [telegramKey, telegramValue] of Object.entries(telegram)) {
+        if (!["enabled", "defaultAccount", "groups"].includes(telegramKey)) {
+          throw new Error(`Surface repair does not support channels.telegram.${telegramKey} config writes.`);
+        }
+        writes.push({ path: `channels.telegram.${telegramKey}`, value: telegramValue });
+      }
+      continue;
+    }
+
+    throw new Error(`Surface repair does not support ${key} config writes.`);
+  }
+
+  return writes;
+}
+
+function readSurfaceConfigMutation(path: string, result: OpenClawConfigCommandResult): SurfaceConfigRepairMutation {
+  const parsed = parseCommandResultJson(result);
+  const configMutation = isObjectRecord(parsed?.configMutation) ? parsed.configMutation : null;
+  const metadata = isObjectRecord(parsed?.metadata) && isObjectRecord(parsed.metadata.openClawConfig)
+    ? parsed.metadata.openClawConfig
+    : null;
+  const source = configMutation ?? metadata;
+
+  if (!source) {
+    return {
+      path,
+      appliedVia: "cli"
+    };
+  }
+
+  const appliedVia = readConfigMutationAppliedVia(source.appliedVia);
+  return {
+    path: typeof source.path === "string" && source.path.trim() ? source.path : path,
+    appliedVia,
+    ...(typeof source.baseHash === "string" && source.baseHash.trim() ? { baseHash: source.baseHash } : {}),
+    ...(typeof source.reloadKind === "string" && source.reloadKind.trim() ? { reloadKind: source.reloadKind } : {}),
+    ...(typeof source.restartRequired === "boolean" ? { restartRequired: source.restartRequired } : {}),
+    ...(typeof source.hotReloaded === "boolean" ? { hotReloaded: source.hotReloaded } : {})
+  };
+}
+
+function parseCommandResultJson(result: OpenClawConfigCommandResult): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(result.stdout || "{}");
+    return isObjectRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readConfigMutationAppliedVia(value: unknown): SurfaceConfigRepairMutation["appliedVia"] {
+  return value === "config.patch" || value === "config.apply" || value === "config.set"
+    ? value
+    : "cli";
 }
 
 function sortConfigComparable(value: unknown): unknown {
@@ -1407,7 +1483,9 @@ async function updateManagedSurfaceRouting(
   );
 
   if (routingPatch) {
-    await measureTiming(timings, "routing.write-openclaw-config", () => patchOpenClawConfig(routingPatch));
+    await measureTiming(timings, "routing.write-openclaw-config", () =>
+      applySurfaceConfigRepairPatch(routingPatch, timings)
+    );
   }
   await measureTiming(timings, "routing.reconcile-telegram-session-stores", () =>
     reconcileManagedTelegramSettingsSideEffects(managedTelegramChannels, telegramPatchPlan.defaultAccountId, timings)

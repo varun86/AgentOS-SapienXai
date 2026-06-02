@@ -492,16 +492,22 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
     return this.call<OpenClawArtifactPayload>("artifacts.get", { ...input }, options);
   }
 
-  putArtifact(input: OpenClawArtifactPutInput, options: OpenClawCommandOptions = {}) {
-    return this.call<OpenClawArtifactPayload>("artifacts.put", { ...input }, options);
+  async putArtifact(
+    input: OpenClawArtifactPutInput,
+    options: OpenClawCommandOptions = {}
+  ): Promise<OpenClawArtifactPayload> {
+    void input;
+    void options;
+    throw new Error("Artifact writes are not part of the OpenClaw 2026.5.28 Gateway baseline; native Gateway support must be explicitly advertised before AgentOS can use artifacts.put.");
   }
 
-  deleteArtifact(input: OpenClawArtifactDeleteInput, options: OpenClawCommandOptions = {}) {
-    return this.call<OpenClawArtifactPayload>(
-      "artifacts.delete",
-      { artifactId: input.artifactId, reason: input.reason ?? undefined },
-      options
-    );
+  async deleteArtifact(
+    input: OpenClawArtifactDeleteInput,
+    options: OpenClawCommandOptions = {}
+  ): Promise<OpenClawArtifactPayload> {
+    void input;
+    void options;
+    throw new Error("Artifact deletion is not part of the OpenClaw 2026.5.28 Gateway baseline; native Gateway support must be explicitly advertised before AgentOS can use artifacts.delete.");
   }
 
   async getRuntimeSnapshot(input: OpenClawRuntimeSnapshotInput = {}, options: OpenClawCommandOptions = {}) {

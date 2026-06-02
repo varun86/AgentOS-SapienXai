@@ -360,7 +360,7 @@ function runDoctor() {
     {
       state: isSupportedNodeVersion(process.versions.node) ? "ok" : "failed",
       label: "Node.js",
-      detail: `${process.version} (required >= 20.9.0)`
+      detail: `${process.version} (required >= 24.0.0)`
     },
     {
       state: "ok",
@@ -2043,15 +2043,14 @@ function resolveCommandPath(command) {
 }
 
 function isSupportedNodeVersion(version) {
-  const [majorText, minorText] = version.split(".");
+  const [majorText] = version.split(".");
   const major = Number(majorText);
-  const minor = Number(minorText);
 
-  if (!Number.isFinite(major) || !Number.isFinite(minor)) {
+  if (!Number.isFinite(major)) {
     return false;
   }
 
-  return major > 20 || (major === 20 && minor >= 9);
+  return major >= 24;
 }
 
 function parseBooleanEnv(value) {

@@ -285,11 +285,23 @@ test("repairs managed bindings without returning binding secrets", () => {
     registry,
     previousBindings,
     nextBindings,
+    configMutations: [{
+      path: "bindings",
+      appliedVia: "config.patch",
+      baseHash: "hash-1",
+      hotReloaded: true
+    }],
     drift
   });
 
   assert.equal(result.changed, true);
   assert.equal(result.expectedBindingCount, 5);
+  assert.deepEqual(result.configMutations, [{
+    path: "bindings",
+    appliedVia: "config.patch",
+    baseHash: "hash-1",
+    hotReloaded: true
+  }]);
   assert.equal(JSON.stringify(result).includes("do-not-return"), false);
   assert.equal(JSON.stringify(nextBindings).includes("thread-extra"), false);
 });

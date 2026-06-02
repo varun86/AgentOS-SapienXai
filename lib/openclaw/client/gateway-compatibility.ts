@@ -38,44 +38,48 @@ export type OpenClawGatewayCompatibilityOperationDefinition = {
   methods: string[];
   events?: string[];
   fallbackAllowed?: boolean;
+  baseline?: "required" | "optional" | "experimental";
 };
 
 export const OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS: OpenClawGatewayCompatibilityOperationDefinition[] = [
-  { id: "health", label: "Gateway health", methods: ["health", "status"] },
-  { id: "modelAuthOrder", label: "Model auth order", methods: ["models.authOrder.set", "models.auth.order.set"] },
-  { id: "logsTail", label: "Gateway logs", methods: ["logs.tail"] },
-  { id: "configSchemaLookup", label: "Config schema lookup", methods: ["config.schema.lookup", "config.schema"] },
-  { id: "configPatch", label: "Config patch", methods: ["config.patch", "config.apply", "config.set"] },
-  { id: "sessionLifecycle", label: "Session lifecycle", methods: ["sessions.create", "sessions.patch", "sessions.steer"] },
-  { id: "agentCreate", label: "Agent creation", methods: ["agents.create"] },
-  { id: "agentUpdate", label: "Agent update", methods: ["agents.update"] },
-  { id: "agentIdentity", label: "Agent identity sync", methods: ["agents.identity.set", "agents.setIdentity", "agents.set-identity"] },
-  { id: "agentDelete", label: "Agent removal", methods: ["agents.delete"] },
-  { id: "missionDispatch", label: "Mission dispatch", methods: ["chat.send", "sessions.send"] },
+  { id: "health", label: "Gateway health", methods: ["health", "status"], baseline: "required" },
+  { id: "modelAuthOrder", label: "Model auth order", methods: ["models.authOrder.set", "models.auth.order.set"], baseline: "experimental" },
+  { id: "logsTail", label: "Gateway logs", methods: ["logs.tail"], baseline: "required" },
+  { id: "configSchemaLookup", label: "Config schema lookup", methods: ["config.schema.lookup", "config.schema"], baseline: "required" },
+  { id: "configPatch", label: "Config patch", methods: ["config.patch", "config.apply", "config.set"], baseline: "required" },
+  { id: "sessionLifecycle", label: "Session lifecycle", methods: ["sessions.create", "sessions.patch", "sessions.steer"], baseline: "optional" },
+  { id: "agentCreate", label: "Agent creation", methods: ["agents.create"], baseline: "required" },
+  { id: "agentUpdate", label: "Agent update", methods: ["agents.update"], baseline: "required" },
+  { id: "agentIdentity", label: "Agent identity sync", methods: ["agents.identity.set", "agents.setIdentity", "agents.set-identity"], baseline: "experimental" },
+  { id: "agentDelete", label: "Agent removal", methods: ["agents.delete"], baseline: "required" },
+  { id: "missionDispatch", label: "Mission dispatch", methods: ["chat.send", "sessions.send"], baseline: "required" },
   {
     id: "missionStream",
     label: "Mission event stream",
     methods: ["sessions.subscribe", "sessions.messages.subscribe"],
-    events: ["chat", "agent", "session.message", "session.tool"]
+    events: ["chat", "agent", "session.message", "session.tool"],
+    baseline: "optional"
   },
-  { id: "chatControl", label: "Chat control", methods: ["chat.abort", "chat.inject"] },
-  { id: "agentWait", label: "Agent wait", methods: ["agent.wait"] },
-  { id: "sessionHistory", label: "Session history", methods: ["chat.history", "sessions.preview", "sessions.get", "sessions.describe"] },
+  { id: "chatControl", label: "Chat control", methods: ["chat.abort", "chat.inject"], baseline: "optional" },
+  { id: "agentWait", label: "Agent wait", methods: ["agent.wait"], baseline: "optional" },
+  { id: "sessionHistory", label: "Session history", methods: ["chat.history", "sessions.preview", "sessions.get", "sessions.describe"], baseline: "optional" },
   {
     id: "taskEvents",
     label: "Task events",
     methods: ["tasks.subscribe", "tasks.get", "tasks.list"],
-    events: ["task", "task.updated", "task.completed"]
+    events: ["task", "task.updated", "task.completed"],
+    baseline: "optional"
   },
-  { id: "taskCancel", label: "Task cancellation", methods: ["tasks.cancel"] },
+  { id: "taskCancel", label: "Task cancellation", methods: ["tasks.cancel"], baseline: "optional" },
   {
     id: "artifacts",
     label: "Artifact sync",
     methods: ["artifacts.list", "artifacts.get", "artifacts.download"],
-    events: ["artifact", "artifact.updated"]
+    events: ["artifact", "artifact.updated"],
+    baseline: "optional"
   },
-  { id: "runtimeSnapshot", label: "Runtime snapshot", methods: ["sessions.list", "tasks.list"] },
-  { id: "tools", label: "Tool catalog", methods: ["tools.catalog", "tools.effective", "tools.invoke"] },
+  { id: "runtimeSnapshot", label: "Runtime snapshot", methods: ["sessions.list", "tasks.list"], baseline: "required" },
+  { id: "tools", label: "Tool catalog", methods: ["tools.catalog", "tools.effective", "tools.invoke"], fallbackAllowed: false, baseline: "optional" },
   {
     id: "execApprovals",
     label: "Execution approvals",
@@ -85,53 +89,98 @@ export const OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS: OpenClawGatewayCompatibi
       "exec.approval.resolve",
       "exec.approvals.get",
       "exec.approvals.set"
-    ]
+    ],
+    baseline: "optional"
   },
-  { id: "devicePairList", label: "Device pairing list", methods: ["device.pair.list", "devices.list", "gateway.devices.list"] },
-  { id: "deviceApproval", label: "Device access repair", methods: ["device.pair.approve", "devices.approve", "gateway.devices.approve"] },
-  { id: "cronRead", label: "Automation status", methods: ["cron.list", "cron.status"] },
-  { id: "channels", label: "Channel status", methods: ["channels.status"] },
-  { id: "channelLogs", label: "Channel logs", methods: ["channels.logs"] },
-  { id: "channelProvisioning", label: "Channel provisioning", methods: ["channels.add", "channels.create", "channels.configure"] },
-  { id: "channelRemoval", label: "Channel removal", methods: ["channels.remove", "channels.delete"] },
-  { id: "gmailProvisioning", label: "Gmail webhook setup", methods: ["webhooks.gmail.setup", "gmail.setup"] },
-  { id: "automationProvisioning", label: "Automation provisioning", methods: ["cron.add", "cron.create"] },
-  { id: "skills", label: "Skill status", methods: ["skills.status"] },
-  { id: "updates", label: "Update status", methods: ["update.status", "update.run", "status"] }
+  { id: "devicePairList", label: "Device pairing list", methods: ["device.pair.list", "devices.list", "gateway.devices.list"], baseline: "optional" },
+  { id: "deviceApproval", label: "Device access repair", methods: ["device.pair.approve", "devices.approve", "gateway.devices.approve"], baseline: "optional" },
+  { id: "cronRead", label: "Automation status", methods: ["cron.list", "cron.status"], baseline: "optional" },
+  { id: "channels", label: "Channel status", methods: ["channels.status"], baseline: "required" },
+  { id: "channelLogs", label: "Channel logs", methods: ["channels.logs"], baseline: "optional" },
+  { id: "channelProvisioning", label: "Channel provisioning", methods: ["channels.add", "channels.create", "channels.configure"], baseline: "experimental" },
+  { id: "channelRemoval", label: "Channel removal", methods: ["channels.remove", "channels.delete"], baseline: "experimental" },
+  { id: "gmailProvisioning", label: "Gmail webhook setup", methods: ["webhooks.gmail.setup", "gmail.setup"], baseline: "experimental" },
+  { id: "automationProvisioning", label: "Automation provisioning", methods: ["cron.add", "cron.create"], baseline: "experimental" },
+  { id: "skills", label: "Skill status", methods: ["skills.status"], baseline: "optional" },
+  { id: "updates", label: "Update status", methods: ["update.status", "update.run", "status"], baseline: "optional" }
 ];
 
-const additionalGatewayFirstMethods = [
-  "diagnostics.stability",
+export const OPENCLAW_GATEWAY_BASELINE_VERSION = "2026.5.28";
+
+export const OPENCLAW_GATEWAY_BASELINE_PROTOCOL_VERSION = 4;
+
+export const OPENCLAW_2026_5_28_REQUIRED_GATEWAY_METHODS = [
+  "health",
+  "status",
   "models.list",
   "models.authStatus",
   "agents.list",
+  "agents.create",
+  "agents.update",
+  "agents.delete",
+  "sessions.list",
+  "chat.send",
+  "config.get",
+  "config.schema",
+  "config.schema.lookup",
+  "config.patch",
+  "config.apply",
+  "channels.status",
+  "logs.tail"
+] as const;
+
+export const OPENCLAW_2026_5_28_OPTIONAL_GATEWAY_METHODS = [
+  "agent.identity.get",
+  "agent.wait",
+  "artifacts.download",
+  "artifacts.get",
+  "artifacts.list",
+  "chat.abort",
+  "chat.history",
+  "chat.inject",
+  "channels.logout",
+  "channels.start",
+  "channels.stop",
+  "cron.list",
+  "cron.status",
+  "devices.list",
+  "exec.approval.get",
+  "exec.approval.list",
+  "exec.approval.request",
+  "exec.approval.resolve",
+  "exec.approval.waitDecision",
+  "plugins.uiDescriptors",
+  "sessions.abort",
+  "sessions.create",
+  "sessions.describe",
+  "sessions.get",
+  "sessions.messages.subscribe",
+  "sessions.patch",
+  "sessions.preview",
+  "sessions.resolve",
+  "sessions.steer",
+  "sessions.subscribe",
+  "skills.detail",
+  "skills.install",
+  "skills.search",
+  "skills.status",
+  "skills.update",
+  "tasks.cancel",
+  "tasks.get",
+  "tasks.list",
+  "tasks.subscribe",
+  "tools.catalog",
+  "tools.effective",
+  "tools.invoke",
+  "update.run",
+  "update.status"
+] as const;
+
+export const OPENCLAW_EXPERIMENTAL_GATEWAY_METHODS = [
+  "diagnostics.stability",
   "agents.files.list",
   "agents.files.get",
   "agents.files.set",
-  "sessions.list",
-  "sessions.create",
-  "sessions.patch",
-  "sessions.steer",
-  "sessions.preview",
-  "sessions.get",
-  "sessions.resolve",
-  "sessions.abort",
-  "chat.history",
-  "chat.abort",
-  "chat.inject",
-  "agent.wait",
-  "tasks.cancel",
-  "config.get",
-  "channels.start",
-  "channels.stop",
-  "channels.logout",
-  "skills.search",
-  "skills.detail",
-  "skills.install",
-  "skills.update",
-  "plugins.uiDescriptors",
-  "exec.approval.request",
-  "exec.approval.waitDecision",
   "plugin.approval.list",
   "plugin.approval.resolve",
   "environment.list",
@@ -140,7 +189,28 @@ const additionalGatewayFirstMethods = [
   "environment.update",
   "environment.delete",
   "gateway.restart.preflight",
-  "gateway.restart.request"
+  "gateway.restart.request",
+  "models.authOrder.set",
+  "models.auth.order.set",
+  "agents.identity.set",
+  "agents.setIdentity",
+  "agents.set-identity",
+  "channels.logs",
+  "channels.add",
+  "channels.create",
+  "channels.configure",
+  "channels.remove",
+  "channels.delete",
+  "webhooks.gmail.setup",
+  "gmail.setup",
+  "cron.add",
+  "cron.create"
+] as const;
+
+const additionalGatewayFirstMethods = [
+  ...OPENCLAW_2026_5_28_REQUIRED_GATEWAY_METHODS,
+  ...OPENCLAW_2026_5_28_OPTIONAL_GATEWAY_METHODS,
+  ...OPENCLAW_EXPERIMENTAL_GATEWAY_METHODS
 ];
 
 export const OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS = Array.from(
@@ -148,6 +218,25 @@ export const OPENCLAW_KNOWN_GATEWAY_FIRST_METHODS = Array.from(
     ...OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS.flatMap((operation) => operation.methods),
     ...additionalGatewayFirstMethods
   ])
+).sort();
+
+export const OPENCLAW_GATEWAY_BASELINE_METHODS = Array.from(
+  new Set([
+    ...OPENCLAW_2026_5_28_REQUIRED_GATEWAY_METHODS,
+    ...OPENCLAW_2026_5_28_OPTIONAL_GATEWAY_METHODS
+  ])
+).sort();
+
+export const OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS = Array.from(
+  new Set(OPENCLAW_2026_5_28_REQUIRED_GATEWAY_METHODS)
+).sort();
+
+export const OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS = Array.from(
+  new Set(OPENCLAW_2026_5_28_OPTIONAL_GATEWAY_METHODS)
+).sort();
+
+export const OPENCLAW_GATEWAY_EXPERIMENTAL_METHODS = Array.from(
+  new Set(OPENCLAW_EXPERIMENTAL_GATEWAY_METHODS)
 ).sort();
 
 const operationDefinitionsById = new Map(

@@ -16,6 +16,8 @@ const CHECK_SCRIPT = `${AGENTOS_PACKAGE_DIR}/scripts/check-release-consistency.m
 const RELEASE_TAG_PREFIX = "agentos-v";
 const INSTALL_COMMAND = "curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash";
 const WINDOWS_INSTALL_COMMAND = "iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex";
+const REQUIRED_NODE_ENGINE = ">=24.0.0";
+const REQUIRED_NODE_MAJOR = "24";
 const RELEASE_ASSETS = [
   "agentos-darwin-arm64.tgz",
   "agentos-darwin-x64.tgz",
@@ -109,7 +111,7 @@ function validateAgentosPackage(context, agentosPackage) {
   expectEqual(context, AGENTOS_PACKAGE_JSON, "type", agentosPackage.type, "module");
   expectEqual(context, AGENTOS_PACKAGE_JSON, "license", agentosPackage.license, "MIT");
   expectEqual(context, AGENTOS_PACKAGE_JSON, "bin.agentos", agentosPackage.bin?.agentos, AGENTOS_BIN_ENTRY);
-  expectEqual(context, AGENTOS_PACKAGE_JSON, "engines.node", agentosPackage.engines?.node, ">=20.9.0");
+  expectEqual(context, AGENTOS_PACKAGE_JSON, "engines.node", agentosPackage.engines?.node, REQUIRED_NODE_ENGINE);
   expectEqual(context, AGENTOS_PACKAGE_JSON, "publishConfig.access", agentosPackage.publishConfig?.access, "public");
 
   for (const fileEntry of ["README.md", "bin", "bundle"]) {
@@ -178,6 +180,8 @@ function validateInstallers(context, installSh, installPs1) {
     expectIncludes(context, "install.sh", installSh, 'ARTIFACT_NAME="agentos-${ASSET_PLATFORM}-${ASSET_ARCH}.tgz"');
     expectIncludes(context, "install.sh", installSh, 'CHECKSUM_NAME="${ARTIFACT_NAME}.sha256"');
     expectIncludes(context, "install.sh", installSh, 'REPO="${AGENTOS_REPO:-SapienXai/AgentOS}"');
+    expectIncludes(context, "install.sh", installSh, `major >= ${REQUIRED_NODE_MAJOR}`);
+    expectIncludes(context, "install.sh", installSh, `AgentOS requires Node.js ${REQUIRED_NODE_MAJOR} or newer.`);
   }
 
   if (installPs1) {
@@ -187,6 +191,8 @@ function validateInstallers(context, installSh, installPs1) {
     expectIncludes(context, "install.ps1", installPs1, '$artifactName = "agentos-$assetPlatform-$assetArch.tgz"');
     expectIncludes(context, "install.ps1", installPs1, '$checksumUrl = "$artifactUrl.sha256"');
     expectIncludes(context, "install.ps1", installPs1, '"SapienXai/AgentOS"');
+    expectIncludes(context, "install.ps1", installPs1, `major >= ${REQUIRED_NODE_MAJOR}`);
+    expectIncludes(context, "install.ps1", installPs1, `AgentOS requires Node.js ${REQUIRED_NODE_MAJOR} or newer.`);
   }
 }
 
@@ -198,6 +204,7 @@ function validateReadmes(context, readme, packageReadme, agentosPackage) {
     expectIncludes(context, "README.md", readme, "npm install -g @sapienx/agentos");
     expectIncludes(context, "README.md", readme, "pnpm check:release");
     expectIncludes(context, "README.md", readme, "packages/agentos/package.json");
+    expectIncludes(context, "README.md", readme, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
 
     expectVersionReferences(context, "README.md", readme, agentosPackage.version, [
       {
@@ -227,6 +234,7 @@ function validateReadmes(context, readme, packageReadme, agentosPackage) {
   if (packageReadme) {
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "pnpm add -g @sapienx/agentos");
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "agentos update --check");
+    expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
   }
 }
 
@@ -293,6 +301,7 @@ function validateReleaseWorkflow(context, workflow, agentosPackage) {
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "npm pack ./packages/agentos --pack-destination dist");
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "install.sh");
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "install.ps1");
+  expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, `node-version: ${REQUIRED_NODE_MAJOR}`);
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "${{ needs.validate-release.outputs.version }}");
 
   for (const asset of RELEASE_ASSETS) {

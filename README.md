@@ -236,7 +236,7 @@ In practice, that means:
 
 AgentOS is Gateway-first on top of OpenClaw. Use `agentos doctor` and the in-app diagnostics panel to confirm the installed OpenClaw version, Gateway protocol range, native auth state, model readiness, and fallback activity before dispatching real missions.
 
-The 0.5.9 release expects Node.js 20.9 or newer and an OpenClaw Gateway whose protocol overlaps the supported range reported by diagnostics. If compatibility is degraded, update OpenClaw, repair Gateway token/device access, restart the Gateway, and re-run `agentos doctor`.
+The 0.5.9 release expects Node.js 24 or newer and an OpenClaw Gateway whose protocol overlaps the supported range reported by diagnostics. If compatibility is degraded, update OpenClaw, repair Gateway token/device access, restart the Gateway, and re-run `agentos doctor`.
 
 ## How The System Works
 

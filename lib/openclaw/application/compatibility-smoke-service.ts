@@ -34,6 +34,7 @@ import type {
   OpenClawSmokeTestCheckStatus
 } from "@/lib/openclaw/types";
 
+export const AGENTOS_REQUIRED_NODE_VERSION = "24.0.0";
 export const OPENCLAW_REQUIRED_NODE_VERSION = "22.19.0";
 export const OPENCLAW_RECOMMENDED_NODE_VERSION = "24.x";
 export const OPENCLAW_REQUIRED_GATEWAY_PROTOCOL_VERSION = "4";
@@ -158,7 +159,7 @@ export async function runOpenClawCompatibilitySmokeTest(): Promise<OpenClawCompa
     id: "node-version",
     label: "Node.js version",
     required: true,
-    recovery: `Install Node.js ${OPENCLAW_REQUIRED_NODE_VERSION} or newer. Node ${OPENCLAW_RECOMMENDED_NODE_VERSION} is recommended by OpenClaw.`,
+    recovery: `Install Node.js ${AGENTOS_REQUIRED_NODE_VERSION} or newer. Node ${OPENCLAW_RECOMMENDED_NODE_VERSION} is recommended for AgentOS and OpenClaw.`,
     run: () => {
       const result = classifyOpenClawNodeVersion(process.versions.node);
       context.nodeVersion = process.versions.node || null;
@@ -170,7 +171,8 @@ export async function runOpenClawCompatibilitySmokeTest(): Promise<OpenClawCompa
         recovery: result.status === "supported" ? null : result.recovery,
         rawDetails: {
           nodeVersion: process.versions.node,
-          required: OPENCLAW_REQUIRED_NODE_VERSION,
+          required: AGENTOS_REQUIRED_NODE_VERSION,
+          openClawRequired: OPENCLAW_REQUIRED_NODE_VERSION,
           recommended: OPENCLAW_RECOMMENDED_NODE_VERSION
         }
       };
@@ -607,7 +609,7 @@ export async function runOpenClawCompatibilitySmokeTest(): Promise<OpenClawCompa
     }
   });
 
-  const transport = getOpenClawGatewayClient().getDiagnostics?.();
+  const transport = getOpenClawGatewayClient()?.getDiagnostics?.();
   const fallbackTotal = transport?.fallbackTotal ?? 0;
   const lastFallbackReason =
     context.lastFallbackReason ??
@@ -632,7 +634,7 @@ export async function runOpenClawCompatibilitySmokeTest(): Promise<OpenClawCompa
       requiredGatewayProtocolVersion: OPENCLAW_REQUIRED_GATEWAY_PROTOCOL_VERSION,
       agentOsSupportedProtocolRange: OPENCLAW_GATEWAY_PROTOCOL_RANGE,
       nodeVersion: context.nodeVersion,
-      nodeRequiredVersion: OPENCLAW_REQUIRED_NODE_VERSION,
+      nodeRequiredVersion: AGENTOS_REQUIRED_NODE_VERSION,
       nodeRecommendedVersion: OPENCLAW_RECOMMENDED_NODE_VERSION,
       nodeStatus: context.nodeStatus,
       gatewayAuthStatus: context.gatewayAuthStatus,
@@ -660,23 +662,23 @@ export function classifyOpenClawNodeVersion(version: string | null | undefined):
     return {
       status: "unknown",
       summary: "Node.js version could not be detected.",
-      recovery: `Install Node.js ${OPENCLAW_REQUIRED_NODE_VERSION} or newer.`
+      recovery: `Install Node.js ${AGENTOS_REQUIRED_NODE_VERSION} or newer.`
     };
   }
 
-  if (compareVersionStrings(normalized, OPENCLAW_REQUIRED_NODE_VERSION) < 0) {
+  if (compareVersionStrings(normalized, AGENTOS_REQUIRED_NODE_VERSION) < 0) {
     return {
       status: "unsupported",
-      summary: `Node.js ${normalized} is below OpenClaw's required ${OPENCLAW_REQUIRED_NODE_VERSION}.`,
-      recovery: `Install Node.js ${OPENCLAW_REQUIRED_NODE_VERSION} or newer. Node ${OPENCLAW_RECOMMENDED_NODE_VERSION} is recommended.`
+      summary: `Node.js ${normalized} is below AgentOS' required ${AGENTOS_REQUIRED_NODE_VERSION}.`,
+      recovery: `Install Node.js ${AGENTOS_REQUIRED_NODE_VERSION} or newer. Node ${OPENCLAW_RECOMMENDED_NODE_VERSION} is recommended.`
     };
   }
 
   return {
     status: "supported",
-    summary: Number(normalized.split(".", 1)[0]) >= 24
-      ? `Node.js ${normalized} matches OpenClaw's recommended runtime family.`
-      : `Node.js ${normalized} is supported. Node ${OPENCLAW_RECOMMENDED_NODE_VERSION} remains recommended.`,
+    summary: Number(normalized.split(".", 1)[0] ?? "0") >= 24
+      ? `Node.js ${normalized} matches AgentOS' required runtime family and OpenClaw's recommended runtime family.`
+      : `Node.js ${normalized} is supported by OpenClaw, but AgentOS requires ${AGENTOS_REQUIRED_NODE_VERSION}.`,
     recovery: null
   };
 }

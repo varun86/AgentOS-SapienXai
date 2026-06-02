@@ -32,10 +32,10 @@ function Require-Command {
 function Assert-NodeVersion {
   Require-Command "node"
 
-  & node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && minor >= 9) ? 0 : 1);'
+  & node -e 'const [major] = process.versions.node.split(".").map(Number); process.exit(major >= 24 ? 0 : 1);'
 
   if ($LASTEXITCODE -ne 0) {
-    throw "AgentOS requires Node.js 20.9 or newer."
+    throw "AgentOS requires Node.js 24 or newer."
   }
 }
 

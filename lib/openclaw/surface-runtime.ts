@@ -470,6 +470,7 @@ export function buildSurfaceBindingRepairResult(input: {
   previousBindings: unknown[];
   nextBindings: unknown[];
   drift: SurfaceDriftSnapshot;
+  configMutations?: SurfaceBindingRepairResult["configMutations"];
 }): SurfaceBindingRepairResult {
   const previousKeys = new Set(
     input.previousBindings
@@ -496,6 +497,7 @@ export function buildSurfaceBindingRepairResult(input: {
     changed: removedBindingCount > 0 || addedBindingCount > 0,
     removedBindingCount,
     addedBindingCount,
+    ...(input.configMutations ? { configMutations: input.configMutations } : {}),
     drift: input.drift
   };
 }

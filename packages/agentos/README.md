@@ -58,6 +58,6 @@ AgentOS is designed to work with a local OpenClaw installation. If OpenClaw is m
 
 Compatibility:
 
-- Requires Node.js 20.9 or newer.
+- Requires Node.js 24 or newer.
 - Uses OpenClaw Gateway-first transport by default.
 - Run `agentos doctor` and check in-app diagnostics to verify OpenClaw version, Gateway protocol compatibility, native auth, and model readiness before the first mission.

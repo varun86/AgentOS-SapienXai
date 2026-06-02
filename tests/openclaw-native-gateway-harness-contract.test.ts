@@ -369,6 +369,27 @@ test("config mutation preserves config.patch to config.apply to config.set fallb
   assert.deepEqual(fallback.calls, []);
 });
 
+test("artifact mutation fails closed without CLI fallback", async () => {
+  const { client, fallback, gateway } = createNativeGatewayTestClient();
+  gateway.route("artifacts.put", (_frame, context) => {
+    context.unsupported();
+  });
+  gateway.route("artifacts.delete", (_frame, context) => {
+    context.unsupported();
+  });
+
+  await assert.rejects(
+    () => client.putArtifact({ name: "result.txt", content: "ok" }),
+    /Gateway-native operation failed; CLI fallback disabled/
+  );
+  await assert.rejects(
+    () => client.deleteArtifact({ artifactId: "artifact-1" }),
+    /Gateway-native operation failed; CLI fallback disabled/
+  );
+
+  assert.deepEqual(fallback.calls, []);
+});
+
 test("environment forced CLI mode bypasses Native WS and the default factory", async () => {
   process.env.AGENTOS_OPENCLAW_GATEWAY_CLIENT = "cli";
   setOpenClawGatewayClientForTesting(null);
