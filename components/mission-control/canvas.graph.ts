@@ -4,7 +4,8 @@ import type {
   AgentSurfaceBadge,
   CanvasEdge,
   CanvasNode,
-  PersistedNodePositionMap
+  PersistedNodePositionMap,
+  TaskNodeData
 } from "@/components/mission-control/canvas-types";
 import {
   resolveSurfaceModuleAnchorPosition,
@@ -59,7 +60,8 @@ export function buildCanvasGraph(
   onHideTask: (task: WorkItemRecord) => void,
   onToggleTaskLock: (task: WorkItemRecord) => void,
   onAbortTask: (task: WorkItemRecord) => void,
-  onInspectTask: (task: WorkItemRecord, target: "overview" | "output" | "files") => void,
+  onInspectTask: TaskNodeData["onInspect"],
+  onActiveTaskCardChange: TaskNodeData["onActiveCardChange"],
   onReviewTask: (task: WorkItemRecord) => void,
   persistedNodePositions: PersistedNodePositionMap
 ) {
@@ -266,7 +268,7 @@ export function buildCanvasGraph(
           selectable: true,
           position: resolvePersistedPosition(
             toPersistedTaskPositionKey(task),
-            { x: taskX, y: agentY + taskIndex * 152 + 10 },
+            { x: taskX, y: agentY + taskIndex * 420 + 10 },
             persistedNodePositions,
             toLegacyPersistedTaskPositionKey(task.id)
           ),
@@ -286,12 +288,13 @@ export function buildCanvasGraph(
             onToggleLock: onToggleTaskLock,
             onAbortTask,
             onInspect: onInspectTask,
+            onActiveCardChange: onActiveTaskCardChange,
             onReviewTask
           }
         });
       });
 
-      laneY += Math.max(152, agentTasks.length * 152 + 44);
+      laneY += Math.max(420, agentTasks.length * 420 + 44);
     });
 
     if (!isFocusMode) {

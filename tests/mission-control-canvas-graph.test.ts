@@ -135,6 +135,7 @@ test("canvas places agent-owned tasks when task workspace id is missing", () => 
     () => {},
     () => {},
     () => {},
+    () => {},
     {}
   );
 

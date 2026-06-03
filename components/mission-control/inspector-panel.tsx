@@ -65,12 +65,13 @@ import type {
   WorkspaceResourceState
 } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
-import type { AgentDetailFocus } from "@/components/mission-control/canvas-types";
+import type { AgentDetailFocus, TaskCardInspectorContext } from "@/components/mission-control/canvas-types";
 
 type InspectorPanelProps = {
   snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
   selectedNodeId: string | null;
+  activeTaskCard?: TaskCardInspectorContext | null;
   agentDetailFocus?: AgentDetailFocus | null;
   lastMission: MissionResponse | null;
   onRefresh?: () => Promise<void>;
@@ -111,6 +112,7 @@ function InspectorPanelContent({
   snapshot,
   surfaceTheme,
   selectedNodeId,
+  activeTaskCard,
   agentDetailFocus,
   lastMission,
   onRefresh,
@@ -127,6 +129,8 @@ function InspectorPanelContent({
   const selectedWorkspace = snapshot.workspaces.find((workspace) => workspace.id === selectedNodeId);
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selectedNodeId);
   const selectedTask = snapshot.tasks.find((task) => task.id === selectedNodeId);
+  const selectedTaskCard =
+    selectedTask && activeTaskCard?.taskId === selectedTask.id ? activeTaskCard : null;
   const selectedRuntime = snapshot.runtimes.find((runtime) => runtime.id === selectedNodeId);
   const selectedModel = snapshot.models.find((model) => model.id === selectedNodeId);
   const isOptimisticTask = Boolean(selectedTask?.metadata.optimistic);
@@ -161,7 +165,8 @@ function InspectorPanelContent({
       : null;
   const resolvedTaskDetailError =
     taskDetailError?.taskId === selectedTaskId ? taskDetailError.message : null;
-  const effectiveTaskDetail = resolvedTaskDetail ?? optimisticTaskDetail;
+  const baseTaskDetail = resolvedTaskDetail ?? optimisticTaskDetail;
+  const effectiveTaskDetail = filterTaskDetailForCard(baseTaskDetail, selectedTaskCard);
   const taskDetailLoading =
     canStreamTaskDetail && !resolvedTaskDetail && !resolvedTaskDetailError;
   const runtimeOutputLoading =
@@ -182,7 +187,9 @@ function InspectorPanelContent({
   const selectedLabel =
     selectedWorkspace?.name ||
     (selectedAgent ? formatAgentDisplayName(selectedAgent) : null) ||
-    (selectedTask ? compactMissionText(selectedTask.title || selectedTask.mission || "Task", 48) || "Task" : null) ||
+    (selectedTaskCard
+      ? compactMissionText(selectedTaskCard.message || `Follow-up ${selectedTaskCard.cardNumber - 1}`, 48) || "Follow-up"
+      : selectedTask ? compactMissionText(selectedTask.title || selectedTask.mission || "Task", 48) || "Task" : null) ||
     (selectedRuntime ? compactMissionText(selectedRuntime.title || "Run", 48) || "Run" : null) ||
     selectedModel?.name ||
     "Gateway overview";
@@ -191,7 +198,9 @@ function InspectorPanelContent({
     : selectedAgent
       ? "agent"
       : selectedTask
-        ? "task"
+        ? selectedTaskCard
+          ? `follow-up ${selectedTaskCard.cardNumber}`
+          : "task"
       : selectedRuntime
         ? "run"
         : selectedModel
@@ -491,6 +500,229 @@ function InspectorPanelContent({
       ) : null}
     </div>
   );
+}
+
+function filterTaskDetailForCard(
+  taskDetail: TaskDetailRecord | null,
+  activeTaskCard: TaskCardInspectorContext | null
+): TaskDetailRecord | null {
+  if (!taskDetail || !activeTaskCard || activeTaskCard.followUpIndex === null) {
+    return taskDetail;
+  }
+
+  const runs = resolveTaskCardRuntimes(activeTaskCard, taskDetail.runs);
+  const runtime = resolveRepresentativeTaskCardRuntime(runs);
+  const outputs = taskDetail.outputs.filter((output) => runs.some((entry) => entry.id === output.runtimeId));
+  const output = resolveBestTaskCardOutput(outputs);
+  const realLiveFeed = filterTaskCardFeed(activeTaskCard, runs, taskDetail.liveFeed);
+  const liveFeed = realLiveFeed.length > 0 ? realLiveFeed : [createTaskCardOptimisticFeed(activeTaskCard)];
+  const createdFiles =
+    outputs.length > 0
+      ? dedupeCreatedFiles(outputs.flatMap((entry) => entry.createdFiles))
+      : dedupeCreatedFiles(runs.flatMap((entry) => extractCreatedFilesFromRuntime(entry)));
+  const warnings =
+    outputs.length > 0
+      ? uniqueStrings(outputs.flatMap((entry) => entry.warnings))
+      : uniqueStrings(runs.flatMap((entry) => extractWarningsFromRuntime(entry)));
+  const status = normalizeTaskCardStatus(runtime?.status ?? activeTaskCard.status, output, activeTaskCard);
+  const finalText = output?.finalText?.trim() || activeTaskCard.summary?.trim() || null;
+  const toolNames = uniqueStrings([
+    ...runs.flatMap((entry) => entry.toolNames ?? []),
+    ...outputs.flatMap((entry) => entry.items.map((item) => item.toolName).filter((value): value is string => Boolean(value)))
+  ]);
+
+  return {
+    ...taskDetail,
+    task: {
+      ...taskDetail.task,
+      title: activeTaskCard.message || `Follow-up ${activeTaskCard.cardNumber - 1}`,
+      mission: activeTaskCard.message ?? taskDetail.task.mission,
+      subtitle:
+        finalText ||
+        (runtime && hasMeaningfulTaskCardRuntimeSubtitle(runtime) ? runtime.subtitle : null) ||
+        (status === "running" || status === "queued" ? "Follow-up is running in the existing OpenClaw session." : taskDetail.task.subtitle),
+      status,
+      updatedAt: runtime?.updatedAt ?? taskDetail.task.updatedAt,
+      primaryRuntimeId: runtime?.id ?? taskDetail.task.primaryRuntimeId,
+      runtimeIds: runs.map((entry) => entry.id),
+      sessionIds: uniqueStrings([
+        activeTaskCard.sessionId ?? "",
+        ...runs.map((entry) => entry.sessionId ?? "")
+      ]),
+      runIds: uniqueStrings([
+        activeTaskCard.runId ?? "",
+        ...runs.map((entry) => entry.runId ?? "")
+      ]),
+      runtimeCount: Math.max(runs.length, activeTaskCard.runId ? 1 : 0),
+      updateCount: liveFeed.length,
+      liveRunCount: status === "running" || status === "queued" ? 1 : 0,
+      artifactCount: createdFiles.length,
+      warningCount: warnings.length,
+      tokenUsage: aggregateTaskCardRuntimeTokenUsage(runs),
+      metadata: {
+        ...taskDetail.task.metadata,
+        resultPreview: finalText ?? (runtime && hasMeaningfulTaskCardRuntimeSubtitle(runtime) ? runtime.subtitle : null) ?? "Waiting for follow-up output.",
+        finalResponseText: finalText,
+        finalResponseRuntimeId: runtime?.id ?? null,
+        turnCount: Math.max(new Set(runs.map((entry) => entry.runId ?? entry.id)).size, activeTaskCard.runId ? 1 : 0),
+        sessionCount: uniqueStrings([activeTaskCard.sessionId ?? "", ...runs.map((entry) => entry.sessionId ?? "")]).length,
+        followUpCardNumber: activeTaskCard.cardNumber,
+        followUpMessage: activeTaskCard.message ?? null
+      }
+    },
+    runs,
+    outputs,
+    liveFeed,
+    createdFiles,
+    warnings,
+    integrity: {
+      ...taskDetail.integrity,
+      finalResponseText: finalText,
+      finalResponseSource: finalText ? "runtime" : "none",
+      outputFileCount: createdFiles.length,
+      transcriptTurnCount: outputs.reduce((sum, entry) => sum + entry.items.length, 0) || runs.length,
+      matchingTranscriptTurnCount: outputs.reduce((sum, entry) => sum + entry.items.length, 0),
+      toolNames,
+      issues: finalText ? [] : taskDetail.integrity.issues,
+      status: finalText ? "verified" : taskDetail.integrity.status
+    }
+  };
+}
+
+function resolveTaskCardRuntimes(
+  activeTaskCard: TaskCardInspectorContext,
+  runs: TaskDetailRecord["runs"]
+) {
+  const runId = activeTaskCard.runId?.trim();
+
+  if (runId) {
+    const matches = runs.filter((runtime) => runtime.runId === runId || runtime.id === runId || readRuntimeMetadataString(runtime.metadata, "runId") === runId);
+
+    if (matches.length > 0) {
+      return matches.sort((left, right) => runtimeTimestampMs(right.updatedAt) - runtimeTimestampMs(left.updatedAt));
+    }
+  }
+
+  const createdAtMs = activeTaskCard.createdAt ? Date.parse(activeTaskCard.createdAt) : Number.NaN;
+  const sessionId = activeTaskCard.sessionId?.trim();
+  return runs
+    .filter((runtime) => {
+      const runtimeUpdatedAt = runtimeTimestampMs(runtime.updatedAt);
+      const afterFollowUp = Number.isNaN(createdAtMs) || runtimeUpdatedAt === 0 || runtimeUpdatedAt >= createdAtMs - 5000;
+      const sameSession = !sessionId || runtime.sessionId === sessionId || runtime.key.includes(sessionId);
+      return afterFollowUp && sameSession;
+    })
+    .sort((left, right) => runtimeTimestampMs(right.updatedAt) - runtimeTimestampMs(left.updatedAt));
+}
+
+function resolveRepresentativeTaskCardRuntime(runs: TaskDetailRecord["runs"]) {
+  return (
+    runs.find((runtime) => hasMeaningfulTaskCardRuntimeSubtitle(runtime)) ??
+    runs.find((runtime) => runtime.status === "completed") ??
+    runs[0] ??
+    null
+  );
+}
+
+function resolveBestTaskCardOutput(outputs: RuntimeOutputRecord[]) {
+  return (
+    outputs.find((output) => output.finalText?.trim()) ??
+    outputs.find((output) => output.errorMessage?.trim()) ??
+    outputs[0] ??
+    null
+  );
+}
+
+function filterTaskCardFeed(
+  activeTaskCard: TaskCardInspectorContext,
+  runs: TaskDetailRecord["runs"],
+  liveFeed: TaskFeedEvent[]
+) {
+  if (runs.length > 0) {
+    const runtimeIds = new Set(runs.map((runtime) => runtime.id));
+    return liveFeed.filter((event) => Boolean(event.runtimeId && runtimeIds.has(event.runtimeId)));
+  }
+
+  const createdAtMs = activeTaskCard.createdAt ? Date.parse(activeTaskCard.createdAt) : Number.NaN;
+  if (Number.isNaN(createdAtMs)) {
+    return [];
+  }
+
+  return liveFeed.filter((event) => {
+    const eventMs = Date.parse(event.timestamp);
+    return !Number.isNaN(eventMs) && eventMs >= createdAtMs - 5000;
+  });
+}
+
+function createTaskCardOptimisticFeed(activeTaskCard: TaskCardInspectorContext): TaskFeedEvent {
+  return {
+    id: `follow-up-${activeTaskCard.cardNumber}-accepted`,
+    kind: "user",
+    timestamp: activeTaskCard.createdAt ?? new Date().toISOString(),
+    title: "Follow-up sent",
+    detail: activeTaskCard.message || "The follow-up was sent to the existing OpenClaw session.",
+    runtimeId: activeTaskCard.runId ?? undefined
+  };
+}
+
+function normalizeTaskCardStatus(
+  value: string | null | undefined,
+  output: RuntimeOutputRecord | null,
+  activeTaskCard: TaskCardInspectorContext
+): TaskDetailRecord["task"]["status"] {
+  switch (value) {
+    case "queued":
+    case "running":
+    case "idle":
+    case "completed":
+    case "stalled":
+    case "cancelled":
+      return value;
+    default:
+      return output?.finalText || activeTaskCard.summary ? "completed" : "running";
+  }
+}
+
+function runtimeTimestampMs(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return value > 1_000_000_000_000 ? value : value * 1000;
+}
+
+function readRuntimeMetadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function hasMeaningfulTaskCardRuntimeSubtitle(runtime: TaskDetailRecord["runs"][number]) {
+  const value = runtime.subtitle.trim().toLowerCase();
+  return Boolean(value && !["chat", "agent", "sessions.changed", "session.message", "openclaw runtime event", "gateway runtime event"].includes(value));
+}
+
+function aggregateTaskCardRuntimeTokenUsage(runs: TaskDetailRecord["runs"]) {
+  const usages = runs
+    .map((runtime) => runtime.tokenUsage)
+    .filter((usage): usage is NonNullable<TaskDetailRecord["runs"][number]["tokenUsage"]> => Boolean(usage));
+
+  if (usages.length === 0) {
+    return undefined;
+  }
+
+  return usages.reduce(
+    (total, usage) => ({
+      input: total.input + (usage?.input ?? 0),
+      output: total.output + (usage?.output ?? 0),
+      total: total.total + (usage?.total ?? 0),
+      cacheRead: (total.cacheRead ?? 0) + (usage?.cacheRead ?? 0)
+    }),
+    { input: 0, output: 0, total: 0, cacheRead: 0 }
+  );
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function GatewayOverview({

@@ -35,7 +35,7 @@ import { resolveSuggestedAgentModelId } from "@/components/mission-control/creat
 import dynamic from "next/dynamic";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
-import type { AgentDetailFocus } from "@/components/mission-control/canvas-types";
+import type { AgentDetailFocus, TaskCardInspectorContext } from "@/components/mission-control/canvas-types";
 import { resolveTaskWorkspaceId } from "@/components/mission-control/canvas.graph";
 import type { OptimisticMissionTask } from "@/components/mission-control/mission-control-shell.utils";
 import {
@@ -219,6 +219,7 @@ export function MissionControlShell({
   const [isComposerActive, setIsComposerActive] = useState(false);
   const [composerViewportResetNonce, setComposerViewportResetNonce] = useState(0);
   const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTabId>("overview");
+  const [activeTaskCardContext, setActiveTaskCardContext] = useState<TaskCardInspectorContext | null>(null);
   const [lastMission, setLastMission] = useState<MissionResponse | null>(null);
   const [recentDispatchId, setRecentDispatchId] = useState<string | null>(null);
   const [optimisticMissionTasks, setOptimisticMissionTasks] = useState<OptimisticMissionTask[]>([]);
@@ -328,6 +329,7 @@ export function MissionControlShell({
       setSelectedNodeId(nodeId);
       setActiveInspectorTab(tab);
       setSelectedAgentDetailFocus(agentDetailFocus);
+      setActiveTaskCardContext((current) => (current?.taskId === nodeId ? current : null));
     },
     []
   );
@@ -3444,9 +3446,15 @@ export function MissionControlShell({
               setTaskAbortRunState("idle");
               setTaskAbortMessage(null);
             }}
-            onInspectTask={(task, target) => {
+            onInspectTask={(task, target, activeCard) => {
+              setActiveTaskCardContext(activeCard ?? null);
               selectNode(task.id, target);
               setIsInspectorOpen(true);
+            }}
+            onActiveTaskCardChange={(task, activeCard) => {
+              if (selectedNodeId === task.id) {
+                setActiveTaskCardContext(activeCard);
+              }
             }}
             onReviewTask={openTaskReview}
             onSelectNode={(nodeId) => {
@@ -3548,6 +3556,7 @@ export function MissionControlShell({
             snapshot={uiSnapshot}
             surfaceTheme={surfaceTheme}
             selectedNodeId={selectedNodeId}
+            activeTaskCard={activeTaskCardContext}
             agentDetailFocus={selectedAgentDetailFocus}
             lastMission={lastMission}
             onRefresh={refresh}

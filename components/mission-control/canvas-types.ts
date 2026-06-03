@@ -105,13 +105,26 @@ export type TaskNodeData = Record<string, unknown> & {
   pendingCreation?: boolean;
   justCreated?: boolean;
   locked?: boolean;
-  onInspect?: (task: WorkItemRecord, target: "overview" | "output" | "files") => void;
+  onInspect?: (task: WorkItemRecord, target: "overview" | "output" | "files", activeCard?: TaskCardInspectorContext | null) => void;
+  onActiveCardChange?: (task: WorkItemRecord, activeCard: TaskCardInspectorContext | null) => void;
   onReviewTask?: (task: WorkItemRecord) => void;
   onReply?: (task: WorkItemRecord) => void;
   onCopyPrompt?: (task: WorkItemRecord) => void;
   onHide?: (task: WorkItemRecord) => void;
   onToggleLock?: (task: WorkItemRecord) => void;
   onAbortTask?: (task: WorkItemRecord) => void;
+};
+
+export type TaskCardInspectorContext = {
+  taskId: string;
+  cardNumber: number;
+  followUpIndex: number | null;
+  message?: string | null;
+  runId?: string | null;
+  sessionId?: string | null;
+  status?: string | null;
+  summary?: string | null;
+  createdAt?: string | null;
 };
 
 export type ModelNodeData = Record<string, unknown> & {

@@ -32,9 +32,10 @@ export async function buildTaskDetailFromTaskRecord(
   snapshot: MissionControlSnapshot,
   dispatchRecord: MissionDispatchRecord | null
 ): Promise<TaskDetailRecord> {
-  const runs = task.runtimeIds
+  const directRuns = task.runtimeIds
     .map((runtimeId) => snapshot.runtimes.find((runtime) => runtime.id === runtimeId))
-    .filter((runtime): runtime is RuntimeRecord => Boolean(runtime))
+    .filter((runtime): runtime is RuntimeRecord => Boolean(runtime));
+  const runs = collectTaskDetailRuns(task, directRuns, snapshot.runtimes)
     .sort(sortRuntimesByUpdatedAtDesc);
 
   return buildTaskDetailFromResolvedRuns(task, runs, snapshot, dispatchRecord);
@@ -78,7 +79,12 @@ async function buildTaskDetailFromResolvedRuns(
       runs.flatMap((runtime) => extractWarningsFromRuntimeMetadata(runtime))
     )
   );
-  const reconciledTask = dispatchRecord ? reconcileTaskRecordWithDispatchRecord(task, dispatchRecord) : task;
+  const reconciledTask = reconcileTaskRecordWithRuns(
+    dispatchRecord ? reconcileTaskRecordWithDispatchRecord(task, dispatchRecord) : task,
+    runs,
+    createdFiles,
+    warnings
+  );
   const enrichedTask = enrichTaskRecordWithRuntimeOutputs(reconciledTask, outputs, createdFiles, warnings);
   const bootstrapFeed = await buildMissionDispatchFeedFromDomain(enrichedTask, dispatchRecord, snapshot);
   const runtimeFeed = buildTaskFeedFromDomain(enrichedTask, runs, outputByRuntimeId, snapshot);
@@ -131,6 +137,62 @@ function enrichTaskRecordWithRuntimeOutputs(
       finalResponseRuntimeId: finalOutput?.runtimeId ?? null
     }
   };
+}
+
+function reconcileTaskRecordWithRuns(
+  task: TaskRecord,
+  runs: RuntimeRecord[],
+  createdFiles: ReturnType<typeof dedupeCreatedFiles>,
+  warnings: string[]
+): TaskRecord {
+  const sortedRuns = [...runs].sort(sortRuntimesByUpdatedAtDesc);
+  const latestRuntime = sortedRuns[0] ?? null;
+  const runtimeIds = sortedRuns.map((runtime) => runtime.id);
+  const runIds = uniqueStrings(sortedRuns.flatMap((runtime) => (runtime.runId ? [runtime.runId] : [])));
+  const sessionIds = uniqueStrings(sortedRuns.flatMap((runtime) => (runtime.sessionId ? [runtime.sessionId] : [])));
+
+  return {
+    ...task,
+    updatedAt: latestRuntime?.updatedAt ?? task.updatedAt,
+    ageMs: latestRuntime?.ageMs ?? task.ageMs,
+    primaryRuntimeId: task.primaryRuntimeId && runtimeIds.includes(task.primaryRuntimeId)
+      ? task.primaryRuntimeId
+      : latestRuntime?.id ?? task.primaryRuntimeId,
+    runtimeIds,
+    runIds,
+    sessionIds,
+    runtimeCount: runtimeIds.length,
+    updateCount: sortedRuns.filter((runtime) => runtime.source === "turn").length,
+    liveRunCount: sortedRuns.filter((runtime) => runtime.status === "running" || runtime.status === "queued").length,
+    artifactCount: createdFiles.length,
+    warningCount: warnings.length,
+    tokenUsage: aggregateTaskDetailRuntimeTokenUsage(sortedRuns) ?? task.tokenUsage,
+    metadata: {
+      ...task.metadata,
+      turnCount: runIds.length || task.metadata.turnCount,
+      sessionCount: sessionIds.length || task.metadata.sessionCount
+    }
+  };
+}
+
+function aggregateTaskDetailRuntimeTokenUsage(runs: RuntimeRecord[]) {
+  const usages = runs
+    .map((runtime) => runtime.tokenUsage)
+    .filter((usage): usage is NonNullable<RuntimeRecord["tokenUsage"]> => Boolean(usage));
+
+  if (usages.length === 0) {
+    return undefined;
+  }
+
+  return usages.reduce(
+    (total, usage) => ({
+      input: total.input + (usage?.input ?? 0),
+      output: total.output + (usage?.output ?? 0),
+      total: total.total + (usage?.total ?? 0),
+      cacheRead: (total.cacheRead ?? 0) + (usage?.cacheRead ?? 0)
+    }),
+    { input: 0, output: 0, total: 0, cacheRead: 0 }
+  );
 }
 
 function resolveLatestRuntimeFinalOutput(
@@ -199,6 +261,68 @@ function matchesDispatchRecordRuntime(runtime: RuntimeRecord, dispatchRecord: Mi
   }
 
   return false;
+}
+
+function collectTaskDetailRuns(
+  task: TaskRecord,
+  directRuns: RuntimeRecord[],
+  allRuntimes: RuntimeRecord[]
+) {
+  const byId = new Map(directRuns.map((runtime) => [runtime.id, runtime]));
+  const dispatchId = task.dispatchId?.trim() || null;
+  const sessionIds = new Set(task.sessionIds.map((value) => value.trim()).filter(Boolean));
+  const runIds = new Set(task.runIds.map((value) => value.trim()).filter(Boolean));
+  const agentIds = new Set(task.agentIds.map((value) => value.trim()).filter(Boolean));
+  if (task.primaryAgentId) {
+    agentIds.add(task.primaryAgentId);
+  }
+
+  for (const runtime of allRuntimes) {
+    if (byId.has(runtime.id)) {
+      continue;
+    }
+
+    if (runtimeMatchesTaskContext(runtime, { dispatchId, sessionIds, runIds, agentIds })) {
+      byId.set(runtime.id, runtime);
+    }
+  }
+
+  return [...byId.values()];
+}
+
+function runtimeMatchesTaskContext(
+  runtime: RuntimeRecord,
+  context: {
+    dispatchId: string | null;
+    sessionIds: Set<string>;
+    runIds: Set<string>;
+    agentIds: Set<string>;
+  }
+) {
+  const runtimeDispatchId = readRuntimeMetadataString(runtime, "dispatchId");
+  if (context.dispatchId && runtimeDispatchId === context.dispatchId) {
+    return true;
+  }
+
+  if (runtime.runId && context.runIds.has(runtime.runId)) {
+    return true;
+  }
+
+  const sessionId = runtime.sessionId?.trim();
+  if (!sessionId || !context.sessionIds.has(sessionId)) {
+    return false;
+  }
+
+  if (context.agentIds.size === 0) {
+    return true;
+  }
+
+  return Boolean(runtime.agentId && context.agentIds.has(runtime.agentId));
+}
+
+function readRuntimeMetadataString(runtime: RuntimeRecord, key: string) {
+  const value = runtime.metadata[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function uniqueStrings(values: string[]) {

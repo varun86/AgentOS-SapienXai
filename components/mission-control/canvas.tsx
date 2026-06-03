@@ -40,7 +40,8 @@ import type {
   CanvasNode,
   FocusTaskAnchor,
   PersistedNodePositionMap,
-  SpringVelocity
+  SpringVelocity,
+  TaskNodeData
 } from "@/components/mission-control/canvas-types";
 import { resolveRelativeTimeReferenceMs } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, WorkItemRecord } from "@/lib/agentos/contracts";
@@ -80,6 +81,7 @@ export function MissionCanvas({
   onToggleTaskLock,
   onAbortTask,
   onInspectTask,
+  onActiveTaskCardChange,
   onReviewTask,
   onSelectNode,
   onCanvasNodePointerDownCapture,
@@ -115,7 +117,8 @@ export function MissionCanvas({
   onHideTask: (task: WorkItemRecord) => void;
   onToggleTaskLock: (task: WorkItemRecord) => void;
   onAbortTask: (task: WorkItemRecord) => void;
-  onInspectTask: (task: WorkItemRecord, target: "overview" | "output" | "files") => void;
+  onInspectTask: NonNullable<TaskNodeData["onInspect"]>;
+  onActiveTaskCardChange: NonNullable<TaskNodeData["onActiveCardChange"]>;
   onReviewTask: (task: WorkItemRecord) => void;
   onSelectNode: (nodeId: string) => void;
   onCanvasNodePointerDownCapture?: () => void;
@@ -172,6 +175,7 @@ export function MissionCanvas({
     onToggleTaskLock,
     onAbortTask,
     onInspectTask,
+    onActiveTaskCardChange,
     onReviewTask,
     emptyPersistedNodePositions
   );
@@ -257,6 +261,7 @@ export function MissionCanvas({
       onToggleTaskLock,
       onAbortTask,
       onInspectTask,
+      onActiveTaskCardChange,
       onReviewTask,
       persistedNodePositionsRef.current
     );
@@ -303,6 +308,7 @@ export function MissionCanvas({
     onToggleTaskLock,
     onAbortTask,
     onInspectTask,
+    onActiveTaskCardChange,
     onReviewTask,
     relativeTimeReferenceMs,
     canvasScopeKey,
