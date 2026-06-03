@@ -218,6 +218,15 @@ export function SearchToolbar({
   );
 }
 
+export function OperationsPageLayout({ main, inspector }: { main: ReactNode; inspector: ReactNode }) {
+  return (
+    <div className={cn("grid gap-3", inspector ? "xl:grid-cols-[minmax(0,1fr)_320px]" : "xl:grid-cols-1")}>
+      <div className="flex min-w-0 flex-col gap-3">{main}</div>
+      {inspector}
+    </div>
+  );
+}
+
 export function ToolbarButton({
   icon: Icon = SlidersHorizontal,
   label,
