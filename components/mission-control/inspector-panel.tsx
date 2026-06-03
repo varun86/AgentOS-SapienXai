@@ -28,6 +28,10 @@ import {
   resolveTaskReviewBadgeLabel,
   resolveTaskReviewSummary
 } from "@/components/mission-control/task-review-state";
+import {
+  useInspectorRuntimeOutput,
+  useInspectorTaskDetailStream
+} from "@/components/mission-control/use-inspector-panel-data";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge as UiBadge, type BadgeProps } from "@/components/ui/badge";
@@ -57,7 +61,6 @@ import type {
   RuntimeOutputRecord,
   TaskDetailRecord,
   TaskFeedEvent,
-  TaskDetailStreamEvent,
   WorkItemRecord,
   WorkspaceResourceState
 } from "@/lib/agentos/contracts";
@@ -133,20 +136,17 @@ function InspectorPanelContent({
   const selectedTaskId = selectedTask?.id ?? null;
   const selectedTaskDispatchId =
     selectedTask && typeof selectedTask.dispatchId === "string" ? selectedTask.dispatchId : null;
-  const [runtimeOutput, setRuntimeOutput] = useState<RuntimeOutputRecord | null>(null);
-  const [runtimeOutputError, setRuntimeOutputError] = useState<{
-    runtimeId: string;
-    message: string;
-  } | null>(null);
-  const [taskDetail, setTaskDetail] = useState<TaskDetailRecord | null>(null);
-  const [taskDetailError, setTaskDetailError] = useState<{
-    taskId: string;
-    message: string;
-  } | null>(null);
+  const { runtimeOutput, runtimeOutputError } = useInspectorRuntimeOutput(selectedRuntimeId);
   const optimisticTaskDetail = useMemo(
     () => (isOptimisticTask && selectedTask ? createOptimisticTaskDetail(selectedTask) : null),
     [isOptimisticTask, selectedTask]
   );
+  const canStreamTaskDetail = Boolean(selectedTaskId) && (!isOptimisticTask || Boolean(selectedTaskDispatchId));
+  const { taskDetail, taskDetailError } = useInspectorTaskDetailStream({
+    selectedTaskId,
+    canStreamTaskDetail,
+    selectedTaskDispatchId
+  });
   const resolvedRuntimeOutput =
     runtimeOutput && runtimeOutput.runtimeId === selectedRuntimeId ? runtimeOutput : null;
   const resolvedRuntimeOutputError =
@@ -162,7 +162,6 @@ function InspectorPanelContent({
   const resolvedTaskDetailError =
     taskDetailError?.taskId === selectedTaskId ? taskDetailError.message : null;
   const effectiveTaskDetail = resolvedTaskDetail ?? optimisticTaskDetail;
-  const canStreamTaskDetail = Boolean(selectedTaskId) && (!isOptimisticTask || Boolean(selectedTaskDispatchId));
   const taskDetailLoading =
     canStreamTaskDetail && !resolvedTaskDetail && !resolvedTaskDetailError;
   const runtimeOutputLoading =
@@ -209,108 +208,6 @@ function InspectorPanelContent({
       ] satisfies Array<{ id: InspectorPanelTab; label: string; icon: LucideIcon; enabled: boolean }>,
     [outputTabLabel, showChatTab, showFilesTab, showOutputTab]
   );
-
-  useEffect(() => {
-    if (!selectedRuntimeId) {
-      return;
-    }
-
-    const controller = new AbortController();
-
-    fetch(`/api/runtimes/${encodeURIComponent(selectedRuntimeId)}`, { signal: controller.signal })
-      .then(async (response) => {
-        const payload = (await response.json()) as RuntimeOutputRecord & { error?: string };
-
-        if (!response.ok) {
-          throw new Error(payload.error || "Unable to load runtime output.");
-        }
-
-        setRuntimeOutput(payload);
-        setRuntimeOutputError(null);
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        setRuntimeOutput(null);
-        setRuntimeOutputError({
-          runtimeId: selectedRuntimeId,
-          message: error instanceof Error ? error.message : "Unable to load runtime output."
-        });
-      });
-
-    return () => controller.abort();
-  }, [selectedRuntimeId]);
-
-  useEffect(() => {
-    if (!selectedTaskId || !canStreamTaskDetail) {
-      return;
-    }
-
-    const searchParams = new URLSearchParams();
-    if (selectedTaskDispatchId) {
-      searchParams.set("dispatchId", selectedTaskDispatchId);
-    }
-    const source = new EventSource(
-      `/api/tasks/${encodeURIComponent(selectedTaskId)}/stream${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`
-    );
-
-    const handleTask = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as TaskDetailStreamEvent;
-
-        if (payload.type !== "task") {
-          return;
-        }
-
-        setTaskDetail(payload.detail);
-        setTaskDetailError(null);
-      } catch (error) {
-        setTaskDetailError({
-          taskId: selectedTaskId,
-          message: error instanceof Error ? error.message : "Unable to parse task feed."
-        });
-      }
-    };
-
-    const handleTaskError = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as TaskDetailStreamEvent;
-
-        if (payload.type === "error") {
-          setTaskDetailError({
-            taskId: selectedTaskId,
-            message: payload.error
-          });
-        }
-      } catch {
-        setTaskDetailError({
-          taskId: selectedTaskId,
-          message: "Unable to load task detail."
-        });
-      }
-    };
-
-    source.addEventListener("task", handleTask as EventListener);
-    source.addEventListener("task-error", handleTaskError as EventListener);
-    source.onerror = () => {
-      setTaskDetailError((current) =>
-        current?.taskId === selectedTaskId
-          ? current
-          : {
-              taskId: selectedTaskId,
-              message: "Task feed disconnected. Reconnecting…"
-            }
-      );
-    };
-
-    return () => {
-      source.removeEventListener("task", handleTask as EventListener);
-      source.removeEventListener("task-error", handleTaskError as EventListener);
-      source.close();
-    };
-  }, [selectedTaskId, canStreamTaskDetail, selectedTaskDispatchId]);
 
   return (
     <div className="panel-surface panel-glow flex h-full flex-row-reverse overflow-hidden rounded-none border border-r-0 border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">

@@ -20,13 +20,14 @@ import { MissionSidebar } from "@/components/mission-control/sidebar";
 import { TaskReviewDialog } from "@/components/mission-control/task-review-dialog";
 import {
   applyTaskReviewStateToSnapshot,
-  createTaskReviewResolution,
-  parseTaskReviewState,
   resolveTaskReviewKey,
-  taskReviewStateStorageKey,
-  type TaskReviewStateMap,
-  type TaskReviewStatus
+  taskReviewStateStorageKey
 } from "@/components/mission-control/task-review-state";
+import {
+  missionControlPreferenceStorageKeys,
+  useMissionControlPreferences
+} from "@/components/mission-control/use-mission-control-preferences";
+import { useTaskReviewWorkflow } from "@/components/mission-control/use-task-review-workflow";
 import { WorkspaceChannelsDialog } from "@/components/mission-control/workspace-channels-dialog";
 import { WorkspaceContextFilesDialog } from "@/components/mission-control/workspace-context-files-dialog";
 import { WorkspaceWizardDialog } from "@/components/mission-control/workspace-wizard/workspace-wizard-dialog";
@@ -145,14 +146,7 @@ type AgentModelRequest = {
   requestId: string;
   agentId: string;
 };
-type TaskReviewRequest = {
-  requestId: string;
-  taskId: string;
-  taskKey: string;
-  fallbackTask: WorkItemRecord;
-};
 
-type SurfaceTheme = "dark" | "light";
 type UpdateRunState = "idle" | "running" | "success" | "error";
 type TaskAbortState = "idle" | "running" | "error";
 type ResetPreviewState = "idle" | "loading" | "ready" | "error";
@@ -166,10 +160,6 @@ type ModelOnboardingRunOptions = {
 };
 type InspectorTabId = "overview" | "chat" | "output" | "files" | "raw";
 
-const surfaceThemeStorageKey = "mission-control-surface-theme";
-const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
-const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
-const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
 const modelAuthTerminalAutoOpenCooldownMs = 2 * 60 * 1000;
 const modelAuthStatusPollDelaysMs = [4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
 const launchpadWorkspaceHandoffPollDelaysMs = [0, 800, 1_200, 1_800, 2_600, 3_600, 5_000, 6_500];
@@ -209,42 +199,6 @@ function wait(ms: number) {
   });
 }
 
-function buildTaskReviewContinuationPrompt(task: WorkItemRecord, capturedOutput: string) {
-  const originalPrompt = limitTaskReviewMessageSection(resolveTaskPrompt(task), 3200);
-  const output = limitTaskReviewMessageSection(capturedOutput, 7600);
-
-  return [
-    "Continue this task from the last captured output. Finish the remaining work and verify the result.",
-    "",
-    "Original mission:",
-    originalPrompt,
-    output ? "" : null,
-    output ? "Last captured output:" : null,
-    output || null
-  ]
-    .filter((entry): entry is string => typeof entry === "string")
-    .join("\n");
-}
-
-function limitTaskReviewMessageSection(value: string, maxLength: number) {
-  const normalized = value.trim();
-
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength).trimEnd()}\n\n[truncated for task continuation]`;
-}
-
-function buildTaskReviewRetryPrompt(task: WorkItemRecord) {
-  return [
-    "Retry this task from the original mission. Do not assume the previous stalled runtime completed.",
-    "",
-    "Original mission:",
-    resolveTaskPrompt(task)
-  ].join("\n");
-}
-
 export function MissionControlShell({
   initialSnapshot,
   mode = "mission"
@@ -269,17 +223,25 @@ export function MissionControlShell({
   const [recentDispatchId, setRecentDispatchId] = useState<string | null>(null);
   const [optimisticMissionTasks, setOptimisticMissionTasks] = useState<OptimisticMissionTask[]>([]);
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
-  const [hiddenRuntimeIds, setHiddenRuntimeIds] = useState<string[]>([]);
-  const [hiddenTaskKeys, setHiddenTaskKeys] = useState<string[]>([]);
-  const [lockedTaskKeys, setLockedTaskKeys] = useState<string[]>([]);
+  const {
+    surfaceTheme,
+    setSurfaceTheme,
+    hiddenRuntimeIds,
+    setHiddenRuntimeIds,
+    hiddenTaskKeys,
+    setHiddenTaskKeys,
+    lockedTaskKeys,
+    setLockedTaskKeys,
+    safeHiddenRuntimeIds,
+    safeHiddenTaskKeys,
+    safeLockedTaskKeys,
+    clearPreferenceState
+  } = useMissionControlPreferences();
   const [agentActionRequest, setAgentActionRequest] = useState<AgentActionRequest | null>(null);
   const [capabilityEditorRequest, setCapabilityEditorRequest] = useState<CapabilityEditorRequest | null>(null);
   const [taskAbortRequest, setTaskAbortRequest] = useState<WorkItemRecord | null>(null);
   const [taskAbortRunState, setTaskAbortRunState] = useState<TaskAbortState>("idle");
   const [taskAbortMessage, setTaskAbortMessage] = useState<string | null>(null);
-  const [taskReviewRequest, setTaskReviewRequest] = useState<TaskReviewRequest | null>(null);
-  const [taskReviewState, setTaskReviewState] = useState<TaskReviewStateMap>({});
-  const [hasHydratedTaskReviewState, setHasHydratedTaskReviewState] = useState(false);
   const missionDispatchAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [recentCreatedAgentId, setRecentCreatedAgentId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -342,7 +304,6 @@ export function MissionControlShell({
   const [hasSeenMissionReady, setHasSeenMissionReady] = useState(false);
   const [gatewayControlAction, setGatewayControlAction] = useState<GatewayControlAction | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
-  const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
   const [isWorkspaceWizardOpen, setIsWorkspaceWizardOpen] = useState(false);
   const [workspaceWizardInitialMode, setWorkspaceWizardInitialMode] = useState<"basic" | "advanced">("basic");
   const [workspaceWizardEditId, setWorkspaceWizardEditId] = useState<string | null>(null);
@@ -362,6 +323,33 @@ export function MissionControlShell({
   const modelAuthTerminalAutoOpenRef = useRef<{ command: string; openedAt: number } | null>(null);
   const modelAuthStatusPollRunRef = useRef(0);
   const updateOperationToastIdRef = useRef<string | number | null>(null);
+  const selectNode = useCallback(
+    (nodeId: string | null, tab: InspectorTabId = "overview", agentDetailFocus: AgentDetailFocus | null = null) => {
+      setSelectedNodeId(nodeId);
+      setActiveInspectorTab(tab);
+      setSelectedAgentDetailFocus(agentDetailFocus);
+    },
+    []
+  );
+  const {
+    taskReviewRequest,
+    taskReviewState,
+    clearTaskReviewState,
+    openTaskReview,
+    closeTaskReview,
+    acceptTaskReview,
+    dismissTaskReview,
+    continueTaskReview,
+    retryTaskReview,
+    openTaskReviewEvidence
+  } = useTaskReviewWorkflow({
+    selectNode,
+    setIsInspectorOpen,
+    setComposeIntent: (intent) => setComposeIntent(intent),
+    setComposerTargetAgentId,
+    setIsComposerActive,
+    refreshSnapshot
+  });
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
   const uiSnapshot = useMemo(() => {
@@ -380,27 +368,6 @@ export function MissionControlShell({
       ) ?? taskReviewRequest.fallbackTask
     );
   }, [taskReviewRequest, uiSnapshot.tasks]);
-  const safeHiddenRuntimeIds = useMemo(
-    () => (Array.isArray(hiddenRuntimeIds) ? hiddenRuntimeIds : []),
-    [hiddenRuntimeIds]
-  );
-  const safeHiddenTaskKeys = useMemo(
-    () => (Array.isArray(hiddenTaskKeys) ? hiddenTaskKeys : []),
-    [hiddenTaskKeys]
-  );
-  const safeLockedTaskKeys = useMemo(
-    () => (Array.isArray(lockedTaskKeys) ? lockedTaskKeys : []),
-    [lockedTaskKeys]
-  );
-
-  const selectNode = useCallback(
-    (nodeId: string | null, tab: InspectorTabId = "overview", agentDetailFocus: AgentDetailFocus | null = null) => {
-      setSelectedNodeId(nodeId);
-      setActiveInspectorTab(tab);
-      setSelectedAgentDetailFocus(agentDetailFocus);
-    },
-    []
-  );
   const openWorkspaceOnCanvas = useCallback(
     (workspaceId: string | null, options: { markPending?: boolean } = {}) => {
       if (options.markPending && workspaceId) {
@@ -482,7 +449,15 @@ export function MissionControlShell({
         Array.from(new Set([...current, ...workspaceRuntimeIds]))
       );
     },
-    [uiSnapshot.agents, uiSnapshot.tasks, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys]
+    [
+      uiSnapshot.agents,
+      uiSnapshot.tasks,
+      safeHiddenRuntimeIds,
+      safeHiddenTaskKeys,
+      safeLockedTaskKeys,
+      setHiddenRuntimeIds,
+      setHiddenTaskKeys
+    ]
   );
 
   const handleFocusAgent = useCallback(
@@ -938,72 +913,6 @@ export function MissionControlShell({
       setFocusedAgentId(null);
     }
   }, [focusedAgentId, uiSnapshot.agents]);
-
-  useEffect(() => {
-    const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
-    const storedHiddenRuntimeIds = globalThis.localStorage?.getItem(hiddenRuntimeIdsStorageKey);
-    const storedHiddenTaskKeys = globalThis.localStorage?.getItem(hiddenTaskKeysStorageKey);
-    const storedLockedTaskKeys = globalThis.localStorage?.getItem(lockedTaskKeysStorageKey);
-    const storedTaskReviewState = globalThis.localStorage?.getItem(taskReviewStateStorageKey);
-
-    if (storedTheme === "dark" || storedTheme === "light") {
-      setSurfaceTheme(storedTheme);
-    }
-
-    if (storedHiddenRuntimeIds) {
-      try {
-        const parsed = JSON.parse(storedHiddenRuntimeIds) as unknown;
-        if (Array.isArray(parsed)) {
-          setHiddenRuntimeIds(parsed.filter((entry): entry is string => typeof entry === "string"));
-        }
-      } catch {}
-    }
-
-    if (storedHiddenTaskKeys) {
-      try {
-        const parsed = JSON.parse(storedHiddenTaskKeys) as unknown;
-        if (Array.isArray(parsed)) {
-          setHiddenTaskKeys(parsed.filter((entry): entry is string => typeof entry === "string"));
-        }
-      } catch {}
-    }
-
-    if (storedLockedTaskKeys) {
-      try {
-        const parsed = JSON.parse(storedLockedTaskKeys) as unknown;
-        if (Array.isArray(parsed)) {
-          setLockedTaskKeys(parsed.filter((entry): entry is string => typeof entry === "string"));
-        }
-      } catch {}
-    }
-
-    setTaskReviewState(parseTaskReviewState(storedTaskReviewState ?? null));
-    setHasHydratedTaskReviewState(true);
-  }, []);
-
-  useEffect(() => {
-    globalThis.localStorage?.setItem(surfaceThemeStorageKey, surfaceTheme);
-  }, [surfaceTheme]);
-
-  useEffect(() => {
-    globalThis.localStorage?.setItem(hiddenRuntimeIdsStorageKey, JSON.stringify(hiddenRuntimeIds));
-  }, [hiddenRuntimeIds]);
-
-  useEffect(() => {
-    globalThis.localStorage?.setItem(hiddenTaskKeysStorageKey, JSON.stringify(hiddenTaskKeys));
-  }, [hiddenTaskKeys]);
-
-  useEffect(() => {
-    globalThis.localStorage?.setItem(lockedTaskKeysStorageKey, JSON.stringify(lockedTaskKeys));
-  }, [lockedTaskKeys]);
-
-  useEffect(() => {
-    if (!hasHydratedTaskReviewState) {
-      return;
-    }
-
-    globalThis.localStorage?.setItem(taskReviewStateStorageKey, JSON.stringify(taskReviewState));
-  }, [hasHydratedTaskReviewState, taskReviewState]);
 
   useEffect(() => {
     if (!recentDispatchId) {
@@ -2779,10 +2688,10 @@ export function MissionControlShell({
     }
 
     const exactKeys = [
-      "mission-control-surface-theme",
-      "mission-control-hidden-runtime-ids",
-      "mission-control-hidden-task-keys",
-      "mission-control-locked-task-keys",
+      missionControlPreferenceStorageKeys.surfaceTheme,
+      missionControlPreferenceStorageKeys.hiddenRuntimeIds,
+      missionControlPreferenceStorageKeys.hiddenTaskKeys,
+      missionControlPreferenceStorageKeys.lockedTaskKeys,
       "mission-control-workspace-plan-id",
       "mission-control-recent-prompts",
       "mission-control-node-positions",
@@ -2812,10 +2721,8 @@ export function MissionControlShell({
       }
     }
 
-    setHiddenRuntimeIds([]);
-    setHiddenTaskKeys([]);
-    setLockedTaskKeys([]);
-    setTaskReviewState({});
+    clearPreferenceState();
+    clearTaskReviewState();
   };
 
   const resetResetDialogState = () => {
@@ -3060,127 +2967,6 @@ export function MissionControlShell({
         setOnboardingStage(resolveEffectiveWizardStage("models", canContinueToModels));
       });
   };
-
-  const openTaskReview = useCallback(
-    (task: WorkItemRecord) => {
-      selectNode(task.id, "output");
-      setTaskReviewRequest({
-        requestId: `task-review:${task.id}:${Date.now()}`,
-        taskId: task.id,
-        taskKey: resolveTaskReviewKey(task),
-        fallbackTask: task
-      });
-    },
-    [selectNode]
-  );
-
-  const recordTaskReviewResolution = useCallback(
-    (task: WorkItemRecord, status: TaskReviewStatus, action: string) => {
-      const resolution = createTaskReviewResolution(task, status, action);
-
-      setTaskReviewState((current) => ({
-        ...current,
-        [resolution.taskKey]: resolution
-      }));
-
-      return resolution;
-    },
-    []
-  );
-
-  const closeTaskReview = useCallback(() => {
-    setTaskReviewRequest(null);
-  }, []);
-
-  const acceptTaskReview = useCallback(
-    (task: WorkItemRecord) => {
-      recordTaskReviewResolution(task, "accepted", "Accepted result");
-      closeTaskReview();
-      toast.success("Task result accepted.", {
-        description: "The review warning is marked as handled for this workspace."
-      });
-    },
-    [closeTaskReview, recordTaskReviewResolution]
-  );
-
-  const dismissTaskReview = useCallback(
-    (task: WorkItemRecord) => {
-      recordTaskReviewResolution(task, "dismissed", "Dismissed review");
-      closeTaskReview();
-      toast.message("Task review dismissed.", {
-        description: "The warning remains available in the task evidence."
-      });
-    },
-    [closeTaskReview, recordTaskReviewResolution]
-  );
-
-  const continueTaskReview = useCallback(
-    async (task: WorkItemRecord, capturedOutput: string) => {
-      const message = buildTaskReviewContinuationPrompt(task, capturedOutput);
-
-      try {
-        const response = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/control`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            action: "continue",
-            message,
-            dispatchId: task.dispatchId ?? null
-          })
-        });
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-
-        if (!response.ok) {
-          throw new Error(payload?.error || "Unable to continue this task.");
-        }
-
-        recordTaskReviewResolution(task, "continued", "Sent continuation");
-        selectNode(task.id, "output");
-        setIsInspectorOpen(true);
-        closeTaskReview();
-        void refreshSnapshot({ force: true });
-        toast.success("Task continuation sent.", {
-          description: "AgentOS will keep the follow-up attached to the existing task card."
-        });
-      } catch (error) {
-        toast.error("Task continuation failed.", {
-          description: error instanceof Error ? error.message : "Unable to continue this task."
-        });
-      }
-    },
-    [closeTaskReview, recordTaskReviewResolution, refreshSnapshot, selectNode]
-  );
-
-  const retryTaskReview = useCallback(
-    (task: WorkItemRecord) => {
-      recordTaskReviewResolution(task, "retried", "Drafted retry");
-      setComposeIntent({
-        id: `review-retry:${task.id}:${Date.now()}`,
-        mission: buildTaskReviewRetryPrompt(task),
-        agentId: task.primaryAgentId,
-        sourceKind: "reply",
-        sourceLabel: task.title.trim() || "Task review"
-      });
-      setComposerTargetAgentId(task.primaryAgentId ?? null);
-      setIsComposerActive(true);
-      closeTaskReview();
-      toast.success("Retry draft prepared.", {
-        description: "Review the mission input, then send it when ready."
-      });
-    },
-    [closeTaskReview, recordTaskReviewResolution]
-  );
-
-  const openTaskReviewEvidence = useCallback(
-    (task: WorkItemRecord, target: InspectorTabId) => {
-      selectNode(task.id, target);
-      setIsInspectorOpen(true);
-      closeTaskReview();
-    },
-    [closeTaskReview, selectNode]
-  );
 
   const settingsPanelProps: MissionControlShellSettingsPanelProps = {
     snapshot,

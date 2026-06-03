@@ -6,4 +6,5 @@
 /packages/agentos/bundle
 /packages/agentos/*.tgz
 /deliverables
+package-lock.json
 tsconfig.tsbuildinfo
