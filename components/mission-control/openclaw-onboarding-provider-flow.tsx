@@ -27,6 +27,7 @@ import {
   modelProviderRegistry
 } from "@/lib/openclaw/model-provider-registry";
 import { getModelProviderAdapter } from "@/lib/openclaw/model-provider-adapters";
+import { modelMatchesAddModelsProvider } from "@/lib/openclaw/domains/model-provider-connection";
 import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 import { OPENCLAW_RECOMMENDED_VERSION } from "@/lib/openclaw/versions";
 import { cn } from "@/lib/utils";
@@ -182,6 +183,7 @@ export function OpenClawOnboardingProviderFlow({
         ? activeDraft.statusMessage || `Connecting ${activeDescriptor.shortLabel}...`
         : activeDraft.statusMessage || `Checking ${activeDescriptor.shortLabel}...`;
   const canShowSearch = activeModels.length > 6 || Boolean(activeDescriptor.searchPlaceholder);
+  const canShowModelList = activeConnection.connected || activeModels.length > 0 || Boolean(activeDraft.emptyState);
 
   async function ensureProviderStatus(providerId: AddModelsProviderId) {
     const draft = resolveDraft(providerDrafts[providerId]);
@@ -475,7 +477,7 @@ export function OpenClawOnboardingProviderFlow({
           </div>
         ) : null}
 
-        {activeDescriptor.connectKind === "apiKey" && !activeConnection.connected && !showLoadingHero ? (
+        {activeDescriptor.connectKind === "apiKey" && !activeConnection.connected && activeModels.length === 0 && !showLoadingHero ? (
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <div className="min-w-0 flex-1">
               <label className="block text-[9px] uppercase tracking-[0.16em] text-slate-500">API key</label>
@@ -537,7 +539,7 @@ export function OpenClawOnboardingProviderFlow({
           </div>
         ) : null}
 
-        {activeDescriptor.connectKind === "oauth" && !activeConnection.connected && !showLoadingHero ? (
+        {activeDescriptor.connectKind === "oauth" && !activeConnection.connected && activeModels.length === 0 && !showLoadingHero ? (
           <div className="mt-4 rounded-[20px] border border-white/10 bg-white/[0.03] p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -642,7 +644,7 @@ export function OpenClawOnboardingProviderFlow({
           </div>
         ) : null}
 
-        {activeConnection.connected && !showLoadingHero ? (
+        {canShowModelList && !showLoadingHero ? (
           <>
             <div className="mt-4 flex flex-nowrap items-center justify-between gap-2 overflow-x-auto pb-1">
               <p className="shrink-0 whitespace-nowrap text-[9px] uppercase tracking-[0.16em] text-slate-500">
@@ -834,11 +836,5 @@ function resolveConnectionDetail(snapshot: MissionControlSnapshot, providerId: A
 }
 
 function modelMatchesProvider(providerId: AddModelsProviderId, modelId: string, modelProvider?: string | null) {
-  const provider = modelProvider || modelId.split("/", 1)[0] || "";
-
-  if (providerId === "openai-codex") {
-    return provider === "openai-codex" || provider === "codex";
-  }
-
-  return provider === providerId;
+  return modelMatchesAddModelsProvider(providerId, modelId, modelProvider);
 }

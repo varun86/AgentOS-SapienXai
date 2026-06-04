@@ -22,6 +22,7 @@ import {
   buildOpenClawRuntimeSmokeTestRecoveryCommand,
   classifyOpenClawRuntimeSmokeTestFailure
 } from "@/lib/openclaw/runtime-compatibility";
+import { OPENCLAW_RECOMMENDED_VERSION } from "@/lib/openclaw/versions";
 import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 
 export const runtime = "nodejs";
@@ -38,6 +39,7 @@ const gatewayReadyInitialDelayMs = 5 * 1000;
 const gatewayReadyProbeIntervalMs = 3 * 1000;
 const runtimeSmokeTestSkippedMessage =
   "OpenClaw updated, but no agent was available for a live turn smoke test. Skipping compatibility gate.";
+const recommendedUpdateArgs = ["update", "--tag", OPENCLAW_RECOMMENDED_VERSION, "--yes"] as const;
 
 type UpdateVerification = {
   ok: boolean;
@@ -122,7 +124,21 @@ export async function POST(request: Request) {
       return;
     }
 
-    const child = spawn(openClawBin, ["update"], {
+    if (isRecommendedOpenClawInstalled(snapshot)) {
+      await send({
+        type: "done",
+        ok: true,
+        message: `OpenClaw is already at the recommended version: v${OPENCLAW_RECOMMENDED_VERSION}.`,
+        exitCode: 0,
+        stdout,
+        stderr,
+        snapshot
+      });
+      await closeWriter();
+      return;
+    }
+
+    const child = spawn(openClawBin, [...recommendedUpdateArgs], {
       cwd: process.cwd(),
       env: process.env
     });
@@ -135,7 +151,7 @@ export async function POST(request: Request) {
     await send({
       type: "status",
       phase: "starting",
-      message: "Running openclaw update..."
+      message: `Running openclaw update --tag ${OPENCLAW_RECOMMENDED_VERSION}...`
     });
 
     child.stdout.on("data", (chunk: Buffer | string) => {
@@ -195,7 +211,7 @@ export async function POST(request: Request) {
         }
 
         if (code !== 0) {
-          const failureCommand = formatOpenClawCommand(openClawBin, ["update"]);
+          const failureCommand = formatOpenClawCommand(openClawBin, [...recommendedUpdateArgs]);
           const failureOutput = [stdout, stderr].filter(Boolean).join("\n");
           const needsInteractiveTty =
             /downgrade confirmation required/i.test(failureOutput) ||
@@ -277,7 +293,7 @@ export async function POST(request: Request) {
               stdout,
               stderr,
               snapshot: verifiedSnapshot,
-              manualCommand: formatOpenClawCommand(openClawBin, ["update"])
+              manualCommand: formatOpenClawCommand(openClawBin, [...recommendedUpdateArgs])
             });
             await closeWriter();
             return;
@@ -554,57 +570,30 @@ function verifyOpenClawUpdate(
 ): UpdateVerification {
   const beforeVersion = normalizeVersion(beforeSnapshot.diagnostics.version);
   const afterVersion = normalizeVersion(afterSnapshot.diagnostics.version);
-  const expectedLatestVersion = normalizeVersion(
-    beforeSnapshot.diagnostics.latestVersion || afterSnapshot.diagnostics.latestVersion
-  );
-  const latestKnownBeforeUpdate =
-    expectedLatestVersion !== null &&
-    beforeVersion !== null &&
-    compareVersionStrings(expectedLatestVersion, beforeVersion) > 0;
+  const recommendedVersion = normalizeVersion(OPENCLAW_RECOMMENDED_VERSION);
 
-  if (afterSnapshot.diagnostics.updateAvailable === true) {
+  if (!afterVersion || !recommendedVersion || compareVersionStrings(afterVersion, recommendedVersion) !== 0) {
     return {
       ok: false,
-      message: [
-        "OpenClaw update command finished, but a newer release is still reported.",
-        `Installed: ${formatVersion(afterVersion)}.`,
-        afterSnapshot.diagnostics.latestVersion || expectedLatestVersion
-          ? `Latest: ${formatVersion(afterSnapshot.diagnostics.latestVersion || expectedLatestVersion)}.`
-          : null
-      ]
-        .filter(Boolean)
-        .join(" ")
+      message: `OpenClaw update command finished, but the installed version is ${formatVersion(afterVersion)}. Expected ${formatVersion(recommendedVersion)}.`
     };
-  }
-
-  if (latestKnownBeforeUpdate && afterVersion && expectedLatestVersion) {
-    const stillBehindLatest = compareVersionStrings(afterVersion, expectedLatestVersion) < 0;
-
-    if (stillBehindLatest) {
-      return {
-        ok: false,
-        message: `OpenClaw update command finished, but the installed version is still ${formatVersion(afterVersion)}. Expected ${formatVersion(expectedLatestVersion)}.`
-      };
-    }
-  }
-
-  if (latestKnownBeforeUpdate && beforeVersion && afterVersion) {
-    const versionDidNotAdvance = compareVersionStrings(afterVersion, beforeVersion) <= 0;
-
-    if (versionDidNotAdvance) {
-      return {
-        ok: false,
-        message: `OpenClaw update command finished, but the installed version did not change from ${formatVersion(beforeVersion)}.`
-      };
-    }
   }
 
   return {
     ok: true,
     message: afterVersion
-      ? `OpenClaw update completed. Installed version: ${formatVersion(afterVersion)}.`
+      ? beforeVersion && compareVersionStrings(beforeVersion, afterVersion) === 0
+        ? `OpenClaw is already at the recommended version: ${formatVersion(afterVersion)}.`
+        : `OpenClaw update completed. Installed version: ${formatVersion(afterVersion)}.`
       : "OpenClaw update completed."
   };
+}
+
+function isRecommendedOpenClawInstalled(snapshot: MissionControlSnapshot) {
+  const version = normalizeVersion(snapshot.diagnostics.version);
+  const recommendedVersion = normalizeVersion(OPENCLAW_RECOMMENDED_VERSION);
+
+  return Boolean(version && recommendedVersion && compareVersionStrings(version, recommendedVersion) === 0);
 }
 
 function preserveKnownUpdateTarget(

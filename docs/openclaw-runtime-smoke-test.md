@@ -108,7 +108,7 @@ Passed:
 - Real agent chat stream completed through `/api/agents/main/chat` and returned `AgentOS runtime smoke ok`.
 - The resulting chat session appeared in the refreshed snapshot as a completed runtime for `main`.
 - Provider validation returned stable missing-field errors for Telegram, Discord, Slack, Gmail, webhook, cron, and email.
-- Google Chat provisioning returned the current stable unsupported-provider error.
+- Google Chat provisioning returned the unsupported-provider error expected for the supported OpenClaw baseline.
 - Telegram and Discord route discovery without credentials returned empty routes without crashing.
 - Slack discovery is reported unsupported and does not crash.
 

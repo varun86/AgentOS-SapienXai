@@ -819,6 +819,14 @@ async function applyProviderRuntimeFailure(
     return connection;
   }
 
+  if (connection.connected) {
+    if (await clearOpenAiCodexAuthRuntimeSmokeFailures()) {
+      clearMissionControlCaches();
+    }
+
+    return connection;
+  }
+
   const settings = await readMissionControlSettings().catch(() => ({}));
   const authFailure = getLatestOpenAiCodexAuthRuntimeSmokeFailure(settings);
 
@@ -838,7 +846,7 @@ async function applyProviderRuntimeFailure(
 function buildOllamaConnectionStatus(ollamaState: OllamaState): AddModelsProviderConnectionStatus {
   return {
     provider: "ollama",
-    connected: Boolean(ollamaState.installed),
+    connected: Boolean(ollamaState.installed && ollamaState.models.length > 0),
     canConnect: true,
     needsTerminal: false,
     detail: !ollamaState.installed

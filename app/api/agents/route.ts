@@ -121,7 +121,7 @@ function formatAgentApiError(
   }
 
   if (
-    /OpenClaw (?:CLI|Gateway|runtime|model setup|system setup)|Agent creation is blocked|Choose a ready model|Workspace was not found|already exists/i.test(message)
+    /OpenClaw (?:CLI|Gateway|runtime|model setup|system setup)|Agent creation is blocked|Choose a ready model|Workspace was not found|already exists|No API key found|Auth store|Configure auth|Unknown model|provider auth|OAuth token refresh failed/i.test(message)
   ) {
     return message;
   }
@@ -140,6 +140,14 @@ function formatAgentApiError(
         : detail
           ? `OpenClaw could not update the agent right now. ${detail}`
           : "OpenClaw could not update the agent right now. Please try again.";
+  }
+
+  if (message) {
+    return action === "delete"
+      ? `OpenClaw could not delete the agent right now. ${message}`
+      : action === "create"
+        ? `OpenClaw could not create the agent right now. ${message}`
+        : `OpenClaw could not update the agent right now. ${message}`;
   }
 
   return action === "delete"

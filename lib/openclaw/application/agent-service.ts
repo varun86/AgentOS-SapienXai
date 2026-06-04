@@ -21,6 +21,7 @@ import {
   getMissionControlSnapshot,
   invalidateMissionControlSnapshotCache
 } from "@/lib/openclaw/application/mission-control-service";
+import { ensureOpenClawModelRuntimeConfig } from "@/lib/openclaw/application/model-provider-state-service";
 import {
   buildAgentPolicySkillId,
   buildWorkspaceAgentStatePath,
@@ -44,6 +45,10 @@ import {
 } from "@/lib/openclaw/domains/workspace-manifest";
 import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import { normalizeOptionalValue } from "@/lib/openclaw/domains/control-plane-normalization";
+import {
+  isOpenAiCodexBackedModel,
+  normalizeOpenAiCodexModelId
+} from "@/lib/openclaw/domains/model-provider-connection";
 import { runWithGatewayAuthSetupRecovery } from "@/lib/openclaw/model-setup-recovery";
 import { writeTextFileEnsured } from "@/lib/openclaw/domains/workspace-bootstrap";
 import { workspaceIdFromPath, workspacePathMatchesId } from "@/lib/openclaw/domains/workspace-id";
@@ -56,6 +61,7 @@ import type {
   MissionControlSnapshot,
   OpenClawAgent
 } from "@/lib/openclaw/types";
+import type { OpenClawUpdateAgentInput } from "@/lib/openclaw/client/types";
 
 const LEGACY_CUSTOM_PRESET_SKILL_IDS = ["project-researcher", "project-builder", "project-analyst"];
 
@@ -259,6 +265,48 @@ function readErrorMessage(error: unknown) {
 
   return typeof error === "string" ? error : "";
 }
+
+function normalizeAgentModelIdForUpdate(modelId: string | null | undefined) {
+  const normalized = normalizeOptionalValue(modelId);
+  return normalized && isOpenAiCodexBackedModel(normalized)
+    ? normalizeOpenAiCodexModelId(normalized)
+    : normalized;
+}
+
+async function prepareAgentModelRuntimeConfig(modelId: string | undefined) {
+  if (!modelId || !isOpenAiCodexBackedModel(modelId)) {
+    return;
+  }
+
+  await runAgentGatewayMutation("preparing the agent model runtime", () =>
+    ensureOpenClawModelRuntimeConfig(modelId, { provider: "openai-codex" })
+  );
+}
+
+async function updateAgentGatewayMetadataOrDeferToConfig(
+  input: OpenClawUpdateAgentInput,
+  operationLabel: string
+) {
+  try {
+    await runAgentGatewayMutation(operationLabel, () =>
+      getOpenClawAdapter().updateAgent(input, { timeoutMs: 15_000 })
+    );
+  } catch (error) {
+    if (isRecoverableAgentUpdateGatewayDrift(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+function isRecoverableAgentUpdateGatewayDrift(error: unknown) {
+  const message = readErrorMessage(error);
+
+  return /INVALID_REQUEST:\s*agent\s+"[^"]+"\s+not found/i.test(message) &&
+    /Gateway-native operation failed;\s*CLI fallback disabled/i.test(message);
+}
+
 export async function updateAgent(input: AgentUpdateInput) {
   const agentId = input.id.trim();
 
@@ -308,7 +356,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     null;
   const nextModelId =
     input.modelId !== undefined
-      ? normalizeOptionalValue(input.modelId)
+      ? normalizeAgentModelIdForUpdate(input.modelId)
       : agent.modelId === "unassigned"
         ? resolveSnapshotDefaultAgentModelId(snapshot)
         : agent.modelId;
@@ -325,12 +373,15 @@ export async function updateAgent(input: AgentUpdateInput) {
     input.tools === undefined;
 
   if (onlyModelChanged) {
-    await runAgentGatewayMutation("updating the agent model", () =>
-      getOpenClawAdapter().updateAgent({
+    await prepareAgentModelRuntimeConfig(nextModelId);
+
+    await updateAgentGatewayMetadataOrDeferToConfig(
+      {
         id: agentId,
         workspace: resolvedWorkspacePath,
         model: nextModelId
-      }, { timeoutMs: 15_000 })
+      },
+      "updating the agent model"
     );
 
     await upsertAgentConfigEntryWithRecovery(
@@ -396,12 +447,15 @@ export async function updateAgent(input: AgentUpdateInput) {
     await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
-  await runAgentGatewayMutation("updating the agent", () =>
-    getOpenClawAdapter().updateAgent({
+  await prepareAgentModelRuntimeConfig(nextModelId);
+
+  await updateAgentGatewayMetadataOrDeferToConfig(
+    {
       id: agentId,
       workspace: resolvedWorkspacePath,
       model: nextModelId
-    }, { timeoutMs: 15_000 })
+    },
+    "updating the agent"
   );
 
   const configEntry = await upsertAgentConfigEntryWithRecovery(

@@ -22,9 +22,18 @@ type ModelAuthProvider = {
   provider?: string | null;
   profiles?: {
     count?: number | null;
+    oauth?: number | null;
+    token?: number | null;
+    apiKey?: number | null;
   } | null;
   effective?: {
     kind?: string | null;
+  } | null;
+  syntheticAuth?: {
+    value?: string | null;
+    source?: string | null;
+    credential?: string | null;
+    mode?: string | null;
   } | null;
 };
 
@@ -176,7 +185,7 @@ export function resolveModelReadiness(models: ModelLike[], modelStatus?: ModelSt
   const readyModels = models.filter((model) => isReadyModelRecord(model));
   const providerIds = unique(
     [
-      ...models.map((model) => model.key.split("/")[0] || "unknown"),
+      ...models.map((model) => resolveAuthProviderIdForModel(model.key)),
       ...((modelStatus?.auth?.providers ?? []).map((entry) => entry?.provider).filter(isNonEmptyString)),
       ...((modelStatus?.auth?.oauth?.providers ?? []).map((entry) => entry?.provider).filter(isNonEmptyString))
     ].filter(isNonEmptyString)
@@ -212,16 +221,26 @@ export function resolveModelReadiness(models: ModelLike[], modelStatus?: ModelSt
       provider === "ollama"
         ? providerModels.some((model) => model.local)
         : provider === "openai"
-          ? Boolean(
-              ((providerAuth?.profiles?.count ?? 0) > 0 && openAiEffectiveKind !== "oauth") ||
-              (openAiEffectiveKind && ["ok", "profiles", "token", "apikey", "api-key"].includes(openAiEffectiveKind))
-            )
+          ? isOpenAiApiAuthConnected(providerAuth)
+          : provider === "openai-codex"
+            ? isOpenAiCodexAuthConnected(
+                providerAuth ?? authProviderMap.get("openai"),
+                oauthStatus ?? oauthProviderMap.get("openai")
+              )
           : (providerAuth?.profiles?.count ?? 0) > 0 || oauthStatus?.status === "ok";
     let detail: string | null = null;
 
-    if (provider !== "openai" && oauthStatus?.status === "ok") {
+    if (
+      provider !== "openai" &&
+      (oauthStatus?.status === "ok" ||
+        (provider === "openai-codex" && oauthProviderMap.get("openai")?.status === "ok"))
+    ) {
       detail = "OAuth connected";
-    } else if ((providerAuth?.profiles?.count ?? 0) > 0 && (provider !== "openai" || openAiEffectiveKind !== "oauth")) {
+    } else if (
+      providerAuth &&
+      (providerAuth.profiles?.count ?? 0) > 0 &&
+      (provider !== "openai" || isOpenAiApiAuthConnected(providerAuth))
+    ) {
       detail = `${providerAuth?.profiles?.count} auth profile${providerAuth?.profiles?.count === 1 ? "" : "s"}`;
     } else if (provider === "ollama" && connected) {
       detail = "Local Ollama model detected.";
@@ -362,18 +381,55 @@ function isAuthProviderConnected(
   authProviderMap: Map<string, ModelAuthProvider & { provider: string }>,
   oauthProviderMap: Map<string, ModelOauthProvider & { provider: string }>
 ) {
-  const providerAuth = authProviderMap.get(provider);
-  const oauthStatus = oauthProviderMap.get(provider);
-
   if (provider === "openai") {
-    const effectiveKind = providerAuth?.effective?.kind?.trim().toLowerCase();
-    return Boolean(
-      ((providerAuth?.profiles?.count ?? 0) > 0 && effectiveKind !== "oauth") ||
-      (effectiveKind && ["ok", "profiles", "token", "apikey", "api-key"].includes(effectiveKind))
+    return isOpenAiApiAuthConnected(authProviderMap.get(provider));
+  }
+
+  if (provider === "openai-codex") {
+    return isOpenAiCodexAuthConnected(
+      authProviderMap.get(provider) ?? authProviderMap.get("openai"),
+      oauthProviderMap.get(provider) ?? oauthProviderMap.get("openai")
     );
   }
 
+  const providerAuth = authProviderMap.get(provider);
+  const oauthStatus = oauthProviderMap.get(provider);
   return (providerAuth?.profiles?.count ?? 0) > 0 || oauthStatus?.status === "ok";
+}
+
+function isOpenAiApiAuthConnected(providerAuth: ModelAuthProvider | undefined) {
+  const effectiveKind = providerAuth?.effective?.kind?.trim().toLowerCase();
+  const tokenProfileCount = providerAuth?.profiles?.token ?? 0;
+  const apiKeyProfileCount = providerAuth?.profiles?.apiKey ?? 0;
+  const oauthProfileCount = providerAuth?.profiles?.oauth ?? 0;
+  const profileCount = providerAuth?.profiles?.count ?? 0;
+
+  return Boolean(
+    tokenProfileCount + apiKeyProfileCount > 0 ||
+    (effectiveKind && ["token", "apikey", "api-key"].includes(effectiveKind)) ||
+    (effectiveKind === "profiles" && profileCount > 0 && oauthProfileCount === 0)
+  );
+}
+
+function isOpenAiCodexAuthConnected(
+  providerAuth: ModelAuthProvider | undefined,
+  oauthStatus: ModelOauthProvider | undefined
+) {
+  const effectiveKind = providerAuth?.effective?.kind?.trim().toLowerCase();
+  const oauthProfileCount = providerAuth?.profiles?.oauth ?? 0;
+  const syntheticAuthValue = providerAuth?.syntheticAuth?.value?.trim();
+
+  return Boolean(
+    oauthStatus?.status === "ok" ||
+    oauthProfileCount > 0 ||
+    syntheticAuthValue ||
+    effectiveKind === "oauth" ||
+    effectiveKind === "synthetic"
+  );
+}
+
+function resolveAuthProviderIdForModel(modelId: string) {
+  return isKnownOpenAiCodexModelId(modelId) ? "openai-codex" : modelId.split("/")[0] || "unknown";
 }
 
 function modelMatchesAuthProvider(provider: string, modelId: string) {

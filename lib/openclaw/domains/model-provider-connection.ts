@@ -1,4 +1,4 @@
-import type { ModelsStatusPayload } from "@/lib/openclaw/client/gateway-client";
+import type { ModelsStatusPayload } from "@/lib/openclaw/client/types";
 import { getModelProviderDescriptor } from "@/lib/openclaw/model-provider-registry";
 import type {
   AddModelsProviderConnectionStatus,
@@ -35,7 +35,13 @@ export function buildModelStatusConnectionStatus(
   const oauthProfiles = Array.isArray(oauthProviderRecord?.profiles) ? oauthProviderRecord.profiles : null;
   const usableOauthProfileCount = oauthProfiles ? countUsableAuthProfiles(oauthProfiles) : 0;
   const oauthStatus = readString(oauthProvider?.status)?.toLowerCase();
-  const profileCount = readNumber(authProvider?.profiles?.count) ?? 0;
+  const profileSummary: Record<string, unknown> = isRecord(authProvider?.profiles)
+    ? authProvider.profiles as Record<string, unknown>
+    : {};
+  const profileCount = readNumber(profileSummary.count) ?? 0;
+  const tokenProfileCount = readNumber(profileSummary.token) ?? 0;
+  const apiKeyProfileCount = readNumber(profileSummary.apiKey) ?? 0;
+  const oauthProfileCount = readNumber(profileSummary.oauth) ?? 0;
   const effectiveKind = readString(authProvider?.effective?.kind)?.toLowerCase();
   const syntheticAuthValue = readString(authProvider?.syntheticAuth?.value);
   const connected = resolveProviderConnected({
@@ -45,6 +51,9 @@ export function buildModelStatusConnectionStatus(
     usableOauthProfileCount,
     oauthStatus,
     profileCount,
+    tokenProfileCount,
+    apiKeyProfileCount,
+    oauthProfileCount,
     effectiveKind,
     syntheticAuthValue
   });
@@ -171,7 +180,7 @@ function shouldDisplayOpenAiModelAsCodex(
   }
 
   if (!modelStatus) {
-    return false;
+    return true;
   }
 
   const codexStatus = buildModelStatusConnectionStatus("openai-codex", modelStatus, []);
@@ -187,6 +196,9 @@ function resolveProviderConnected({
   usableOauthProfileCount,
   oauthStatus,
   profileCount,
+  tokenProfileCount,
+  apiKeyProfileCount,
+  oauthProfileCount,
   effectiveKind,
   syntheticAuthValue
 }: {
@@ -196,6 +208,9 @@ function resolveProviderConnected({
   usableOauthProfileCount: number;
   oauthStatus?: string;
   profileCount: number;
+  tokenProfileCount: number;
+  apiKeyProfileCount: number;
+  oauthProfileCount: number;
   effectiveKind?: string;
   syntheticAuthValue: string | null;
 }) {
@@ -214,10 +229,12 @@ function resolveProviderConnected({
   }
 
   if (provider === "openai") {
+    const credentialProfileCount = tokenProfileCount + apiKeyProfileCount;
+
     return Boolean(
-      (profileCount > 0 && effectiveKind !== "oauth") ||
-      (effectiveKind && ["ok", "profiles", "token", "apikey", "api-key"].includes(effectiveKind)) ||
-      (syntheticAuthValue && effectiveKind !== "oauth")
+      credentialProfileCount > 0 ||
+      (effectiveKind && ["token", "apikey", "api-key"].includes(effectiveKind)) ||
+      (effectiveKind === "profiles" && profileCount > 0 && oauthProfileCount === 0)
     );
   }
 

@@ -57,26 +57,11 @@ export function getOpenClawUserLocalBinPath() {
 }
 
 export function getOpenClawInstallCommand() {
-  const installAndPinRecommendedVersionCommand = buildOpenClawInstallPinCommand();
-
   if (process.platform === "win32") {
-    return `& ([scriptblock]::Create((iwr -useb ${OPENCLAW_INSTALL_POWERSHELL_URL}))) -Tag ${OPENCLAW_RECOMMENDED_VERSION} -NoOnboard; if ($LASTEXITCODE -eq 0) { ${installAndPinRecommendedVersionCommand} } else { exit $LASTEXITCODE }`;
+    return `& ([scriptblock]::Create((iwr -useb ${OPENCLAW_INSTALL_POWERSHELL_URL}))) -Tag ${OPENCLAW_RECOMMENDED_VERSION} -NoOnboard`;
   }
 
-  return `set -euo pipefail; curl -fsSL --proto '=https' --tlsv1.2 ${OPENCLAW_INSTALL_CLI_URL} | bash -s -- --prefix "$HOME/.openclaw" --version ${OPENCLAW_RECOMMENDED_VERSION} --no-onboard && ${installAndPinRecommendedVersionCommand}`;
-}
-
-function buildOpenClawInstallPinCommand() {
-  const commandPath = quoteShellArg(getOpenClawLocalPrefixBinPath());
-  return `${commandPath} update --tag ${OPENCLAW_RECOMMENDED_VERSION} --yes`;
-}
-
-function quoteShellArg(value: string) {
-  if (/^[a-zA-Z0-9_./:@%+=,-]+$/.test(value)) {
-    return value;
-  }
-
-  return `'${value.replaceAll("'", "'\\''")}'`;
+  return `set -euo pipefail; curl -fsSL --proto '=https' --tlsv1.2 ${OPENCLAW_INSTALL_CLI_URL} | bash -s -- --prefix "$HOME/.openclaw" --version ${OPENCLAW_RECOMMENDED_VERSION} --no-onboard`;
 }
 
 export async function ensureOpenClawLocalBinOnPath(

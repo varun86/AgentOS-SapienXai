@@ -24,6 +24,7 @@ import {
   normalizeAddModelsProviderId
 } from "@/lib/openclaw/model-provider-registry";
 import { getModelProviderAdapter, ModelProviderActionError } from "@/lib/openclaw/model-provider-adapters";
+import { modelMatchesAddModelsProvider } from "@/lib/openclaw/domains/model-provider-connection";
 import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 import { OPENCLAW_RECOMMENDED_VERSION } from "@/lib/openclaw/versions";
 import type {
@@ -1292,13 +1293,7 @@ function resolveConnectionDetail(
 }
 
 function modelMatchesProvider(providerId: AddModelsProviderId, modelId: string, modelProvider?: string | null) {
-  const provider = modelProvider || modelId.split("/", 1)[0] || "";
-
-  if (providerId === "openai-codex") {
-    return provider === "openai-codex" || provider === "codex";
-  }
-
-  return provider === providerId;
+  return modelMatchesAddModelsProvider(providerId, modelId, modelProvider);
 }
 
 function buildProgressSteps(

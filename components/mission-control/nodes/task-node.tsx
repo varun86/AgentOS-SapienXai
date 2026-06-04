@@ -58,7 +58,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTaskFeed } from "@/hooks/use-task-feed";
-import type { RuntimeOutputRecord, RuntimeRecord, TaskFeedEvent } from "@/lib/agentos/contracts";
+import type { RuntimeActivityRecord, RuntimeOutputRecord, TaskFeedEvent } from "@/lib/agentos/contracts";
 import {
   mergeTaskFollowUps,
   readTaskFollowUpsFromMetadata,
@@ -992,7 +992,7 @@ function formatElapsedFromIso(value: string | null, referenceTimeMs: number) {
   return remainingSeconds === 0 ? `${minutes}m` : `${minutes}m ${remainingSeconds}s`;
 }
 
-function resolveFollowUpRuntimes(followUp: SubmittedTaskFollowUp, runs: RuntimeRecord[]) {
+function resolveFollowUpRuntimes(followUp: SubmittedTaskFollowUp, runs: RuntimeActivityRecord[]) {
   const runId = followUp.runId?.trim();
 
   if (runId) {
@@ -1017,7 +1017,7 @@ function resolveFollowUpRuntimes(followUp: SubmittedTaskFollowUp, runs: RuntimeR
   return candidates;
 }
 
-function resolveRepresentativeFollowUpRuntime(runtimes: RuntimeRecord[]) {
+function resolveRepresentativeFollowUpRuntime(runtimes: RuntimeActivityRecord[]) {
   return (
     runtimes.find((runtime) => hasMeaningfulRuntimeSubtitle(runtime)) ??
     runtimes.find((runtime) => runtime.status === "completed") ??
@@ -1037,7 +1037,7 @@ function resolveBestFollowUpOutput(outputs: RuntimeOutputRecord[]) {
 
 function filterFollowUpFeed(
   followUp: SubmittedTaskFollowUp,
-  runtimes: RuntimeRecord[],
+  runtimes: RuntimeActivityRecord[],
   feed: TaskFeedEvent[]
 ) {
   if (runtimes.length > 0) {
@@ -1080,9 +1080,9 @@ function createFollowUpOptimisticFeed(followUp: SubmittedTaskFollowUp): TaskFeed
 
 function resolveFollowUpStatus(
   followUp: SubmittedTaskFollowUp,
-  runtime: RuntimeRecord | null,
+  runtime: RuntimeActivityRecord | null,
   output: RuntimeOutputRecord | null | undefined,
-  runtimes: RuntimeRecord[] = []
+  runtimes: RuntimeActivityRecord[] = []
 ) {
   const status = normalizeRuntimeStatus(followUp.status);
   if (status && status !== "running") {
@@ -1120,14 +1120,14 @@ function resolveFollowUpStatus(
   return "running";
 }
 
-function isFollowUpRuntimeGroupStale(runtimes: RuntimeRecord[]) {
+function isFollowUpRuntimeGroupStale(runtimes: RuntimeActivityRecord[]) {
   const latestUpdatedAt = Math.max(...runtimes.map((runtime) => timestampNumberToMs(runtime.updatedAt)));
   return latestUpdatedAt > 0 && Date.now() - latestUpdatedAt > FOLLOW_UP_STALE_MS;
 }
 
 function resolveFollowUpResultText(
   followUp: SubmittedTaskFollowUp,
-  runtime: RuntimeRecord | null,
+  runtime: RuntimeActivityRecord | null,
   output: RuntimeOutputRecord | null | undefined
 ) {
   const finalText = output?.finalText?.trim();
@@ -1162,9 +1162,9 @@ function resolveFollowUpResultText(
 
 function resolveFollowUpFooterLabel(
   followUp: SubmittedTaskFollowUp,
-  runtime: RuntimeRecord | null,
+  runtime: RuntimeActivityRecord | null,
   output: RuntimeOutputRecord | null | undefined,
-  runtimes: RuntimeRecord[] = []
+  runtimes: RuntimeActivityRecord[] = []
 ) {
   const status = resolveFollowUpStatus(followUp, runtime, output, runtimes);
 
@@ -1204,7 +1204,7 @@ function buildTaskCardInspectorContext(
   };
 }
 
-function normalizeRuntimeStatus(value: string | null | undefined): RuntimeRecord["status"] | null {
+function normalizeRuntimeStatus(value: string | null | undefined): RuntimeActivityRecord["status"] | null {
   switch (value) {
     case "queued":
     case "running":
@@ -1236,7 +1236,7 @@ function readMetadataString(metadata: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function hasMeaningfulRuntimeSubtitle(runtime: RuntimeRecord) {
+function hasMeaningfulRuntimeSubtitle(runtime: RuntimeActivityRecord) {
   const value = runtime.subtitle.trim().toLowerCase();
   return Boolean(value && !["chat", "agent", "sessions.changed", "session.message", "openclaw runtime event", "gateway runtime event"].includes(value));
 }
@@ -1245,7 +1245,7 @@ function countUniqueStrings(values: string[]) {
   return new Set(values.map((value) => value.trim()).filter(Boolean)).size;
 }
 
-function sumRuntimeTokens(runtimes: RuntimeRecord[]) {
+function sumRuntimeTokens(runtimes: RuntimeActivityRecord[]) {
   const total = runtimes.reduce((sum, runtime) => sum + (runtime.tokenUsage?.total ?? 0), 0);
   return total || undefined;
 }

@@ -562,7 +562,7 @@ test("openclaw onboarding uses the official installer command", () => {
     assert.match(command, /install\.ps1/);
     assert.match(command, new RegExp(`-Tag\\s+${OPENCLAW_RECOMMENDED_VERSION}`));
     assert.match(command, /-NoOnboard/);
-    assert.match(command, new RegExp(`--tag\\s+${OPENCLAW_RECOMMENDED_VERSION}`));
+    assert.doesNotMatch(command, /update\s+--tag/);
     return;
   }
 
@@ -570,8 +570,7 @@ test("openclaw onboarding uses the official installer command", () => {
   assert.match(command, new RegExp(`--version\\s+${OPENCLAW_RECOMMENDED_VERSION}`));
   assert.match(command, /--no-onboard/);
   assert.match(command, /\$HOME\/\.openclaw/);
-  assert.match(command, new RegExp(`--tag\\s+${OPENCLAW_RECOMMENDED_VERSION}`));
-  assert.match(command, /--yes/);
+  assert.doesNotMatch(command, /update\s+--tag/);
 });
 
 test("openclaw path list helpers avoid duplicate terminal path entries", () => {
@@ -1313,6 +1312,93 @@ test("provider status does not treat ChatGPT OAuth as an OpenAI API key", () => 
   assert.equal(connection?.connected, false);
 });
 
+test("provider status does not treat Codex runtime OAuth profiles as OpenAI API connection", () => {
+  const connection = buildModelStatusConnectionStatus(
+    "openai",
+    {
+      allowed: ["openai/gpt-5.5"],
+      auth: {
+        runtimeAuthRoutes: [
+          {
+            provider: "openai",
+            runtime: "codex",
+            authProvider: "openai",
+            status: "usable"
+          }
+        ],
+        providers: [
+          {
+            provider: "openai",
+            effective: {
+              kind: "profiles"
+            },
+            profiles: {
+              count: 1,
+              oauth: 1,
+              token: 0,
+              apiKey: 0
+            },
+            syntheticAuth: {
+              value: "plugin-owned",
+              source: "codex-app-server",
+              credential: "codex-app-server",
+              mode: "token"
+            }
+          }
+        ],
+        oauth: {
+          providers: [
+            {
+              provider: "openai",
+              status: "ok",
+              profiles: [
+                {
+                  profileId: "openai:user@example.com",
+                  status: "static"
+                }
+              ]
+            } as never
+          ]
+        }
+      }
+    } as never,
+    new Set(["openai/gpt-5.5"])
+  );
+
+  assert.equal(connection?.connected, false);
+});
+
+test("provider status treats OpenAI API key profiles as OpenAI connection", () => {
+  const connection = buildModelStatusConnectionStatus(
+    "openai",
+    {
+      allowed: ["openai/gpt-5.4-pro"],
+      auth: {
+        providers: [
+          {
+            provider: "openai",
+            effective: {
+              kind: "profiles"
+            },
+            profiles: {
+              count: 1,
+              oauth: 0,
+              token: 0,
+              apiKey: 1
+            }
+          } as never
+        ],
+        oauth: {
+          providers: []
+        }
+      }
+    },
+    new Set(["openai/gpt-5.4-pro"])
+  );
+
+  assert.equal(connection?.connected, true);
+});
+
 test("provider status treats Codex app-server synthetic auth as connected", () => {
   const connection = buildModelStatusConnectionStatus(
     "openai-codex",
@@ -1443,6 +1529,37 @@ test("snapshot model records display canonical OpenAI Codex routes as ChatGPT", 
   assert.equal(records[0]?.available, true);
   assert.equal(records[1]?.provider, "openai");
   assert.equal(records[1]?.available, false);
+});
+
+test("snapshot model records keep known Codex routes as ChatGPT without live model status", () => {
+  const records = buildModelRecords(
+    [
+      {
+        key: "openai/gpt-5.5",
+        name: "GPT-5.5",
+        input: "text",
+        contextWindow: 272000,
+        local: false,
+        available: true,
+        missing: false,
+        tags: []
+      },
+      {
+        key: "openai/gpt-5.4-pro",
+        name: "GPT-5.4 Pro",
+        input: "text",
+        contextWindow: 1050000,
+        local: false,
+        available: true,
+        missing: false,
+        tags: []
+      }
+    ],
+    []
+  );
+
+  assert.equal(records[0]?.provider, "openai-codex");
+  assert.equal(records[1]?.provider, "openai");
 });
 
 test("snapshot model records collapse Codex aliases to canonical routes", () => {

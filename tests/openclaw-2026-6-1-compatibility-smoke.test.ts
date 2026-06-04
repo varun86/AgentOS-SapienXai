@@ -39,8 +39,8 @@ test("setup smoke uses the centralized OpenClaw baseline constants", () => {
   assert.equal(OPENCLAW_GATEWAY_BASELINE_VERSION, OPENCLAW_SUPPORTED_BASELINE_VERSION);
 
   const installCommand = getOpenClawInstallCommand();
-  assert.match(installCommand, new RegExp(`--tag\\s+${OPENCLAW_RECOMMENDED_VERSION}`));
   assert.match(installCommand, new RegExp(`(?:--version|-Tag)\\s+${OPENCLAW_RECOMMENDED_VERSION}`));
+  assert.doesNotMatch(installCommand, /update\s+--tag/);
 });
 
 test("gateway native connection smoke covers the supported OpenClaw method baseline", () => {

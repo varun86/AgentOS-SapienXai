@@ -232,6 +232,59 @@ export async function addOpenClawModelsToConfig(provider: AddModelsProviderId, m
   await writeJsonFile(openClawConfigPath, config);
 }
 
+export async function ensureOpenClawModelRuntimeConfig(
+  modelId: string,
+  options: { provider?: AddModelsProviderId | null } = {}
+) {
+  const requestedModelId = modelId.trim();
+  const provider = options.provider ?? resolveProviderFromModelIdForRuntime(requestedModelId);
+
+  if (!requestedModelId || !provider) {
+    return {
+      modelId: requestedModelId,
+      provider,
+      via: "skipped" as const
+    };
+  }
+
+  const normalizedModelId = normalizeModelIdForProvider(provider, requestedModelId);
+
+  try {
+    await ensureModelRuntimeConfigViaGateway(provider, normalizedModelId);
+    return {
+      modelId: normalizedModelId,
+      provider,
+      via: "gateway" as const
+    };
+  } catch (error) {
+    if (!isLegacyProviderFileFallbackEnabled()) {
+      throw new Error(buildGatewayConfigMutationFailureMessage("preparing the model runtime", error));
+    }
+  }
+
+  const config = await readJsonFile<OpenClawConfigPayload>(openClawConfigPath, {});
+
+  config.meta = {
+    ...config.meta,
+    lastTouchedAt: new Date().toISOString()
+  };
+  config.agents = config.agents || {};
+  config.agents.defaults = config.agents.defaults || {};
+  config.agents.defaults.models = config.agents.defaults.models || {};
+  config.agents.defaults.models[normalizedModelId] =
+    config.agents.defaults.models[normalizedModelId] || {};
+  applyDefaultModelRuntime(config, provider, normalizedModelId);
+  stripLegacyAgentRuntimeFromDefaults(config.agents.defaults);
+
+  await writeJsonFile(openClawConfigPath, config);
+
+  return {
+    modelId: normalizedModelId,
+    provider,
+    via: "legacy-file" as const
+  };
+}
+
 export async function setOpenClawDefaultModel(
   modelId: string,
   options: { provider?: AddModelsProviderId | null } = {}
@@ -358,6 +411,74 @@ async function setDefaultModelViaGateway(
   }
 
   throw lastError;
+}
+
+async function ensureModelRuntimeConfigViaGateway(provider: AddModelsProviderId, normalizedModelId: string) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= gatewayConfigPatchRetryDelaysMs.length; attempt += 1) {
+    try {
+      await ensureModelRuntimeConfigViaGatewayOnce(provider, normalizedModelId);
+      return;
+    } catch (error) {
+      lastError = error;
+      const retryDelayMs = resolveGatewayConfigPatchRetryDelayMs(error, attempt);
+
+      if (retryDelayMs === null) {
+        throw error;
+      }
+
+      await tryStartGatewayAfterTransientConfigFailure(error);
+      await delay(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
+async function ensureModelRuntimeConfigViaGatewayOnce(provider: AddModelsProviderId, normalizedModelId: string) {
+  const adapter = getOpenClawAdapter();
+  const existingDefaults = await adapter.getConfig<OpenClawAgentDefaultsConfig>(
+    "agents.defaults",
+    { timeoutMs: 5_000 }
+  );
+
+  if (isModelRuntimePrepared(existingDefaults, normalizedModelId, provider)) {
+    return;
+  }
+
+  const nextDefaults = cloneAgentDefaults(existingDefaults);
+  const nextModels = cloneModelEntries(nextDefaults.models);
+
+  nextModels[normalizedModelId] = isRecord(nextModels[normalizedModelId])
+    ? nextModels[normalizedModelId]
+    : {};
+  applyModelRuntimePolicyToModelEntries(nextModels, normalizedModelId, provider);
+  nextDefaults.models = nextModels;
+  stripLegacyAgentRuntimeFromDefaults(nextDefaults);
+  await adapter.setConfig("agents.defaults", nextDefaults, { timeoutMs: 5_000 });
+
+  if (provider === "openai-codex") {
+    await adapter.setConfig("plugins.entries.codex.enabled", true, { timeoutMs: 5_000 });
+  }
+}
+
+function isModelRuntimePrepared(
+  defaults: OpenClawAgentDefaultsConfig | null,
+  modelId: string,
+  provider: AddModelsProviderId
+) {
+  const expectedRuntimeId = resolveModelScopedRuntimeId(provider);
+
+  if (!expectedRuntimeId) {
+    return true;
+  }
+
+  if (!defaults) {
+    return false;
+  }
+
+  return defaults.models?.[modelId]?.agentRuntime?.id === expectedRuntimeId;
 }
 
 async function setDefaultModelViaGatewayOnce(
@@ -558,6 +679,14 @@ function normalizeModelIdForProvider(provider: AddModelsProviderId, modelId: str
 function resolveProviderFromModelId(modelId: string): AddModelsProviderId | null {
   const modelProvider = modelId.split("/", 1)[0] || null;
   return isAddModelsProviderId(modelProvider) ? modelProvider : null;
+}
+
+function resolveProviderFromModelIdForRuntime(modelId: string): AddModelsProviderId | null {
+  if (modelMatchesProvider("openai-codex", normalizeModelIdForProvider("openai-codex", modelId))) {
+    return "openai-codex";
+  }
+
+  return resolveProviderFromModelId(modelId);
 }
 
 function applyDefaultModelRuntime(

@@ -4,6 +4,7 @@ import { afterEach, test } from "node:test";
 import { setOpenClawAdapterForTesting, type OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   addOpenClawModelsToConfig,
+  ensureOpenClawModelRuntimeConfig,
   persistOpenClawProviderToken,
   readOpenClawCodexPluginReady,
   setOpenClawDefaultModel
@@ -328,6 +329,103 @@ test("setting a Codex default model normalizes the model ref and enables Codex r
     }
   });
   assert.equal(values.get("plugins.entries.codex.enabled"), true);
+});
+
+test("preparing a Codex agent model writes runtime config without changing the default model", async () => {
+  const calls: string[] = [];
+  const values = new Map<string, unknown>();
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      calls.push(`get:${path}`);
+      return path === "agents.defaults"
+        ? {
+            models: {
+              "openrouter/old": {}
+            },
+            model: {
+              primary: "openrouter/old"
+            },
+            agentRuntime: {
+              id: "legacy"
+            }
+          }
+        : null;
+    },
+    async setConfig(path: string, value: unknown) {
+      calls.push(`set:${path}`);
+      values.set(path, value);
+      return { stdout: JSON.stringify({ ok: true, value }), stderr: "" };
+    }
+  } as unknown as OpenClawAdapter);
+
+  const result = await ensureOpenClawModelRuntimeConfig("openai-codex/gpt-5.5", {
+    provider: "openai-codex"
+  });
+
+  assert.deepEqual(result, {
+    modelId: "openai/gpt-5.5",
+    provider: "openai-codex",
+    via: "gateway"
+  });
+  assert.deepEqual(calls, [
+    "get:agents.defaults",
+    "set:agents.defaults",
+    "set:plugins.entries.codex.enabled"
+  ]);
+  assert.deepEqual(values.get("agents.defaults"), {
+    models: {
+      "openrouter/old": {},
+      "openai/gpt-5.5": {
+        agentRuntime: {
+          id: "codex"
+        }
+      }
+    },
+    model: {
+      primary: "openrouter/old"
+    }
+  });
+});
+
+test("preparing an already configured Codex agent model does not write Gateway config", async () => {
+  const calls: string[] = [];
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      calls.push(`get:${path}`);
+      return path === "agents.defaults"
+        ? {
+            models: {
+              "openai/gpt-5.5": {
+                agentRuntime: {
+                  id: "codex"
+                }
+              }
+            },
+            model: {
+              primary: "openai/gpt-5.4-mini"
+            },
+            maxConcurrent: 4
+          }
+        : null;
+    },
+    async setConfig(path: string) {
+      calls.push(`set:${path}`);
+      throw new Error("setConfig should not be called for an already prepared model runtime");
+    }
+  } as unknown as OpenClawAdapter);
+
+  const result = await ensureOpenClawModelRuntimeConfig("openai/gpt-5.5", {
+    provider: "openai-codex"
+  });
+
+  assert.deepEqual(result, {
+    modelId: "openai/gpt-5.5",
+    provider: "openai-codex",
+    via: "gateway"
+  });
+  assert.deepEqual(calls, ["get:agents.defaults"]);
 });
 
 test("setting the default model does not silently fall back to OpenClaw file writes after Gateway failure", async () => {
