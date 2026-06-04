@@ -1,0 +1,192 @@
+export type OpenClawCompatibilityStatus = "compatible" | "degraded" | "incompatible";
+
+export type OpenClawCompatibilityTargetKind = "local" | "test-gateway" | "baseline-contract";
+
+export type OpenClawCompatibilityCapabilityId =
+  | "gatewayHealth"
+  | "sessions"
+  | "chat"
+  | "models"
+  | "authProfiles"
+  | "accountsBrowserProfiles"
+  | "tasks"
+  | "config"
+  | "transcripts"
+  | "cliFallback";
+
+export type OpenClawCompatibilitySupportStatus = "supported" | "unsupported" | "unknown" | "not-available";
+
+export type OpenClawCompatibilityCapabilitySource =
+  | "gateway-advertised"
+  | "gateway-discovery"
+  | "version-default"
+  | "runtime-diagnostic"
+  | "cli-probe"
+  | "not-available";
+
+export type OpenClawGatewayProtocolCompatibilityStatus = "compatible" | "unsupported" | "unknown";
+
+export type OpenClawGatewayHealthStatus = "healthy" | "degraded" | "unreachable" | "unknown";
+
+export type OpenClawCompatibilityContractStatus = "ok" | "degraded" | "unsupported" | "failed";
+
+export type OpenClawCompatibilityResponseShapeStatus = "valid" | "invalid" | "not-checked";
+
+export type OpenClawCompatibilityMethodSource =
+  | "gateway-advertised"
+  | "gateway-discovery"
+  | "version-default"
+  | "unavailable";
+
+export interface OpenClawCompatibilityTarget {
+  kind: OpenClawCompatibilityTargetKind;
+  label: string;
+  version?: string | null;
+}
+
+export interface OpenClawCompatibilityCapability {
+  id: OpenClawCompatibilityCapabilityId;
+  label: string;
+  status: OpenClawCompatibilitySupportStatus;
+  source: OpenClawCompatibilityCapabilitySource;
+  methods: string[];
+  events: string[];
+  supportedMethods: string[];
+  supportedEvents: string[];
+  reason: string;
+}
+
+export interface OpenClawCompatibilityContractCheck {
+  operation: string;
+  label: string;
+  surface: OpenClawCompatibilityCapabilityId;
+  required: boolean;
+  baseline: "required" | "optional" | "experimental";
+  methods: string[];
+  events: string[];
+  supportedMethod: string | null;
+  supportedEvent: string | null;
+  nativeGatewaySupported: boolean;
+  cliFallbackAvailable: boolean;
+  responseShapeStatus: OpenClawCompatibilityResponseShapeStatus;
+  responseShapeValid: boolean | null;
+  status: OpenClawCompatibilityContractStatus;
+  reason: string;
+  suggestedRecovery: string;
+}
+
+export interface OpenClawCompatibilityReleaseSummary {
+  nativeGatewayCoveragePercent: number;
+  nativeGatewayCoverageLabel: string;
+  cliFallbackOperationCount: number;
+  activeCliFallbackCount: number;
+  degradedSurfaces: string[];
+  unsupportedSurfaces: string[];
+  failedSurfaces: string[];
+  supportedOpenClawVersion: string;
+  testedOpenClawVersions: string[];
+}
+
+export type OpenClawCompatibilityFallbackDiagnostic = {
+  at: string;
+  operation: string;
+  issue: string;
+  kind: string;
+  recovery: string;
+};
+
+export type OpenClawCompatibilityTransportDiagnostics = {
+  fallbackTotal: number;
+  recentFallbackDiagnostics: OpenClawCompatibilityFallbackDiagnostic[];
+};
+
+export interface OpenClawCompatibilityReport {
+  generatedAt: string;
+  target: OpenClawCompatibilityTarget;
+  status: OpenClawCompatibilityStatus;
+  statusReason: string;
+  recovery: string;
+  openClaw: {
+    installedVersion: string | null;
+    recommendedVersion: string;
+    supportedBaselineVersion: string;
+    testedVersions: string[];
+  };
+  gateway: {
+    health: OpenClawGatewayHealthStatus;
+    healthReason: string;
+    protocolVersion: string | null;
+    protocolStatus: OpenClawGatewayProtocolCompatibilityStatus;
+    protocolRange: {
+      min: number;
+      max: number;
+    };
+    authMode: string | null;
+    authRole: string | null;
+    authScopes: string[];
+    capabilitySource: OpenClawCompatibilityMethodSource;
+    advertisedMethodCount: number;
+    effectiveMethodCount: number;
+    advertisedEventCount: number;
+  };
+  fallback: {
+    cliAvailable: boolean;
+    cliForced: boolean;
+    operationCount: number;
+    activeFallbackCount: number;
+    diagnostics: OpenClawCompatibilityFallbackDiagnostic[];
+  };
+  capabilities: OpenClawCompatibilityCapability[];
+  contracts: OpenClawCompatibilityContractCheck[];
+  summary: OpenClawCompatibilityReleaseSummary;
+  diagnostics: string[];
+}
+
+export interface OpenClawCompatibilityDetectionInput {
+  advertisedMethods: string[];
+  advertisedEvents: string[];
+  installedVersion: string | null;
+  source: OpenClawCompatibilityMethodSource;
+  cliFallbackAvailable: boolean;
+}
+
+export interface OpenClawCompatibilityContractInput {
+  effectiveMethods: string[];
+  effectiveEvents: string[];
+  capabilitySource: OpenClawCompatibilityMethodSource;
+  cliFallbackAvailable: boolean;
+  cliForced: boolean;
+  includeLiveShapeChecks: boolean;
+  callNative?: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+}
+
+export type OpenClawCompatibilityReportInput = {
+  target: OpenClawCompatibilityTarget;
+  generatedAt: string;
+  installedVersion: string | null;
+  recommendedVersion: string;
+  supportedBaselineVersion: string;
+  testedVersions: string[];
+  gatewayHealth: OpenClawGatewayHealthStatus;
+  gatewayHealthReason: string;
+  protocolVersion: string | null;
+  protocolStatus: OpenClawGatewayProtocolCompatibilityStatus;
+  protocolRange: {
+    min: number;
+    max: number;
+  };
+  authMode: string | null;
+  authRole: string | null;
+  authScopes: string[];
+  advertisedMethods: string[];
+  effectiveMethods: string[];
+  advertisedEvents: string[];
+  effectiveEvents: string[];
+  capabilitySource: OpenClawCompatibilityMethodSource;
+  cliAvailable: boolean;
+  cliForced: boolean;
+  transport?: OpenClawCompatibilityTransportDiagnostics | null;
+  capabilities: OpenClawCompatibilityCapability[];
+  contracts: OpenClawCompatibilityContractCheck[];
+  diagnostics: string[];
+};

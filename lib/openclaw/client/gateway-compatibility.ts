@@ -2,6 +2,7 @@ import { OPENCLAW_SUPPORTED_BASELINE_VERSION } from "@/lib/openclaw/versions";
 
 export type OpenClawGatewayCompatibilityOperationId =
   | "health"
+  | "models"
   | "modelAuthOrder"
   | "modelScan"
   | "logsTail"
@@ -35,6 +36,7 @@ export type OpenClawGatewayCompatibilityOperationId =
   | "channelRemoval"
   | "gmailProvisioning"
   | "automationProvisioning"
+  | "browserProfiles"
   | "skills"
   | "updates";
 
@@ -49,6 +51,7 @@ export type OpenClawGatewayCompatibilityOperationDefinition = {
 
 export const OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS: OpenClawGatewayCompatibilityOperationDefinition[] = [
   { id: "health", label: "Gateway health", methods: ["health", "status"], baseline: "required" },
+  { id: "models", label: "Models List", methods: ["models.list", "models.authStatus"], baseline: "required" },
   { id: "modelAuthOrder", label: "Model auth order", methods: ["models.authOrder.set", "models.auth.order.set"], baseline: "experimental" },
   { id: "modelScan", label: "Model scan", methods: ["models.scan"], baseline: "optional" },
   { id: "logsTail", label: "Gateway logs", methods: ["logs.tail"], baseline: "required" },
@@ -106,11 +109,12 @@ export const OPENCLAW_GATEWAY_COMPATIBILITY_OPERATIONS: OpenClawGatewayCompatibi
   { id: "cronRead", label: "Automation status", methods: ["cron.list", "cron.status"], baseline: "optional" },
   { id: "channels", label: "Channel status", methods: ["channels.status"], baseline: "required" },
   { id: "channelList", label: "Channel list", methods: ["channels.list", "channels.status"], baseline: "optional" },
-  { id: "channelLogs", label: "Channel logs", methods: ["channels.logs"], baseline: "optional" },
+  { id: "channelLogs", label: "Channel logs", methods: ["channels.logs"], baseline: "experimental" },
   { id: "channelProvisioning", label: "Channel provisioning", methods: ["channels.add", "channels.create", "channels.configure"], baseline: "experimental" },
   { id: "channelRemoval", label: "Channel removal", methods: ["channels.remove", "channels.delete"], baseline: "experimental" },
   { id: "gmailProvisioning", label: "Gmail webhook setup", methods: ["webhooks.gmail.setup", "gmail.setup"], baseline: "experimental" },
   { id: "automationProvisioning", label: "Automation provisioning", methods: ["cron.add", "cron.create"], baseline: "experimental" },
+  { id: "browserProfiles", label: "Browser profiles", methods: ["browser.request"], fallbackAllowed: false, baseline: "experimental" },
   { id: "skills", label: "Skill status", methods: ["skills.status"], baseline: "optional" },
   { id: "updates", label: "Update status", methods: ["update.status", "update.run", "status"], baseline: "optional" }
 ];
@@ -223,7 +227,8 @@ export const OPENCLAW_EXPERIMENTAL_GATEWAY_METHODS = [
   "webhooks.gmail.setup",
   "gmail.setup",
   "cron.add",
-  "cron.create"
+  "cron.create",
+  "browser.request"
 ] as const;
 
 const additionalGatewayFirstMethods = [

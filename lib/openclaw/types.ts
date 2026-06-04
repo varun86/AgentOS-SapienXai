@@ -1,3 +1,5 @@
+import type { OpenClawCompatibilityReport } from "@/lib/openclaw/compat/types";
+
 export type DiagnosticHealth = "healthy" | "degraded" | "offline";
 export type OpenClawBinarySelectionMode = "auto" | "local-prefix" | "global-path" | "custom";
 
@@ -279,6 +281,7 @@ export interface GatewayDiagnostics {
   openClawBinarySelection: OpenClawBinarySelection;
   modelReadiness: ModelReadiness;
   capabilityMatrix?: OpenClawCapabilityMatrix;
+  compatibilityReport?: OpenClawCompatibilityReport | null;
   gatewayFallbackDiagnostics?: OpenClawGatewayFallbackDiagnosticRecord[];
   gatewayFallbackReasons?: string[];
   compatibilitySmokeTest?: OpenClawCompatibilitySmokeReport | null;

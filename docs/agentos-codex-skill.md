@@ -120,3 +120,155 @@ Do not:
 - Rewrite large areas before proving the current structure is wrong.
 - Create version or release mismatches between GitHub, npm, docs, installers, and workflows.
 - Add Turkish project content or user-facing copy unless explicitly requested.
+
+
+---
+
+# Mandatory Operating Rules
+
+## OpenClaw Compatibility Mode
+
+When touching any OpenClaw-related integration, Codex must treat compatibility as a first-class requirement.
+
+This applies to:
+- Gateway client code
+- CLI fallback code
+- OpenClaw adapters
+- OpenClaw application services
+- Setup Center
+- Settings / Diagnostics
+- Models, auth profiles, accounts, browser profiles, sessions, tasks, transcripts, channels, tools, and config flows
+- Release/version scripts that depend on OpenClaw versions
+
+Rules:
+- Never assume an OpenClaw method, field, event, or CLI command exists only because AgentOS UI needs it.
+- Identify the exact OpenClaw capability being used before implementing or changing behavior.
+- Prefer native OpenClaw Gateway/API paths whenever a stable path exists.
+- Use CLI fallback only when no stable native Gateway/API path exists, and make the fallback explicit, observable, and recoverable.
+- If Gateway support is missing, unstable, or uncertain, expose the feature as degraded, unsupported, or unavailable instead of pretending it works.
+- Keep AgentOS UI dependent on AgentOS-normalized domain models, not raw OpenClaw response shapes.
+- Do not spread OpenClaw calls directly into React components or unrelated API routes.
+- Route OpenClaw access through the existing adapter/client/application-service boundary.
+- Preserve compatibility with the recommended OpenClaw version defined in the repo.
+- When practical, check behavior against latest stable OpenClaw and latest beta OpenClaw.
+- If an OpenClaw response shape, lifecycle behavior, auth behavior, model discovery behavior, session/task behavior, or fallback behavior changes, add or update a contract test.
+- If a feature cannot be connected to a real OpenClaw capability, do not leave mock/local/demo behavior behind.
+- Show `unknown`, `not available`, `unsupported`, or `degraded` states honestly when runtime data is missing.
+- Do not silently swallow OpenClaw errors. Convert them into useful diagnostics and recovery suggestions.
+- Do not downgrade the architecture by making CLI fallback the default path.
+- Do not duplicate OpenClaw functionality inside AgentOS unless explicitly needed as a UI/control-layer abstraction.
+
+Compatibility checks should report:
+- Installed OpenClaw version
+- Recommended OpenClaw version
+- Gateway availability
+- Gateway protocol compatibility
+- Native Gateway/API supported operations
+- CLI fallback operations
+- Unsupported operations
+- Degraded surfaces
+- Recovery suggestions
+- Overall status: compatible, degraded, incompatible, or unknown
+
+For every OpenClaw integration change, the final report must include:
+- Which OpenClaw capabilities were touched
+- Whether each capability is native Gateway/API, CLI fallback, sidecar-derived, unsupported, or unknown
+- Whether contract tests were added or updated
+- Whether compatibility was checked against the recommended OpenClaw version
+- Any known compatibility risk with latest stable or beta OpenClaw
+
+
+## Security Rules
+
+Security must be treated as a release-blocking concern when touching API routes, auth, accounts, integrations, model credentials, browser profiles, local operator access, release scripts, or publish flows.
+
+Rules:
+- Do not treat CSRF protection, Origin checks, Referer checks, Host checks, loopback checks, or local network assumptions as authentication.
+- Do not expose read or write API routes without intentional access control.
+- Do not weaken existing local-operator, auth, or safety checks to make UI flows easier.
+- Do not add unauthenticated access to sensitive runtime state, credentials, account profiles, browser sessions, logs, files, environment values, or OpenClaw control actions.
+- Never log secrets, tokens, cookies, API keys, auth profiles, npm tokens, OpenAI keys, OpenRouter keys, browser session data, or private environment values.
+- Never print secret values in terminal output, debug logs, test output, release notes, GitHub Actions logs, or error messages.
+- Never commit `.env`, `.env.local`, `.env.production`, local credential files, browser profile data, tokens, cookies, or generated secret files.
+- If a script needs an environment variable, validate that it exists without printing its value.
+- If a secret is missing, fail with a safe, clear message.
+- When editing release or publish flows, confirm that npm/GitHub tokens are used only through environment variables or approved secret stores.
+- Do not store user credentials inside repo-tracked files.
+- Do not create fake auth, bypass auth, or add temporary insecure shortcuts unless the user explicitly asks for a local-only prototype, and even then mark it clearly as unsafe and do not ship it.
+- Do not trust client-controlled headers as proof of identity.
+- Do not rely on browser-only protections for non-browser clients.
+- Sensitive API responses should return only the minimum fields needed by the UI.
+- Error messages should be useful but must not leak secrets, filesystem paths containing private usernames when avoidable, tokens, cookies, or internal credential material.
+- When practical, add or update tests for unauthorized access, degraded auth state, missing credentials, unsafe fallback behavior, and secret redaction.
+
+When touching security-sensitive code, the final report must include:
+- Which sensitive surfaces were touched
+- What access-control assumptions were used
+- Whether secrets are redacted
+- Whether `.env*` files remain untracked
+- Whether unauthorized/degraded cases were tested
+- Any remaining security risks or follow-up tasks
+
+
+## Final Report Format
+
+At the end of every task, Codex must provide a concise but complete final report. Do not hide failed steps. Do not claim success unless commands were actually run and completed successfully.
+
+Use this format:
+
+### Summary
+- Briefly explain what was changed and why.
+- Mention whether the task is fully complete, partially complete, or blocked.
+
+### Files Changed
+- List each changed file.
+- For each file, explain the purpose of the change in one short sentence.
+
+### OpenClaw Compatibility
+- List every OpenClaw capability touched.
+- For each capability, mark it as:
+  - Native Gateway/API
+  - CLI fallback
+  - Sidecar-derived
+  - Unsupported
+  - Unknown
+- Include installed/recommended OpenClaw version if checked.
+- Include native coverage, fallback count, degraded surfaces, and unsupported operations when available.
+- Mention whether contract tests were added or updated.
+- Mention any compatibility risk with latest stable or beta OpenClaw.
+
+### Security
+- State whether the task touched security-sensitive surfaces.
+- If yes, list which ones.
+- Confirm that no secrets were logged or committed.
+- Confirm that `.env*` files remain untracked.
+- Mention any access-control, auth, token, credential, browser profile, or API route risks.
+- Mention whether unauthorized/degraded cases were tested.
+
+### Validation
+- List every command run, for example:
+  - `pnpm lint`
+  - `pnpm typecheck`
+  - `pnpm test`
+  - `pnpm build`
+  - `pnpm openclaw:compat`
+- Mark each command as passed, failed, skipped, or not available.
+- If skipped, explain why.
+- If failed, include the exact failure summary and what remains to fix.
+
+### Release / Publish
+Use this section only when the task touches release or publishing.
+- Version prepared or published
+- Commit hash
+- Git tag
+- GitHub release link
+- npm package/version link
+- Release assets/checksums status
+- Whether release consistency checks passed
+- Any manual follow-up needed
+
+### Known Issues / Follow-ups
+- List remaining issues honestly.
+- Separate blockers from nice-to-have follow-ups.
+- Do not invent completed work.
+- Do not say something is production-ready unless validation proves it.

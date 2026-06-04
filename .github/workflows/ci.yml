@@ -47,3 +47,41 @@ jobs:
 
       - name: Run release consistency check
         run: pnpm check:release
+
+  openclaw-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: stable
+            target: test-gateway-stable
+            allow_failure: false
+          - channel: beta
+            target: test-gateway-beta
+            allow_failure: true
+    continue-on-error: ${{ matrix.allow_failure }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run OpenClaw compatibility report
+        run: pnpm openclaw:compat -- --target ${{ matrix.target }} --json-output .compat/openclaw-${{ matrix.channel }}.json
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: openclaw-compat-${{ matrix.channel }}
+          path: .compat/openclaw-${{ matrix.channel }}.json
+          if-no-files-found: warn

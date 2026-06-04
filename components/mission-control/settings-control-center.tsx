@@ -65,6 +65,9 @@ type GatewayMethodContractAudit = GatewayCompatibilityProfile["methodContract"];
 type CompatibilitySmokeReport = NonNullable<
   MissionControlShellSettingsPanelProps["snapshot"]["diagnostics"]["compatibilitySmokeTest"]
 >;
+type CompatibilityReport = NonNullable<
+  MissionControlShellSettingsPanelProps["snapshot"]["diagnostics"]["compatibilityReport"]
+>;
 type SettingsSectionId =
   | "openclaw"
   | "gateway"
@@ -185,6 +188,7 @@ export function SettingsControlCenter(
     [connectionState, snapshot.diagnostics.transport]
   );
   const capabilityMatrix = snapshot.diagnostics.capabilityMatrix;
+  const compatibilityReport = snapshot.diagnostics.compatibilityReport;
   const gatewayCompatibilityProfile = capabilityMatrix?.compatibility;
   const gatewayFallbackDiagnostics = (
     snapshot.diagnostics.gatewayFallbackDiagnostics?.length
@@ -606,6 +610,10 @@ export function SettingsControlCenter(
                       ["Endpoint", snapshot.diagnostics.gatewayUrl || "Not configured"],
                       ["Auth status", nativeAuthLabel],
                       ["Protocol", `${transportSummary.protocolRangeLabel}, connected: ${transportSummary.protocolLabel}`],
+                      ["OpenClaw Compatibility", compatibilityReport ? formatCompatibilityReportStatus(compatibilityReport.status) : "Unknown"],
+                      ["Native Gateway coverage", compatibilityReport ? `${compatibilityReport.summary.nativeGatewayCoveragePercent}% (${compatibilityReport.summary.nativeGatewayCoverageLabel})` : "Unknown"],
+                      ["CLI fallback operation count", compatibilityReport ? String(compatibilityReport.summary.cliFallbackOperationCount) : "Unknown"],
+                      ["Unsupported/degraded surfaces", compatibilityReport ? formatCompatibilityReportIssues(compatibilityReport) : "Unknown"],
                       ["Compatibility", formatGatewayCompatibilityStatus(gatewayCompatibilityProfile)],
                       ["Contract audit", formatGatewayMethodContractStatus(gatewayCompatibilityProfile?.methodContract)],
                       ["Contract gaps", formatGatewayMethodContractGaps(gatewayCompatibilityProfile?.methodContract, capabilityMatrix?.operations)],
@@ -620,6 +628,7 @@ export function SettingsControlCenter(
                   />
 
                   <CompatibilityPanel
+                    compatibilityReport={compatibilityReport}
                     report={compatibilitySmokeReport}
                     snapshot={snapshot}
                     capabilityMatrix={capabilityMatrix}
@@ -1319,6 +1328,7 @@ function DiagnosticBlock({
 }
 
 function CompatibilityPanel({
+  compatibilityReport,
   report,
   snapshot,
   capabilityMatrix,
@@ -1329,6 +1339,7 @@ function CompatibilityPanel({
   onRun,
   surfaceTheme
 }: {
+  compatibilityReport: CompatibilityReport | null | undefined;
   report: CompatibilitySmokeReport | null;
   snapshot: MissionControlShellSettingsPanelProps["snapshot"];
   capabilityMatrix: MissionControlShellSettingsPanelProps["snapshot"]["diagnostics"]["capabilityMatrix"];
@@ -1340,26 +1351,51 @@ function CompatibilityPanel({
   surfaceTheme: SurfaceTheme;
 }) {
   const compatibility = report?.compatibility;
+  const reportStatus = compatibilityReport?.status;
   const protocolRange = compatibility
     ? `v${compatibility.agentOsSupportedProtocolRange.min}-v${compatibility.agentOsSupportedProtocolRange.max}`
-    : transportSummary.protocolRangeLabel;
+    : compatibilityReport
+      ? `v${compatibilityReport.gateway.protocolRange.min}-v${compatibilityReport.gateway.protocolRange.max}`
+      : transportSummary.protocolRangeLabel;
   const fallbackReason =
     compatibility?.lastFallbackReason ||
+    compatibilityReport?.fallback.diagnostics[0]?.issue ||
     snapshot.diagnostics.gatewayFallbackDiagnostics?.[0]?.issue ||
     "None";
   const lastNativeError = compatibility?.lastNativeError || transportSummary.lastNativeError || "None";
   const recovery =
+    compatibilityReport?.recovery ||
     report?.recovery ||
     transportSummary.recovery ||
     snapshot.diagnostics.issues[0] ||
-    "Run the smoke test to verify OpenClaw compatibility.";
-  const statusLabel = report ? formatCompatibilitySmokeStatus(report.status) : "Unknown";
-  const statusTone = report ? compatibilitySmokeStatusTone(report.status) : "neutral";
+    "OpenClaw compatibility is not available yet.";
+  const statusLabel = reportStatus
+    ? formatCompatibilityReportStatus(reportStatus)
+    : report
+      ? formatCompatibilitySmokeStatus(report.status)
+      : "Unknown";
+  const statusTone = reportStatus ? compatibilityReportStatusTone(reportStatus) : report ? compatibilitySmokeStatusTone(report.status) : "neutral";
   const safeLabel = report
     ? report.safeToDispatchMissions
       ? "Safe to dispatch"
       : "Do not dispatch"
-    : "Not tested";
+    : compatibilityReport
+      ? compatibilityReport.status === "compatible"
+        ? "Compatible"
+        : compatibilityReport.status === "degraded"
+          ? "Degraded"
+          : "Incompatible"
+      : "Not tested";
+  const reportIssues = compatibilityReport
+    ? [
+      ...compatibilityReport.summary.failedSurfaces,
+      ...compatibilityReport.summary.unsupportedSurfaces,
+      ...compatibilityReport.summary.degradedSurfaces
+    ]
+    : [];
+  const visibleContractIssues = compatibilityReport?.contracts
+    .filter((check) => check.status !== "ok")
+    .slice(0, 5) ?? [];
 
   return (
     <div className={cn("mt-4 rounded-[18px] border p-3.5", insetPanelClassName(surfaceTheme))}>
@@ -1373,7 +1409,8 @@ function CompatibilityPanel({
             <span className={transportTonePillClassName(statusTone, surfaceTheme)}>{safeLabel}</span>
           </div>
           <p className={cn("mt-1 text-xs", surfaceTheme === "light" ? "text-[#8a7464]" : "text-slate-400")}>
-            Last test: {report ? formatTimestamp(report.checkedAt) : "Not run"}
+            Report: {compatibilityReport ? formatTimestamp(compatibilityReport.generatedAt) : "Not available"}
+            {report ? ` / Smoke: ${formatTimestamp(report.checkedAt)}` : ""}
           </p>
         </div>
         <Button
@@ -1392,14 +1429,17 @@ function CompatibilityPanel({
         <InfoRows
           surfaceTheme={surfaceTheme}
           rows={[
-            ["Installed OpenClaw", formatVersionValue(compatibility?.installedVersion ?? snapshot.diagnostics.version ?? null)],
-            ["Required OpenClaw", formatVersionValue(compatibility?.requiredOpenClawVersion ?? null)],
-            ["Recommended OpenClaw", formatVersionValue(compatibility?.recommendedOpenClawVersion ?? snapshot.diagnostics.latestVersion ?? null)],
-            ["Gateway protocol", compatibility?.gatewayProtocolVersion ? `v${compatibility.gatewayProtocolVersion}` : capabilityMatrix?.gatewayProtocolVersion ? `v${capabilityMatrix.gatewayProtocolVersion}` : transportSummary.protocolLabel],
+            ["Installed OpenClaw", formatVersionValue(compatibilityReport?.openClaw.installedVersion ?? compatibility?.installedVersion ?? snapshot.diagnostics.version ?? null)],
+            ["Required OpenClaw", formatVersionValue(compatibility?.requiredOpenClawVersion ?? compatibilityReport?.openClaw.supportedBaselineVersion ?? null)],
+            ["Recommended OpenClaw", formatVersionValue(compatibilityReport?.openClaw.recommendedVersion ?? compatibility?.recommendedOpenClawVersion ?? snapshot.diagnostics.latestVersion ?? null)],
+            ["Gateway protocol status", compatibilityReport ? formatGatewayProtocolReport(compatibilityReport) : compatibility?.gatewayProtocolVersion ? `v${compatibility.gatewayProtocolVersion}` : capabilityMatrix?.gatewayProtocolVersion ? `v${capabilityMatrix.gatewayProtocolVersion}` : transportSummary.protocolLabel],
             ["AgentOS protocol range", protocolRange],
+            ["Native Gateway coverage", compatibilityReport ? `${compatibilityReport.summary.nativeGatewayCoveragePercent}% (${compatibilityReport.summary.nativeGatewayCoverageLabel})` : "Unknown"],
+            ["CLI fallback operation count", compatibilityReport ? String(compatibilityReport.summary.cliFallbackOperationCount) : "Unknown"],
+            ["Unsupported/degraded surfaces", compatibilityReport ? (reportIssues.length > 0 ? formatShortList(reportIssues, 3) : "None") : "Unknown"],
             ["Node.js", compatibility?.nodeVersion ? `${compatibility.nodeVersion} / ${formatNodeStatus(compatibility.nodeStatus)}` : "Run smoke test"],
             ["Gateway auth", compatibility?.gatewayAuthStatus || nativeAuthLabel],
-            ["Native Gateway", compatibility?.nativeGatewayStatus || transportSummary.statusLabel],
+            ["Native Gateway", compatibilityReport ? `${compatibilityReport.gateway.health} / ${compatibilityReport.gateway.capabilitySource}` : compatibility?.nativeGatewayStatus || transportSummary.statusLabel],
             ["CLI fallback count", String(compatibility?.cliFallbackUsageCount ?? transportSummary.fallbackTotal)],
             ["Last native error", lastNativeError],
             ["Last fallback reason", fallbackReason]
@@ -1423,6 +1463,37 @@ function CompatibilityPanel({
           </p>
         ) : null}
       </div>
+
+      {visibleContractIssues.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {visibleContractIssues.map((check) => (
+            <div
+              key={check.operation}
+              className={cn(
+                "rounded-[16px] border p-3",
+                surfaceTheme === "light"
+                  ? "border-[#eadbcf] bg-[#fffdf9]"
+                  : "border-white/[0.08] bg-[#101a2a]/92"
+              )}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={transportTonePillClassName(contractStatusTone(check.status), surfaceTheme)}>
+                  {formatContractStatus(check.status)}
+                </span>
+                <p className={cn("text-sm font-medium", surfaceTheme === "light" ? "text-[#3b2d24]" : "text-slate-100")}>
+                  {check.label}
+                </p>
+              </div>
+              <p className={cn("mt-2 text-xs leading-5", surfaceTheme === "light" ? "text-[#6b5546]" : "text-slate-300")}>
+                {check.reason}
+              </p>
+              <p className={cn("mt-1 text-xs leading-5", surfaceTheme === "light" ? "text-[#52735e]" : "text-slate-400")}>
+                Recovery: {check.suggestedRecovery}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {report?.checks.length ? (
         <div className="mt-3 space-y-2">
@@ -1834,6 +1905,17 @@ function formatCompatibilitySmokeStatus(value: CompatibilitySmokeReport["status"
   }
 }
 
+function formatCompatibilityReportStatus(value: CompatibilityReport["status"]) {
+  switch (value) {
+    case "compatible":
+      return "Compatible";
+    case "degraded":
+      return "Degraded";
+    case "incompatible":
+      return "Incompatible";
+  }
+}
+
 function compatibilitySmokeStatusTone(value: CompatibilitySmokeReport["status"]): TransportStatusTone {
   switch (value) {
     case "compatible":
@@ -1845,6 +1927,42 @@ function compatibilitySmokeStatusTone(value: CompatibilitySmokeReport["status"])
     case "unknown":
     default:
       return "neutral";
+  }
+}
+
+function compatibilityReportStatusTone(value: CompatibilityReport["status"]): TransportStatusTone {
+  switch (value) {
+    case "compatible":
+      return "success";
+    case "degraded":
+      return "warning";
+    case "incompatible":
+      return "danger";
+  }
+}
+
+function formatContractStatus(value: CompatibilityReport["contracts"][number]["status"]) {
+  switch (value) {
+    case "ok":
+      return "OK";
+    case "degraded":
+      return "Degraded";
+    case "unsupported":
+      return "Unsupported";
+    case "failed":
+      return "Failed";
+  }
+}
+
+function contractStatusTone(value: CompatibilityReport["contracts"][number]["status"]): TransportStatusTone {
+  switch (value) {
+    case "ok":
+      return "success";
+    case "degraded":
+      return "warning";
+    case "unsupported":
+    case "failed":
+      return "danger";
   }
 }
 
@@ -1888,6 +2006,29 @@ function formatNodeStatus(value: CompatibilitySmokeReport["compatibility"]["node
 
 function formatVersionValue(value: string | null | undefined) {
   return value ? `v${value.replace(/^v/i, "")}` : "Unknown";
+}
+
+function formatGatewayProtocolReport(report: CompatibilityReport) {
+  const version = report.gateway.protocolVersion ? `v${report.gateway.protocolVersion}` : "unknown";
+  return `${version} / ${report.gateway.protocolStatus}`;
+}
+
+function formatCompatibilityReportIssues(report: CompatibilityReport) {
+  const values = [
+    ...report.summary.failedSurfaces,
+    ...report.summary.unsupportedSurfaces,
+    ...report.summary.degradedSurfaces
+  ];
+
+  return values.length > 0 ? formatShortList(values, 3) : "None";
+}
+
+function formatShortList(values: string[], maxVisible: number) {
+  const unique = Array.from(new Set(values));
+  const visible = unique.slice(0, maxVisible);
+  const suffix = unique.length > visible.length ? ` +${unique.length - visible.length}` : "";
+
+  return `${visible.join(", ")}${suffix}`;
 }
 
 function formatRawDetails(value: unknown) {

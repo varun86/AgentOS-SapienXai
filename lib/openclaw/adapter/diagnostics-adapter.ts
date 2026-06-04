@@ -184,6 +184,7 @@ export function buildGatewayDiagnostics(input: {
   openClawBinarySelection: OpenClawBinarySelection;
   modelReadiness: ModelReadiness;
   capabilityMatrix?: OpenClawCapabilityMatrix;
+  compatibilityReport?: MissionControlSnapshot["diagnostics"]["compatibilityReport"];
   compatibilitySmokeTest?: MissionControlSnapshot["diagnostics"]["compatibilitySmokeTest"];
   commandHistory?: OpenClawCommandDiagnostic[];
   transport?: MissionControlSnapshot["diagnostics"]["transport"];
@@ -240,6 +241,7 @@ export function buildGatewayDiagnostics(input: {
     openClawBinarySelection: input.openClawBinarySelection,
     modelReadiness: input.modelReadiness,
     capabilityMatrix: input.capabilityMatrix,
+    compatibilityReport: input.compatibilityReport ?? null,
     compatibilitySmokeTest: input.compatibilitySmokeTest ?? null,
     gatewayFallbackDiagnostics,
     gatewayFallbackReasons: activeGatewayFallbackDiagnostics.map(

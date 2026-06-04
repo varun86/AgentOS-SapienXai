@@ -13,6 +13,11 @@ import {
   warmOpenClawCapabilityMatrix
 } from "@/lib/openclaw/application/capability-matrix-service";
 import {
+  getCachedOpenClawCompatibilityReport,
+  getOpenClawCompatibilityReport,
+  warmOpenClawCompatibilityReport
+} from "@/lib/openclaw/compat";
+import {
   buildOpenClawBinarySelectionSnapshot,
   readOpenClawBinarySelection
 } from "@/lib/openclaw/binary-selection";
@@ -128,6 +133,18 @@ export async function buildLiveMissionControlDiagnostics(input: {
     warmOpenClawCapabilityMatrix();
   }
   const transport = getOpenClawGatewayClient()?.getDiagnostics?.();
+  const compatibilityReport =
+    input.profile === "interactive"
+      ? getCachedOpenClawCompatibilityReport() ?? undefined
+      : await getOpenClawCompatibilityReport({
+        status: input.status ?? null,
+        gatewayStatus: input.gatewayStatus ?? null,
+        transport,
+        includeLiveShapeChecks: false
+      }).catch(() => undefined);
+  if (input.profile === "interactive" && !compatibilityReport) {
+    warmOpenClawCompatibilityReport();
+  }
   const gatewayFallbackIssues = filterActiveOpenClawGatewayFallbackDiagnostics(
     getRecentOpenClawGatewayFallbackDiagnostics(),
     transport
@@ -147,6 +164,7 @@ export async function buildLiveMissionControlDiagnostics(input: {
     openClawBinarySelection,
     modelReadiness,
     capabilityMatrix,
+    compatibilityReport,
     compatibilitySmokeTest: getLatestOpenClawCompatibilitySmokeTest(input.settings),
     commandHistory: getRecentOpenClawCommandDiagnostics(),
     transport,
