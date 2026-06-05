@@ -12,7 +12,8 @@ import {
   Moon,
   MoreHorizontal,
   Search,
-  SlidersHorizontal
+  SlidersHorizontal,
+  SunMedium
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -55,14 +56,19 @@ const iconToneStyles: Record<StatusTone, string> = {
 
 export function OperationsTopBar({
   snapshot,
-  connectionState
+  connectionState,
+  surfaceTheme,
+  onToggleTheme
 }: {
   snapshot: MissionControlSnapshot;
   connectionState: "connecting" | "live" | "retrying";
+  surfaceTheme: "dark" | "light";
+  onToggleTheme: () => void;
 }) {
   const version = snapshot.diagnostics.version ?? snapshot.diagnostics.latestVersion ?? "unknown";
   const online = connectionState === "live" && snapshot.diagnostics.health === "healthy";
   const label = online ? "Online" : connectionState === "retrying" ? "Retrying" : "Connecting";
+  const ThemeIcon = surfaceTheme === "light" ? SunMedium : Moon;
 
   return (
     <div className="flex items-center justify-end gap-2 text-[0.58rem] font-semibold uppercase tracking-[0.22em] text-slate-400">
@@ -80,7 +86,12 @@ export function OperationsTopBar({
         {label}
       </span>
       <IconButton ariaLabel="Refresh status" icon={Clock3} />
-      <IconButton ariaLabel="Theme" icon={Moon} />
+      <IconButton
+        ariaLabel={surfaceTheme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+        icon={ThemeIcon}
+        active={surfaceTheme === "light"}
+        onClick={onToggleTheme}
+      />
       <IconButton ariaLabel="Notifications" icon={Bell} dot />
     </div>
   );

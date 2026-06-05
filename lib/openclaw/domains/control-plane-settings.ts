@@ -18,6 +18,9 @@ const missionControlSettingsPath = path.join(missionControlRootPath, "settings.j
 const runtimeSmokeTestTtlMs = 12 * 60 * 60 * 1000;
 const providerAuthSmokeTestTtlMs = 5 * 60 * 1000;
 const allowRemoteGatewayUrlEnv = "AGENTOS_ALLOW_REMOTE_GATEWAY_URL";
+const defaultConfigUpdatePacingMode: ConfigUpdatePacingMode = "respect-gateway";
+const fastLocalTestingConfigUpdatePacingMs = 10_000;
+const maxConfigUpdatePacingMs = 10 * 60_000;
 
 export type RuntimeSmokeTestCacheEntry = {
   status: "passed" | "failed";
@@ -27,8 +30,16 @@ export type RuntimeSmokeTestCacheEntry = {
   error?: string;
 };
 
+export type ConfigUpdatePacingMode = "respect-gateway" | "fast-local-testing" | "custom";
+
+export type ConfigUpdatePacingSettings = {
+  mode: ConfigUpdatePacingMode;
+  minimumIntervalMs: number | null;
+};
+
 export type MissionControlSettings = {
   workspaceRoot?: string;
+  configUpdatePacing?: ConfigUpdatePacingSettings;
   runtimePreflight?: {
     smokeTests?: Record<string, RuntimeSmokeTestCacheEntry>;
   };
@@ -123,15 +134,113 @@ export async function readMissionControlSettings(): Promise<MissionControlSettin
       typeof parsed.runtimePreflight === "object" && parsed.runtimePreflight ? parsed.runtimePreflight : undefined
     );
     const compatibilitySmokeTest = normalizeCompatibilitySmokeTest(parsed.compatibilitySmokeTest);
+    const configUpdatePacing = normalizeConfigUpdatePacingSettings(parsed.configUpdatePacing);
 
     return {
       ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(configUpdatePacing ? { configUpdatePacing } : {}),
       ...(runtimePreflight ? { runtimePreflight } : {}),
       ...(compatibilitySmokeTest ? { compatibilitySmokeTest } : {})
     };
   } catch {
     return {};
   }
+}
+
+export function normalizeConfigUpdatePacingSettings(value: unknown): ConfigUpdatePacingSettings | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const mode = normalizeConfigUpdatePacingMode(record.mode);
+  const minimumIntervalMs = normalizeConfigUpdatePacingIntervalMs(record.minimumIntervalMs);
+
+  if (mode === "respect-gateway") {
+    return {
+      mode,
+      minimumIntervalMs: null
+    };
+  }
+
+  if (mode === "fast-local-testing") {
+    return {
+      mode,
+      minimumIntervalMs: fastLocalTestingConfigUpdatePacingMs
+    };
+  }
+
+  return {
+    mode,
+    minimumIntervalMs: minimumIntervalMs ?? fastLocalTestingConfigUpdatePacingMs
+  };
+}
+
+export function normalizeConfigUpdatePacingInput(input: {
+  mode?: string | null;
+  minimumIntervalMs?: number | null;
+}): ConfigUpdatePacingSettings {
+  const mode = normalizeConfigUpdatePacingMode(input.mode);
+
+  if (mode === "respect-gateway") {
+    return {
+      mode,
+      minimumIntervalMs: null
+    };
+  }
+
+  if (mode === "fast-local-testing") {
+    return {
+      mode,
+      minimumIntervalMs: fastLocalTestingConfigUpdatePacingMs
+    };
+  }
+
+  return {
+    mode,
+    minimumIntervalMs: normalizeConfigUpdatePacingIntervalMs(input.minimumIntervalMs) ?? fastLocalTestingConfigUpdatePacingMs
+  };
+}
+
+export function getEffectiveConfigUpdatePacing(settings: MissionControlSettings): ConfigUpdatePacingSettings {
+  return settings.configUpdatePacing ?? {
+    mode: defaultConfigUpdatePacingMode,
+    minimumIntervalMs: null
+  };
+}
+
+export async function updateConfigUpdatePacingSettings(input: {
+  mode?: string | null;
+  minimumIntervalMs?: number | null;
+}) {
+  const settings = await readMissionControlSettings();
+  const configUpdatePacing = normalizeConfigUpdatePacingInput(input);
+
+  await writeMissionControlSettings({
+    ...settings,
+    configUpdatePacing
+  });
+
+  return configUpdatePacing;
+}
+
+function normalizeConfigUpdatePacingMode(value: unknown): ConfigUpdatePacingMode {
+  return value === "fast-local-testing" || value === "custom" || value === "respect-gateway"
+    ? value
+    : defaultConfigUpdatePacingMode;
+}
+
+function normalizeConfigUpdatePacingIntervalMs(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+
+  const rounded = Math.round(value);
+  if (rounded <= 0) {
+    return null;
+  }
+
+  return Math.min(rounded, maxConfigUpdatePacingMs);
 }
 
 export async function writeMissionControlSettings(settings: MissionControlSettings) {

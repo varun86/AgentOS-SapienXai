@@ -115,7 +115,21 @@ export async function hydrateMissionControlWorkspaceGraph(input: {
   const agentEntries = await Promise.all(
     input.bindings.workspaceBoundAgents.map(async (rawAgent) => {
       const configured = configByAgent.get(rawAgent.id);
-      const identityOverrides = null;
+      const identityOverrides = configured?.identity
+        ? {
+            name: configured.identity.name ?? configured.name ?? null,
+            emoji: configured.identity.emoji ?? null,
+            theme: configured.identity.theme ?? null,
+            avatar: configured.identity.avatar ?? null
+          }
+        : configured?.name
+          ? {
+              name: configured.name,
+              emoji: null,
+              theme: null,
+              avatar: null
+            }
+          : null;
       const workspaceId = input.bindings.resolveWorkspaceId(rawAgent.workspace);
       const sessionList = recentSessionsByAgent.get(rawAgent.id) ?? [];
       const manifest =

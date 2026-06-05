@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import { controlGateway } from "@/lib/openclaw/application/gateway-service";
-import { getOpenClawAdapter, setOpenClawAdapterForTesting } from "@/lib/openclaw/adapter/openclaw-adapter";
+import {
+  GatewayBackedOpenClawAdapter,
+  getOpenClawAdapter,
+  setOpenClawAdapterForTesting
+} from "@/lib/openclaw/adapter/openclaw-adapter";
+import {
+  resetConfigUpdatePacingForTesting,
+  setConfigUpdatePacingForTesting
+} from "@/lib/openclaw/application/config-pacing-service";
 import {
   settleGatewayStatusPayloadFromOpenClaw,
   settleModelStatusPayloadFromOpenClaw,
@@ -23,6 +31,10 @@ type MockCall = {
   action?: string;
   options?: OpenClawCommandOptions;
 };
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {}) {
   const calls: MockCall[] = [];
@@ -284,6 +296,7 @@ afterEach(() => {
   setOpenClawGatewayClientProvider(null);
   setOpenClawGatewayClientForTesting(null);
   setOpenClawAdapterForTesting(null);
+  resetConfigUpdatePacingForTesting();
 });
 
 test("OpenClaw adapter status slice uses the injected gateway client", async () => {
@@ -338,6 +351,39 @@ test("OpenClaw gateway client factory supports a provider extension point", () =
   setOpenClawGatewayClientProvider(() => client);
 
   assert.equal(getOpenClawGatewayClient(), client);
+});
+
+test("OpenClaw adapter queues the latest config mutation during Gateway config cooldown", async () => {
+  setConfigUpdatePacingForTesting({ mode: "respect-gateway", minimumIntervalMs: null });
+  const appliedValues: unknown[] = [];
+  let attempt = 0;
+  const adapter = new GatewayBackedOpenClawAdapter(() => ({
+    async setConfig(_path: string, value: unknown) {
+      attempt += 1;
+
+      if (attempt === 1) {
+        throw new Error(
+          "UNAVAILABLE: rate limit exceeded for config.patch; retry after 0.05s Gateway-native operation failed; CLI fallback disabled for this operation."
+        );
+      }
+
+      appliedValues.push(value);
+      return { stdout: JSON.stringify({ ok: true }), stderr: "" };
+    }
+  } as unknown as OpenClawGatewayClient));
+
+  const first = await adapter.setConfig("agents.defaults", { model: "openai/gpt-5" });
+  const second = await adapter.setConfig("agents.defaults", { model: "openai/gpt-5.5" });
+
+  assert.equal(first.metadata?.pending, true);
+  assert.equal(second.metadata?.pending, true);
+
+  await delay(90);
+
+  assert.equal(attempt, 2);
+  assert.deepEqual(appliedValues, [
+    { model: "openai/gpt-5.5" }
+  ]);
 });
 
 test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", async () => {

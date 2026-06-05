@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 
 import { MissionSidebar } from "@/components/mission-control/sidebar";
+import { useMissionControlPreferences } from "@/components/mission-control/use-mission-control-preferences";
 import {
   buildWorkspaceSelectionStorageKey,
   resolveWorkspaceSelection,
@@ -22,6 +23,7 @@ export type OperationsShellContext = {
   activeWorkspace: WorkspaceRecord | null;
   activeWorkspaceId: string | null;
   connectionState: "connecting" | "live" | "retrying";
+  surfaceTheme: "dark" | "light";
   refresh: () => Promise<void>;
   setSnapshot: Dispatch<SetStateAction<MissionControlSnapshot>>;
 };
@@ -34,6 +36,7 @@ export function OperationsShell({
   children: (context: OperationsShellContext) => ReactNode;
 }) {
   const { snapshot, connectionState, refresh, setSnapshot } = useMissionControlData(initialSnapshot);
+  const { surfaceTheme, setSurfaceTheme } = useMissionControlPreferences();
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
     initialSnapshot.workspaces[0]?.id ?? null
   );
@@ -104,7 +107,12 @@ export function OperationsShell({
   }, [activeWorkspaceId, loadedWorkspaceSelectionRoot, snapshot.diagnostics.workspaceRoot]);
 
   return (
-    <div className="mission-shell relative min-h-screen overflow-hidden bg-[#030814] text-slate-100">
+    <div
+      className={cn(
+        "mission-shell relative min-h-screen overflow-hidden bg-[#030814] text-slate-100",
+        surfaceTheme === "light" && "mission-shell--light"
+      )}
+    >
       <div className="mission-canvas-backdrop fixed inset-0 z-0">
         <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0 opacity-60" />
         <div
@@ -129,7 +137,7 @@ export function OperationsShell({
       >
         <MissionSidebar
           snapshot={snapshot}
-          surfaceTheme="dark"
+          surfaceTheme={surfaceTheme}
           activeWorkspaceId={activeWorkspaceId}
           requestedAgentAction={null}
           connectionState={connectionState}
@@ -183,7 +191,7 @@ export function OperationsShell({
       >
         <MissionSidebar
           snapshot={snapshot}
-          surfaceTheme="dark"
+          surfaceTheme={surfaceTheme}
           activeWorkspaceId={activeWorkspaceId}
           requestedAgentAction={null}
           connectionState={connectionState}
@@ -217,13 +225,19 @@ export function OperationsShell({
 
       <main className={cn("relative z-20 min-h-screen pb-4 pl-[68px] pr-3 pt-4 sm:pl-[76px] sm:pr-5 lg:pl-[92px] lg:pr-4")}>
         <div className="mx-auto flex w-full max-w-[1880px] flex-col gap-3">
-          <OperationsTopBar snapshot={snapshot} connectionState={connectionState} />
+          <OperationsTopBar
+            snapshot={snapshot}
+            connectionState={connectionState}
+            surfaceTheme={surfaceTheme}
+            onToggleTheme={() => setSurfaceTheme((current) => (current === "light" ? "dark" : "light"))}
+          />
           {children({
             snapshot: scopedSnapshot,
             rootSnapshot: snapshot,
             activeWorkspace,
             activeWorkspaceId,
             connectionState,
+            surfaceTheme,
             refresh,
             setSnapshot
           })}

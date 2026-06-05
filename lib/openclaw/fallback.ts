@@ -14,6 +14,22 @@ import {
 } from "@/lib/openclaw/surface-runtime";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
+function createDefaultConfigUpdatePacingSnapshot(): MissionControlSnapshot["diagnostics"]["configUpdatePacing"] {
+  return {
+    settings: {
+      mode: "respect-gateway",
+      minimumIntervalMs: null
+    },
+    pending: false,
+    pendingCount: 0,
+    pendingPaths: [],
+    cooldownUntil: null,
+    retryAfterMs: null,
+    lastIssue: null,
+    lastUpdatedAt: null
+  };
+}
+
 function createTransientSnapshot(
   reason: string,
   options: {
@@ -57,6 +73,7 @@ function createTransientSnapshot(
         authProviders: [],
         issues: [reason]
       },
+      configUpdatePacing: createDefaultConfigUpdatePacingSnapshot(),
       runtime: {
         stateRoot,
         stateWritable: false,
@@ -169,6 +186,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         ],
         issues: []
       },
+      configUpdatePacing: createDefaultConfigUpdatePacingSnapshot(),
       runtime: {
         stateRoot: path.join(os.homedir(), ".openclaw"),
         stateWritable: false,

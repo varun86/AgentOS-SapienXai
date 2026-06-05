@@ -21,12 +21,14 @@ export function AgentsPageContent({
   snapshot,
   rootSnapshot,
   activeWorkspaceId,
+  surfaceTheme,
   refresh,
   setSnapshot
 }: {
   snapshot: MissionControlSnapshot;
   rootSnapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
+  surfaceTheme: "dark" | "light";
   refresh: () => Promise<void>;
   setSnapshot: Dispatch<SetStateAction<MissionControlSnapshot>>;
 }) {
@@ -142,7 +144,7 @@ export function AgentsPageContent({
                   onSnapshotChange={(updater) => setSnapshot((current) => updater(current))}
                   onAgentCreated={setSelectedId}
                   onAgentCreatedVisible={setSelectedId}
-                  surfaceTheme="dark"
+                  surfaceTheme={surfaceTheme}
                   trigger={
                     <Button size="sm" className="h-8 rounded-[10px] bg-blue-500 px-3 text-xs text-white shadow-blue-500/20 hover:bg-blue-400">
                       <Plus className="mr-1.5 h-3.5 w-3.5" />
@@ -232,7 +234,7 @@ export function AgentsPageContent({
               <AgentChatDrawer
                 agent={chatAgent}
                 snapshot={rootSnapshot}
-                surfaceTheme="dark"
+                surfaceTheme={surfaceTheme}
                 isVisible={Boolean(chatAgent)}
                 onRefresh={refresh}
                 onSnapshotChange={(updater) => setSnapshot((current) => updater(current))}

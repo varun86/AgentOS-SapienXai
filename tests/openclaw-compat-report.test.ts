@@ -5,6 +5,7 @@ import {
   clearOpenClawCompatibilityReportCacheForTesting,
   generateOpenClawCompatibilityReport
 } from "@/lib/openclaw/compat";
+import { resolveOpenClawCompatibilityTarget } from "@/lib/openclaw/compat/targets";
 import {
   OPENCLAW_GATEWAY_BASELINE_OPTIONAL_METHODS,
   OPENCLAW_GATEWAY_BASELINE_REQUIRED_METHODS
@@ -76,9 +77,11 @@ test("compatibility report fails a required contract when live response shape dr
 function baseReportOptions(gateway: FakeOpenClawGateway) {
   return {
     target: {
-      kind: "test-gateway" as const,
-      label: "OpenClaw stable test gateway",
-      version: OPENCLAW_SUPPORTED_BASELINE_VERSION
+      ...resolveOpenClawCompatibilityTarget({
+        target: "test-gateway-stable",
+        runtimeStartedBy: "ci"
+      }),
+      label: "OpenClaw stable test gateway"
     },
     installedVersion: OPENCLAW_SUPPORTED_BASELINE_VERSION,
     status: {

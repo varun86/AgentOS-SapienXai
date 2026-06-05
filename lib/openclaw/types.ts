@@ -1,4 +1,5 @@
 import type { OpenClawCompatibilityReport } from "@/lib/openclaw/compat/types";
+import type { ConfigUpdatePacingSnapshot } from "@/lib/openclaw/config-pacing-types";
 
 export type DiagnosticHealth = "healthy" | "degraded" | "offline";
 export type OpenClawBinarySelectionMode = "auto" | "local-prefix" | "global-path" | "custom";
@@ -282,6 +283,7 @@ export interface GatewayDiagnostics {
   modelReadiness: ModelReadiness;
   capabilityMatrix?: OpenClawCapabilityMatrix;
   compatibilityReport?: OpenClawCompatibilityReport | null;
+  configUpdatePacing: ConfigUpdatePacingSnapshot;
   gatewayFallbackDiagnostics?: OpenClawGatewayFallbackDiagnosticRecord[];
   gatewayFallbackReasons?: string[];
   compatibilitySmokeTest?: OpenClawCompatibilitySmokeReport | null;

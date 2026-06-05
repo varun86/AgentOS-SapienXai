@@ -46,6 +46,7 @@ import {
   getLatestRuntimeSmokeTest,
   type MissionControlSettings
 } from "@/lib/openclaw/domains/control-plane-settings";
+import { getConfigUpdatePacingSnapshotForSettings } from "@/lib/openclaw/application/config-pacing-service";
 import type { SessionsPayload } from "@/lib/openclaw/domains/session-catalog";
 import type { UpdateStatusPayload } from "@/lib/openclaw/adapter/gateway-payloads";
 import type {
@@ -165,6 +166,7 @@ export async function buildLiveMissionControlDiagnostics(input: {
     modelReadiness,
     capabilityMatrix,
     compatibilityReport,
+    configUpdatePacing: getConfigUpdatePacingSnapshotForSettings(input.settings),
     compatibilitySmokeTest: getLatestOpenClawCompatibilitySmokeTest(input.settings),
     commandHistory: getRecentOpenClawCommandDiagnostics(),
     transport,

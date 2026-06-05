@@ -58,6 +58,7 @@ export function buildSnapshotAgentEntry(input: {
   const agentName =
     normalizeOptionalValue(input.identityOverrides?.name) ||
     input.configured?.name ||
+    input.manifestAgent?.name ||
     input.rawAgent.name ||
     input.configured?.identity?.name ||
     input.rawAgent.identityName ||
@@ -78,7 +79,7 @@ export function buildSnapshotAgentEntry(input: {
     ...(input.manifestAgent?.toolIds ?? []),
     ...(policy.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
   ]);
-  const primaryModel = input.rawAgent.model || input.configured?.model || "unassigned";
+  const primaryModel = input.configured?.model || input.manifestAgent?.modelId || input.rawAgent.model || "unassigned";
   const agentRuntimes = input.agentRuntimes.sort(sortRuntimesByUpdatedAtDesc);
   const observedToolNames = unique(agentRuntimes.flatMap((runtime) => runtime.toolNames ?? []));
   const activeRuntimeIds = agentRuntimes.map((runtime) => runtime.id);
@@ -125,9 +126,13 @@ export function buildSnapshotAgentEntry(input: {
     identity: {
       emoji:
         normalizeOptionalValue(input.identityOverrides?.emoji) ||
+        input.manifestAgent?.emoji ||
         input.configured?.identity?.emoji ||
         input.rawAgent.identityEmoji,
-      theme: normalizeOptionalValue(input.identityOverrides?.theme) || input.configured?.identity?.theme,
+      theme:
+        normalizeOptionalValue(input.identityOverrides?.theme) ||
+        input.manifestAgent?.theme ||
+        input.configured?.identity?.theme,
       avatar: normalizeOptionalValue(input.identityOverrides?.avatar) || input.configured?.identity?.avatar,
       source: input.rawAgent.identitySource
     },

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { CommandResult } from "@/lib/openclaw/cli";
+import { runGatewayConfigMutationWithPacing } from "@/lib/openclaw/application/config-pacing-service";
 import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
 import type {
   GatewayProbePayload,
@@ -351,11 +352,21 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
   }
 
   setConfig(path: string, value: unknown, options: OpenClawCommandOptions & { strictJson?: boolean } = {}) {
-    return this.getClient().setConfig(path, value, options);
+    return runGatewayConfigMutationWithPacing({
+      path,
+      operation: "set",
+      value,
+      execute: () => this.getClient().setConfig(path, value, options)
+    });
   }
 
   unsetConfig(path: string, options: OpenClawCommandOptions = {}) {
-    return this.getClient().unsetConfig(path, options);
+    return runGatewayConfigMutationWithPacing({
+      path,
+      operation: "unset",
+      value: null,
+      execute: () => this.getClient().unsetConfig(path, options)
+    });
   }
 
   addAgent(input: OpenClawAddAgentInput, options: OpenClawCommandOptions = {}) {

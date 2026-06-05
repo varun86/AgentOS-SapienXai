@@ -401,6 +401,16 @@ function createSnapshot(input: {
         authProviders: [],
         issues: []
       },
+      configUpdatePacing: {
+        settings: { mode: "respect-gateway", minimumIntervalMs: null },
+        pending: false,
+        pendingCount: 0,
+        pendingPaths: [],
+        cooldownUntil: null,
+        retryAfterMs: null,
+        lastIssue: null,
+        lastUpdatedAt: null
+      },
       runtime: {
         stateRoot: path.join(input.workspacePath, ".openclaw"),
         stateWritable: true,

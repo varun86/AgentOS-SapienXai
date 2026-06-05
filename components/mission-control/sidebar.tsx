@@ -307,6 +307,7 @@ export function MissionSidebar({
         });
       }
 
+      onSnapshotChange?.((currentSnapshot) => applyEditedAgentDraftToSnapshot(currentSnapshot, editDraft));
       handleEditAgentOpenChange(false);
       succeeded = true;
     } catch (error) {
@@ -1429,6 +1430,42 @@ function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): A
         (seed.channelIds ?? []).filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
       )
     )
+  };
+}
+
+function applyEditedAgentDraftToSnapshot(snapshot: MissionControlSnapshot, draft: AgentDraft): MissionControlSnapshot {
+  return {
+    ...snapshot,
+    agents: snapshot.agents.map((agent) => {
+      if (agent.id !== draft.id) {
+        return agent;
+      }
+
+      const name = draft.name.trim() || formatAgentDisplayName(agent);
+      const modelId = draft.modelId.trim() || agent.modelId || "unassigned";
+      const emoji = draft.emoji.trim();
+      const theme = draft.theme.trim();
+      const avatar = draft.avatar.trim();
+
+      return {
+        ...agent,
+        name,
+        identityName: name,
+        modelId,
+        policy: draft.policy,
+        heartbeat: {
+          enabled: Boolean(draft.heartbeat.enabled),
+          every: draft.heartbeat.enabled ? draft.heartbeat.every || null : null,
+          everyMs: agent.heartbeat.everyMs ?? null
+        },
+        identity: {
+          ...agent.identity,
+          emoji: emoji || undefined,
+          theme: theme || undefined,
+          avatar: avatar || undefined
+        }
+      };
+    })
   };
 }
 

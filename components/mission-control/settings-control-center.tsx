@@ -149,6 +149,16 @@ export function SettingsControlCenter(
   );
   const [compatibilitySmokeError, setCompatibilitySmokeError] = useState<string | null>(null);
   const [isRunningCompatibilitySmoke, setIsRunningCompatibilitySmoke] = useState(false);
+  const [configUpdatePacing, setConfigUpdatePacing] = useState(() => snapshot.diagnostics.configUpdatePacing);
+  const [configUpdatePacingMode, setConfigUpdatePacingMode] = useState(
+    () => snapshot.diagnostics.configUpdatePacing.settings.mode
+  );
+  const [configUpdatePacingCustomSeconds, setConfigUpdatePacingCustomSeconds] = useState(() =>
+    String(Math.ceil((snapshot.diagnostics.configUpdatePacing.settings.minimumIntervalMs ?? 10_000) / 1_000))
+  );
+  const [configUpdatePacingError, setConfigUpdatePacingError] = useState<string | null>(null);
+  const [isSavingConfigUpdatePacing, setIsSavingConfigUpdatePacing] = useState(false);
+  const [configUpdatePacingTick, setConfigUpdatePacingTick] = useState(0);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => resolveInitialSettingsSection());
   const [settingsHashHydrated, setSettingsHashHydrated] = useState(false);
   const renderedActiveSection = settingsHashHydrated ? activeSection : resolveInitialSettingsSection();
@@ -219,6 +229,26 @@ export function SettingsControlCenter(
         : current;
     });
   }, [snapshot.diagnostics.compatibilitySmokeTest]);
+
+  useEffect(() => {
+    setConfigUpdatePacing(snapshot.diagnostics.configUpdatePacing);
+    setConfigUpdatePacingMode(snapshot.diagnostics.configUpdatePacing.settings.mode);
+    setConfigUpdatePacingCustomSeconds(
+      String(Math.ceil((snapshot.diagnostics.configUpdatePacing.settings.minimumIntervalMs ?? 10_000) / 1_000))
+    );
+  }, [snapshot.diagnostics.configUpdatePacing]);
+
+  useEffect(() => {
+    if (!configUpdatePacing.cooldownUntil) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setConfigUpdatePacingTick((value) => value + 1);
+    }, 1_000);
+
+    return () => window.clearInterval(timer);
+  }, [configUpdatePacing.cooldownUntil]);
 
   const refreshGatewayAuthStatus = useCallback(async () => {
     setIsCheckingGatewayAuth(true);
@@ -383,6 +413,46 @@ export function SettingsControlCenter(
       setIsRunningCompatibilitySmoke(false);
     }
   };
+
+  const saveConfigUpdatePacing = async () => {
+    setIsSavingConfigUpdatePacing(true);
+    setConfigUpdatePacingError(null);
+
+    try {
+      const minimumIntervalMs = configUpdatePacingMode === "custom"
+        ? Math.max(1, Math.round(Number(configUpdatePacingCustomSeconds) || 10)) * 1_000
+        : null;
+      const response = await fetch("/api/settings/config-pacing", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          mode: configUpdatePacingMode,
+          minimumIntervalMs
+        })
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to update config update pacing.");
+      }
+
+      setConfigUpdatePacing(payload.configUpdatePacing);
+      setConfigUpdatePacingMode(payload.configUpdatePacing.settings.mode);
+      setConfigUpdatePacingCustomSeconds(
+        String(Math.ceil((payload.configUpdatePacing.settings.minimumIntervalMs ?? 10_000) / 1_000))
+      );
+    } catch (error) {
+      setConfigUpdatePacingError(error instanceof Error ? error.message : "Unable to update config update pacing.");
+    } finally {
+      setIsSavingConfigUpdatePacing(false);
+    }
+  };
+
+  const configUpdatePacingRetryMs = configUpdatePacing.cooldownUntil
+    ? Math.max(0, Date.parse(configUpdatePacing.cooldownUntil) - Date.now() + configUpdatePacingTick * 0)
+    : null;
 
   return (
     <main
@@ -1110,6 +1180,107 @@ export function SettingsControlCenter(
                     <p className={cn("mt-2 break-all text-sm", surfaceTheme === "light" ? "text-[#4f3e34]" : "text-slate-200")}>
                       {shortPath(snapshot.diagnostics.updateRoot || installSummary.root || "Not detected", 80)}
                     </p>
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-4 rounded-[18px] p-3.5",
+                      surfaceTheme === "light"
+                        ? "border border-[#eadbcf] bg-[#fbf4ec]/78"
+                        : "border border-white/[0.08] bg-[#101a2a]/92"
+                    )}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className={labelClassName(surfaceTheme)}>Config update pacing</p>
+                        <p className={cn("mt-1 text-xs leading-5", surfaceTheme === "light" ? "text-[#7b6353]" : "text-slate-400")}>
+                          Controls how often AgentOS attempts OpenClaw config updates. It does not change the OpenClaw Gateway rate limit.
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em]",
+                          configUpdatePacing.pending
+                            ? surfaceTheme === "light"
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-amber-300/24 bg-amber-300/[0.08] text-amber-200"
+                            : surfaceTheme === "light"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-emerald-300/20 bg-emerald-300/[0.08] text-emerald-200"
+                        )}
+                      >
+                        {configUpdatePacing.pending ? "Pending config update" : "Idle"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                      <button
+                        type="button"
+                        onClick={() => setConfigUpdatePacingMode("respect-gateway")}
+                        className={segmentedButtonClassName(surfaceTheme, configUpdatePacingMode === "respect-gateway")}
+                      >
+                        Respect Gateway
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfigUpdatePacingMode("fast-local-testing")}
+                        className={segmentedButtonClassName(surfaceTheme, configUpdatePacingMode === "fast-local-testing")}
+                      >
+                        Fast testing
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfigUpdatePacingMode("custom")}
+                        className={segmentedButtonClassName(surfaceTheme, configUpdatePacingMode === "custom")}
+                      >
+                        Custom
+                      </button>
+                    </div>
+
+                    {configUpdatePacingMode === "custom" ? (
+                      <div className="mt-3">
+                        <Label className={labelClassName(surfaceTheme)}>Minimum local interval, seconds</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={600}
+                          value={configUpdatePacingCustomSeconds}
+                          onChange={(event) => setConfigUpdatePacingCustomSeconds(event.target.value)}
+                          className={inputClassName(surfaceTheme, "mt-2")}
+                        />
+                      </div>
+                    ) : null}
+
+                    <InfoRows
+                      surfaceTheme={surfaceTheme}
+                      rows={[
+                        ["Current mode", formatConfigUpdatePacingMode(configUpdatePacing.settings.mode)],
+                        ["Minimum local interval", formatConfigUpdatePacingInterval(configUpdatePacing.settings.minimumIntervalMs)],
+                        ["Pending paths", configUpdatePacing.pendingPaths.length ? configUpdatePacing.pendingPaths.join(", ") : "None"],
+                        ["Retry countdown", configUpdatePacingRetryMs !== null ? formatConfigUpdatePacingInterval(configUpdatePacingRetryMs) : "None"],
+                        ["CLI fallback", "Disabled for Gateway config cooldown recovery"]
+                      ]}
+                    />
+
+                    {configUpdatePacing.lastIssue ? (
+                      <p className={cn("mt-3 text-xs leading-5", surfaceTheme === "light" ? "text-amber-700" : "text-amber-200")}>
+                        Last Gateway issue: {configUpdatePacing.lastIssue}
+                      </p>
+                    ) : null}
+                    {configUpdatePacingError ? (
+                      <p className={cn("mt-3 text-xs leading-5", surfaceTheme === "light" ? "text-red-700" : "text-rose-300")}>
+                        {configUpdatePacingError}
+                      </p>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void saveConfigUpdatePacing()}
+                      disabled={isSavingConfigUpdatePacing}
+                      className={cn(secondaryButtonClassName(surfaceTheme), "mt-3 w-full")}
+                    >
+                      {isSavingConfigUpdatePacing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                      Save pacing
+                    </Button>
                   </div>
                 </Card>
               </section>
@@ -1913,6 +2084,9 @@ function formatCompatibilityReportStatus(value: CompatibilityReport["status"]) {
       return "Degraded";
     case "incompatible":
       return "Incompatible";
+    case "unknown":
+    default:
+      return "Unknown";
   }
 }
 
@@ -1938,6 +2112,9 @@ function compatibilityReportStatusTone(value: CompatibilityReport["status"]): Tr
       return "warning";
     case "incompatible":
       return "danger";
+    case "unknown":
+    default:
+      return "neutral";
   }
 }
 
@@ -2212,6 +2389,33 @@ function formatTimestamp(value: string) {
   return date.toLocaleString();
 }
 
+function formatConfigUpdatePacingMode(value: string) {
+  switch (value) {
+    case "fast-local-testing":
+      return "Fast local testing";
+    case "custom":
+      return "Custom";
+    case "respect-gateway":
+    default:
+      return "Respect Gateway cooldown";
+  }
+}
+
+function formatConfigUpdatePacingInterval(valueMs: number | null | undefined) {
+  if (!valueMs || valueMs <= 0) {
+    return "Gateway cooldown only";
+  }
+
+  const seconds = Math.ceil(valueMs / 1_000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
 function copyToClipboard(value: string) {
   if (typeof navigator === "undefined" || !navigator.clipboard) {
     return;
@@ -2303,6 +2507,19 @@ function secondaryButtonClassName(surfaceTheme: SurfaceTheme, extraClassName?: s
       ? "border-[#d7c4b6] bg-white text-[#6b5546] hover:bg-[#f4e9de]"
       : mode === "gateway-contrast"
         ? "border-emerald-300/15 bg-[#0f1826] text-slate-100 hover:bg-[#182538]"
+        : "border-white/10 bg-[#121d2d] text-slate-200 hover:bg-[#182538]"
+  );
+}
+
+function segmentedButtonClassName(surfaceTheme: SurfaceTheme, active: boolean) {
+  return cn(
+    "h-9 rounded-full border px-3 text-xs transition-colors",
+    active
+      ? surfaceTheme === "light"
+        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+        : "border-cyan-300/24 bg-cyan-300/[0.12] text-cyan-100"
+      : surfaceTheme === "light"
+        ? "border-[#e2d1c4] bg-white text-[#6b5546] hover:bg-[#f4e9de]"
         : "border-white/10 bg-[#121d2d] text-slate-200 hover:bg-[#182538]"
   );
 }

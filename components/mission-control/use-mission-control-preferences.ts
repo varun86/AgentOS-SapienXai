@@ -36,6 +36,7 @@ export function useMissionControlPreferences() {
   const [hiddenRuntimeIds, setHiddenRuntimeIds] = useState<string[]>([]);
   const [hiddenTaskKeys, setHiddenTaskKeys] = useState<string[]>([]);
   const [lockedTaskKeys, setLockedTaskKeys] = useState<string[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -48,24 +49,41 @@ export function useMissionControlPreferences() {
       setHiddenRuntimeIds(parseStoredStringList(globalThis.localStorage?.getItem(hiddenRuntimeIdsStorageKey) ?? null));
       setHiddenTaskKeys(parseStoredStringList(globalThis.localStorage?.getItem(hiddenTaskKeysStorageKey) ?? null));
       setLockedTaskKeys(parseStoredStringList(globalThis.localStorage?.getItem(lockedTaskKeysStorageKey) ?? null));
+      setIsHydrated(true);
     });
   }, []);
 
   useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
     globalThis.localStorage?.setItem(surfaceThemeStorageKey, surfaceTheme);
-  }, [surfaceTheme]);
+  }, [isHydrated, surfaceTheme]);
 
   useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
     globalThis.localStorage?.setItem(hiddenRuntimeIdsStorageKey, JSON.stringify(hiddenRuntimeIds));
-  }, [hiddenRuntimeIds]);
+  }, [hiddenRuntimeIds, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
     globalThis.localStorage?.setItem(hiddenTaskKeysStorageKey, JSON.stringify(hiddenTaskKeys));
-  }, [hiddenTaskKeys]);
+  }, [hiddenTaskKeys, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
     globalThis.localStorage?.setItem(lockedTaskKeysStorageKey, JSON.stringify(lockedTaskKeys));
-  }, [lockedTaskKeys]);
+  }, [isHydrated, lockedTaskKeys]);
 
   const safeHiddenRuntimeIds = useMemo(
     () => (Array.isArray(hiddenRuntimeIds) ? hiddenRuntimeIds : []),

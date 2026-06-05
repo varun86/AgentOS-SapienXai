@@ -846,6 +846,16 @@ function createSnapshot(): MissionControlSnapshot {
         authProviders: [],
         issues: []
       },
+      configUpdatePacing: {
+        settings: { mode: "respect-gateway", minimumIntervalMs: null },
+        pending: false,
+        pendingCount: 0,
+        pendingPaths: [],
+        cooldownUntil: null,
+        retryAfterMs: null,
+        lastIssue: null,
+        lastUpdatedAt: null
+      },
       runtime: {
         stateRoot: "/tmp/.openclaw",
         stateWritable: true,

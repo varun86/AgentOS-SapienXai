@@ -185,6 +185,7 @@ export function buildGatewayDiagnostics(input: {
   modelReadiness: ModelReadiness;
   capabilityMatrix?: OpenClawCapabilityMatrix;
   compatibilityReport?: MissionControlSnapshot["diagnostics"]["compatibilityReport"];
+  configUpdatePacing?: MissionControlSnapshot["diagnostics"]["configUpdatePacing"];
   compatibilitySmokeTest?: MissionControlSnapshot["diagnostics"]["compatibilitySmokeTest"];
   commandHistory?: OpenClawCommandDiagnostic[];
   transport?: MissionControlSnapshot["diagnostics"]["transport"];
@@ -242,6 +243,7 @@ export function buildGatewayDiagnostics(input: {
     modelReadiness: input.modelReadiness,
     capabilityMatrix: input.capabilityMatrix,
     compatibilityReport: input.compatibilityReport ?? null,
+    configUpdatePacing: input.configUpdatePacing ?? createDefaultConfigUpdatePacingDiagnostics(),
     compatibilitySmokeTest: input.compatibilitySmokeTest ?? null,
     gatewayFallbackDiagnostics,
     gatewayFallbackReasons: activeGatewayFallbackDiagnostics.map(
@@ -252,6 +254,22 @@ export function buildGatewayDiagnostics(input: {
     transport: input.transport,
     securityWarnings,
     issues
+  };
+}
+
+function createDefaultConfigUpdatePacingDiagnostics(): MissionControlSnapshot["diagnostics"]["configUpdatePacing"] {
+  return {
+    settings: {
+      mode: "respect-gateway",
+      minimumIntervalMs: null
+    },
+    pending: false,
+    pendingCount: 0,
+    pendingPaths: [],
+    cooldownUntil: null,
+    retryAfterMs: null,
+    lastIssue: null,
+    lastUpdatedAt: null
   };
 }
 

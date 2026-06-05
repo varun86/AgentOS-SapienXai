@@ -38,11 +38,7 @@ export function resolveOpenClawCompatibilityTarget(input: {
   const gatewayUrl = kind === "real"
     ? resolveRedactedGatewayUrl(input.gatewayUrl)
     : null;
-  const version = name === "simulated-beta-shape"
-    ? `${OPENCLAW_RECOMMENDED_VERSION}-beta`
-    : name === "simulated-stable" || name === "real-stable"
-      ? OPENCLAW_SUPPORTED_BASELINE_VERSION
-      : null;
+  const version = resolveTargetVersion(name);
 
   return {
     name,
@@ -55,6 +51,19 @@ export function resolveOpenClawCompatibilityTarget(input: {
     isRealRuntime: kind === "real",
     isSimulatedRuntime: kind === "simulated"
   };
+}
+
+function resolveTargetVersion(name: OpenClawCompatibilityTargetName) {
+  switch (name) {
+    case "simulated-beta-shape":
+      return `${OPENCLAW_RECOMMENDED_VERSION}-beta`;
+    case "simulated-stable":
+    case "real-stable":
+      return OPENCLAW_SUPPORTED_BASELINE_VERSION;
+    case "real-local":
+    default:
+      return null;
+  }
 }
 
 export function isSimulatedCompatibilityTarget(target: OpenClawCompatibilityTarget) {
